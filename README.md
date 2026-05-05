@@ -163,6 +163,28 @@ D:\CG\
 - ✅ End-to-end smoke test passes (claude + gemini in parallel)
 - ✅ Doctor passes
 - ✅ Task store + run history
-- ⏳ Tests (pytest)
-- ⏳ Git remote + CI
-EOF
+- ✅ 15 pytest tests passing
+- ✅ Git remote (https://github.com/hustlerv369/CG)
+
+## Migrating from CLAUDEGRAVITY
+
+If you came from the old `D:\CLAUDE\CLAUDEGRAVITY` directory:
+
+1. Close every Antigravity window and the Claude Code session that
+   built CG (so no file locks remain).
+2. Run the archive script in PowerShell:
+
+   ```powershell
+   powershell -ExecutionPolicy Bypass -File D:\CG\scripts\archive-old-claudegravity.ps1
+   ```
+
+   It renames `D:\CLAUDE\CLAUDEGRAVITY` to `D:\CLAUDE\CLAUDEGRAVITY.archive`.
+   Antigravity stops auto-loading the poisoned workspace context, but the
+   files are still recoverable on disk.
+
+3. From now on, open Antigravity (or any IDE) at `D:\CG`. Brand new
+   workspace memory in Antigravity = no Stripe ghost.
+
+The full GitHub history of the old project lives at
+`hustlerv369/CLAUDEGRAVITY` (master + the v2.0 backup at
+`claude/sharp-cray-3be33e`).
