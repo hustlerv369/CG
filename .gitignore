@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+
+# Local secrets (never commit)
+.env
+.env.local
+*.key
+*.pem
+
+# Per-run outputs — too noisy for git, regenerable
+outputs/*/
+!outputs/.gitkeep
+
+# Node (gemini-cli is npm-installed globally; this repo has no node_modules)
+node_modules/
+
+# OS launcher artifacts
+*.lnk
