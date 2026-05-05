@@ -89,6 +89,9 @@ diff outputs/task-001/claude.md outputs/task-001/gemini.md
 ## CLI reference
 
 ```
+cg.py dashboard                          launch web dashboard (browser UI)
+cg.py cluster <spec.json> --layout auto  launch N agents in N visible windows
+
 cg.py task add <title> [--spec ... | --spec-file ... | stdin]
                        [--id task-NNN]   create a task
 cg.py task list                          list tasks with run counts
@@ -158,12 +161,33 @@ D:\CG\
    └─ design-notes.md   why this was rebuilt
 ```
 
+## Web dashboard 🆕
+
+A FastAPI + vanilla-JS web app at `http://127.0.0.1:8765` that lets you
+define multi-agent workflows in the browser, hit Run, and watch each
+agent's stdout stream live in its own panel. n8n-style mission
+control, but for AI workers, all on your subscriptions.
+
+```bash
+# Start it
+python src/cg.py dashboard
+# or double-click "CG Dashboard.bat" on your desktop
+
+# → opens http://127.0.0.1:8765 with:
+#    - 3 bundled presets (compare / pipeline / fan-out)
+#    - per-agent live SSE panels
+#    - run history sidebar
+```
+
+Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
+
 ## Status
 
 - ✅ End-to-end smoke test passes (claude + gemini in parallel)
 - ✅ Doctor passes
 - ✅ Task store + run history
-- ✅ 15 pytest tests passing
+- ✅ Web dashboard with live SSE streaming
+- ✅ 24 pytest tests passing (15 cg + 9 dashboard)
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 
 ## Migrating from CLAUDEGRAVITY

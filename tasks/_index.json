@@ -29,6 +29,59 @@
           }
         }
       ]
+    },
+    {
+      "id": "task-002",
+      "title": "CZK currency formatter",
+      "spec": "Write a Python function `czk_format(amount: float) -> str` that formats a number as Czech crowns.\n\nCzech currency formatting rules:\n- Thousands separator: SPACE (not comma, not dot, not narrow no-break space — regular space)\n- Decimal separator: COMMA\n- Always 2 decimal places\n- Suffix: \" Kč\" (space before \"Kč\")\n- Negative numbers: minus sign before the digits\n\nExamples (these MUST all pass):\n    czk_format(1234.5)      == \"1 234,50 Kč\"\n    czk_format(1000000)     == \"1 000 000,00 Kč\"\n    czk_format(0)           == \"0,00 Kč\"\n    czk_format(-99.9)       == \"-99,90 Kč\"\n    czk_format(7)           == \"7,00 Kč\"\n    czk_format(123.456)     == \"123,46 Kč\"   # rounds half-to-even or normal rounding both fine\n    czk_format(999999.99)   == \"999 999,99 Kč\"\n\nOutput requirements:\n- Output ONLY a single fenced ```python code block.\n- The block must contain just the function definition (and any imports it needs at the top).\n- No prose, no test cases, no explanation outside the code block.\n- The function must be self-contained — no external libraries beyond the Python stdlib.",
+      "created_at": "2026-05-05T20:34:47+00:00",
+      "runs": [
+        {
+          "started": "2026-05-05T20:34:56+00:00",
+          "finished": "2026-05-05T20:36:09+00:00",
+          "agents": [
+            "claude",
+            "gemini"
+          ],
+          "results": {
+            "claude": {
+              "exit_code": 0,
+              "stdout_path": "outputs\\task-002\\claude.md",
+              "stderr_path": null,
+              "stdout_chars": 334
+            },
+            "gemini": {
+              "exit_code": 0,
+              "stdout_path": "outputs\\task-002\\gemini.md",
+              "stderr_path": "outputs\\task-002\\gemini.stderr",
+              "stdout_chars": 661
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "task-003",
+      "title": "CZK currency formatter (Gemini retry, no questions)",
+      "spec": "DO NOT ask any clarifying questions.\nDO NOT propose a plan.\nDO NOT mention what you are about to do.\n\nJust write Python code RIGHT NOW.\n\nTask: implement function `czk_format(amount: float) -> str`\n\nCzech currency formatting rules:\n- Thousands separator: REGULAR SPACE\n- Decimal separator: COMMA\n- Always 2 decimal places\n- Suffix: \" Kč\"\n- Negative: minus sign before digits\n\nExamples that MUST all pass:\n    czk_format(1234.5)      == \"1 234,50 Kč\"\n    czk_format(1000000)     == \"1 000 000,00 Kč\"\n    czk_format(0)           == \"0,00 Kč\"\n    czk_format(-99.9)       == \"-99,90 Kč\"\n    czk_format(7)           == \"7,00 Kč\"\n    czk_format(123.456)     == \"123,46 Kč\"\n    czk_format(999999.99)   == \"999 999,99 Kč\"\n\nOutput format — strictly:\n\n\\`\\`\\`python\ndef czk_format(amount: float) -> str:\n    ...\n\\`\\`\\`\n\nNOTHING before the opening fence. NOTHING after the closing fence.",
+      "created_at": "2026-05-05T20:36:50+00:00",
+      "runs": [
+        {
+          "started": "2026-05-05T20:36:50+00:00",
+          "finished": "2026-05-05T20:39:19+00:00",
+          "agents": [
+            "gemini"
+          ],
+          "results": {
+            "gemini": {
+              "exit_code": 0,
+              "stdout_path": "outputs\\task-003\\gemini.md",
+              "stderr_path": "outputs\\task-003\\gemini.stderr",
+              "stdout_chars": 480
+            }
+          }
+        }
+      ]
     }
   ]
 }

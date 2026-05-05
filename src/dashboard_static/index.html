@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>CG Dashboard — multi-agent orchestrator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="stylesheet" href="/static/dashboard.css" />
+</head>
+<body>
+  <header>
+    <h1>CG <span class="dim">— multi-agent</span></h1>
+    <div class="status" id="server-status">connecting…</div>
+  </header>
+
+  <main>
+    <!-- LEFT: workflow designer -->
+    <section class="designer">
+      <h2>Workflow</h2>
+
+      <div class="row">
+        <label>Preset</label>
+        <select id="preset-select">
+          <option value="">— pick a preset —</option>
+        </select>
+      </div>
+
+      <div class="row">
+        <label>Title</label>
+        <input id="run-title" type="text" placeholder="What is this run for?" />
+      </div>
+
+      <div id="agent-rows"></div>
+
+      <div class="agent-controls">
+        <button class="ghost" id="add-agent">+ add agent</button>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="run-btn">▶ Run</button>
+        <button class="ghost" id="clear-btn">Clear</button>
+      </div>
+
+      <h2 class="section">History</h2>
+      <ul id="history"></ul>
+    </section>
+
+    <!-- RIGHT: live monitor -->
+    <section class="monitor">
+      <div class="monitor-header">
+        <h2 id="run-title-display">no run yet</h2>
+        <div class="monitor-meta" id="run-meta"></div>
+      </div>
+      <div id="agent-grid" class="agent-grid">
+        <div class="empty-state">
+          ← define a workflow on the left, then hit Run.<br />
+          Each agent's live stdout will appear here in its own panel.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="/static/dashboard.js"></script>
+</body>
+</html>

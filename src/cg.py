@@ -329,6 +329,73 @@ def cmd_run(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_cluster(args: argparse.Namespace) -> int:
+    """Launch a multi-agent cluster from a JSON spec.
+
+    Spec format (a list of agent invocations)::
+
+        [
+          {"agent": "gemini", "label": "design",   "prompt": "..."},
+          {"agent": "claude", "label": "build",    "prompt": "..."},
+          {"agent": "gemini", "label": "review",   "prompt": "..."}
+        ]
+
+    With ``--layout tasks-json`` we instead write a ``.vscode/tasks.json``
+    that the IDE (Antigravity / VS Code / Cursor) can run as a single
+    "Run cluster" task — all panes appear inside the IDE window.
+    """
+    import cluster as cluster_mod
+
+    spec_path = Path(args.spec).resolve()
+    if not spec_path.exists():
+        print(f"error: spec file {spec_path} not found", file=sys.stderr)
+        return 1
+    spec = json.loads(spec_path.read_text(encoding="utf-8"))
+    if not isinstance(spec, list):
+        print("error: spec must be a JSON array of agent invocations", file=sys.stderr)
+        return 1
+
+    cluster_dir = OUTPUTS_DIR / args.id
+    rc = cluster_mod.run_cluster(spec, cluster_dir, layout=args.layout)
+    if rc != 0:
+        return rc
+    if args.wait:
+        results = cluster_mod.wait_for_cluster(cluster_dir, timeout=args.timeout)
+        all_ok = all(v == 0 for v in results.values())
+        for label, exit_code in results.items():
+            print(f"  {label}: exit={exit_code}")
+        return 0 if all_ok else 1
+    return 0
+
+
+def cmd_dashboard(args: argparse.Namespace) -> int:
+    """Launch the web dashboard (FastAPI app) on a local port.
+
+    Opens http://127.0.0.1:8765 in the default browser. The dashboard
+    lets you define multi-agent workflows, run them in parallel, and
+    watch each agent's stdout stream live in its own panel.
+    """
+    try:
+        import uvicorn  # noqa: F401  (presence check)
+    except ImportError:
+        print("error: uvicorn not installed. Run: pip install fastapi 'uvicorn[standard]' sse-starlette",
+              file=sys.stderr)
+        return 1
+    # We delegate to dashboard.main() so the CLI stays consistent.
+    sys.argv = ["dashboard"]
+    if args.host:
+        sys.argv += ["--host", args.host]
+    if args.port:
+        sys.argv += ["--port", str(args.port)]
+    if args.no_open:
+        sys.argv += ["--no-open"]
+    # Import here so we don't pay startup cost for other commands
+    sys.path.insert(0, str(Path(__file__).parent))
+    import dashboard
+    dashboard.main()
+    return 0
+
+
 def cmd_doctor(args: argparse.Namespace) -> int:
     """Smoke-check that both AI worker CLIs are present and authenticated."""
     print("[cg] doctor — checking agent CLIs")
@@ -384,6 +451,30 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT,
                      help=f"per-agent timeout in seconds (default: {DEFAULT_TIMEOUT})")
     run.set_defaults(func=cmd_run)
+
+    # dashboard
+    dash = sub.add_parser("dashboard",
+                           help="launch the web dashboard (multi-agent UI in browser)")
+    dash.add_argument("--host", default="127.0.0.1")
+    dash.add_argument("--port", type=int, default=8765)
+    dash.add_argument("--no-open", action="store_true",
+                       help="do not auto-open browser")
+    dash.set_defaults(func=cmd_dashboard)
+
+    # cluster
+    cl = sub.add_parser("cluster",
+                         help="launch N agents in parallel, each in its own visible window")
+    cl.add_argument("spec", help="path to JSON cluster spec (array of {agent,label,prompt})")
+    cl.add_argument("--id", default="cluster", help="cluster id (used as outputs/<id>/ subdir)")
+    cl.add_argument("--layout", choices=["auto", "wt", "cmd", "tasks-json"], default="auto",
+                     help="window layout: wt=Windows Terminal split panes, "
+                          "cmd=separate console windows, tasks-json=write .vscode/tasks.json "
+                          "for the IDE, auto=pick wt if available else cmd")
+    cl.add_argument("--wait", action=argparse.BooleanOptionalAction, default=True,
+                     help="block until all agents finish (--no-wait to fire-and-forget)")
+    cl.add_argument("--timeout", type=int, default=600,
+                     help="cluster-wide timeout in seconds")
+    cl.set_defaults(func=cmd_cluster)
 
     # doctor
     doc = sub.add_parser("doctor", help="smoke-check both AI worker CLIs")

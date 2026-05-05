@@ -1,0 +1,22 @@
+[
+  {
+    "id": "3420758397a1",
+    "title": "smoke-from-api",
+    "created": 1778014932.1927805,
+    "finished": true,
+    "agents": [
+      {
+        "label": "claude",
+        "agent": "claude",
+        "status": "done",
+        "exit_code": 0
+      },
+      {
+        "label": "gemini",
+        "agent": "gemini",
+        "status": "done",
+        "exit_code": 0
+      }
+    ]
+  }
+]
