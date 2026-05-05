@@ -107,22 +107,27 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
 class AgentRunState:
     label: str
     agent: str
-    status: str = "queued"  # queued | running | done | failed
+    depends_on: list[str] = field(default_factory=list)
+    status: str = "queued"  # queued | waiting | running | done | failed | cancelled
     started: float | None = None
     finished: float | None = None
     exit_code: int | None = None
     log_lines: list[str] = field(default_factory=list)
+    stderr_lines: list[str] = field(default_factory=list)
+    process: Any = field(default=None, repr=False)  # subprocess.Popen
 
     def to_public(self) -> dict[str, Any]:
         return {
             "label": self.label,
             "agent": self.agent,
+            "depends_on": self.depends_on,
             "status": self.status,
             "started": self.started,
             "finished": self.finished,
             "exit_code": self.exit_code,
             "log_chars": sum(len(l) for l in self.log_lines),
             "log_tail": "\n".join(self.log_lines[-200:]),
+            "stderr_chars": sum(len(l) for l in self.stderr_lines),
         }
 
 
@@ -141,6 +146,7 @@ class RunState:
             "title": self.title,
             "created": self.created,
             "finished": self.finished,
+            "spec": self.spec,  # original prompts preserved for rerun
             "agents": [a.to_public() for a in self.agents.values()],
         }
 
@@ -189,27 +195,107 @@ class RunManager:
             created=time.time(),
             spec=spec,
         )
+        # Validate first
+        labels_in_spec: set[str] = set()
         for i, item in enumerate(spec):
             label = item.get("label") or f"agent-{i+1}"
             agent_kind = item.get("agent")
             if agent_kind not in AGENT_KINDS:
                 raise HTTPException(400, f"unknown agent {agent_kind!r} for {label}")
-            run.agents[label] = AgentRunState(label=label, agent=agent_kind)
+            if label in labels_in_spec:
+                raise HTTPException(400, f"duplicate label {label!r}")
+            labels_in_spec.add(label)
+        # Validate depends_on references
+        for i, item in enumerate(spec):
+            label = item.get("label") or f"agent-{i+1}"
+            for dep in item.get("depends_on", []) or []:
+                if dep not in labels_in_spec:
+                    raise HTTPException(
+                        400,
+                        f"agent {label!r} depends on {dep!r} which is not in this run",
+                    )
+                if dep == label:
+                    raise HTTPException(400, f"agent {label!r} cannot depend on itself")
+        # Build state
+        for i, item in enumerate(spec):
+            label = item.get("label") or f"agent-{i+1}"
+            run.agents[label] = AgentRunState(
+                label=label,
+                agent=item["agent"],
+                depends_on=list(item.get("depends_on", []) or []),
+                status="queued" if not item.get("depends_on") else "waiting",
+            )
         self.runs[run_id] = run
         self._persist_index()
 
-        # Each agent runs in its own thread so they're truly parallel.
+        # Each agent runs in its own thread; the thread blocks on its
+        # dependencies first via _wait_for_deps.
         for item in spec:
-            label = item.get("label") or f"agent-{len(run.agents)}"
+            label = item["label"] if "label" in item else None
+            if not label:
+                # backfill any missing labels
+                for i2, it in enumerate(spec):
+                    if it is item:
+                        label = f"agent-{i2+1}"
+                        break
             t = threading.Thread(
-                target=self._run_one,
+                target=self._run_one_with_deps,
                 args=(run, label, item.get("agent"), item.get("prompt", "")),
                 daemon=True,
             )
             t.start()
-        # Watcher thread to mark run finished + persist outputs
+        # Watcher thread to mark run finished
         threading.Thread(target=self._watch_run, args=(run,), daemon=True).start()
         return run
+
+    def _wait_for_deps(self, run: RunState, agent_state: AgentRunState) -> bool:
+        """Block until every dependency is done. Returns False if any dep
+        failed or was cancelled (caller should mark this agent failed too)."""
+        if not agent_state.depends_on:
+            return True
+        agent_state.status = "waiting"
+        self._emit(run.id, agent_state.label, {"event": "status", "data": {
+            "label": agent_state.label, "status": "waiting"}})
+        while True:
+            statuses = [run.agents[d].status for d in agent_state.depends_on
+                         if d in run.agents]
+            if any(s in {"failed", "cancelled"} for s in statuses):
+                return False
+            if all(s == "done" for s in statuses):
+                return True
+            time.sleep(0.5)
+
+    def _substitute_prompt(self, run: RunState, prompt: str,
+                            depends_on: list[str]) -> str:
+        """Replace ``{{label}}`` placeholders with that dependency's output."""
+        if not depends_on:
+            return prompt
+        result = prompt
+        for dep in depends_on:
+            agent = run.agents.get(dep)
+            if agent is None:
+                continue
+            output = "\n".join(agent.log_lines)
+            placeholder = "{{" + dep + "}}"
+            result = result.replace(placeholder, output)
+        return result
+
+    def _run_one_with_deps(self, run: RunState, label: str, agent: str, prompt: str) -> None:
+        agent_state = run.agents[label]
+        if not self._wait_for_deps(run, agent_state):
+            agent_state.status = "failed"
+            agent_state.exit_code = -1
+            agent_state.finished = time.time()
+            agent_state.log_lines.append(
+                f"[skipped] dependency failed or was cancelled: {agent_state.depends_on}")
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": agent_state.log_lines[-1]}})
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "failed", "exit_code": -1}})
+            return
+        # Substitute {{depLabel}} placeholders with the dependency's output
+        rendered = self._substitute_prompt(run, prompt, agent_state.depends_on)
+        self._run_one(run, label, agent, rendered)
 
     def _run_one(self, run: RunState, label: str, agent: str, prompt: str) -> None:
         cfg = AGENT_KINDS[agent]
@@ -239,11 +325,11 @@ class RunManager:
                 cmd,
                 stdin=subprocess.PIPE if stdin_input is not None else subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                stderr=subprocess.PIPE,  # capture separately, don't pollute log
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                bufsize=1,  # line buffered
+                bufsize=1,
                 env=env,
             )
         except FileNotFoundError as exc:
@@ -258,12 +344,22 @@ class RunManager:
             out_fp.close()
             return
 
+        agent_state.process = proc
+
         if stdin_input is not None and proc.stdin is not None:
             try:
                 proc.stdin.write(stdin_input)
                 proc.stdin.close()
             except (BrokenPipeError, OSError):
                 pass
+
+        # Stderr reader on its own thread so it can't deadlock the stdout reader.
+        def _drain_stderr():
+            assert proc.stderr is not None
+            for line in proc.stderr:
+                agent_state.stderr_lines.append(line.rstrip("\n"))
+        stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
+        stderr_thread.start()
 
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -274,13 +370,39 @@ class RunManager:
                 "label": label, "line": line_clean}})
 
         proc.wait()
+        stderr_thread.join(timeout=2)
         agent_state.exit_code = proc.returncode
-        agent_state.status = "done" if proc.returncode == 0 else "failed"
+        if agent_state.status == "cancelled":
+            pass  # leave as cancelled
+        else:
+            agent_state.status = "done" if proc.returncode == 0 else "failed"
         agent_state.finished = time.time()
         out_fp.close()
+        # Persist stderr if any (cosmetic warnings etc.)
+        if agent_state.stderr_lines:
+            stderr_path = run_dir / f"{label}.err.md"
+            stderr_path.write_text("\n".join(agent_state.stderr_lines),
+                                    encoding="utf-8")
         self._emit(run.id, label, {"event": "status", "data": {
             "label": label, "status": agent_state.status,
             "exit_code": agent_state.exit_code}})
+
+    def cancel_run(self, run_id: str) -> bool:
+        """Kill any in-flight subprocesses for this run."""
+        run = self.runs.get(run_id)
+        if not run:
+            return False
+        for agent_state in run.agents.values():
+            if agent_state.status in {"running", "waiting", "queued"}:
+                agent_state.status = "cancelled"
+                if agent_state.process is not None:
+                    try:
+                        agent_state.process.kill()
+                    except Exception:
+                        pass
+                self._emit(run.id, agent_state.label, {"event": "status", "data": {
+                    "label": agent_state.label, "status": "cancelled"}})
+        return True
 
     def _watch_run(self, run: RunState) -> None:
         while True:
@@ -351,22 +473,33 @@ PRESETS: list[dict[str, Any]] = [
     },
     {
         "id": "pipeline",
-        "title": "Design → Implement (Gemini + Claude)",
-        "description": "Gemini designs the spec, then Claude implements it. "
-                        "(Demo: both run in parallel — for true sequential pipeline see docs.)",
+        "title": "Design → Implement → Critique (Gemini → Claude → Gemini)",
+        "description": "Gemini writes the spec, Claude implements from it, then Gemini "
+                        "reviews. Real sequential pipeline using depends_on + {{label}} "
+                        "prompt substitution.",
         "spec": [
             {
                 "agent": "gemini", "label": "design",
-                "prompt": "DO NOT ask questions. Output a Markdown spec for a Python function "
-                          "`fizzbuzz(n: int) -> list[str]` that returns the first n FizzBuzz "
-                          "values. Cover: signature, edge cases (n<=0), 3 example outputs."
+                "prompt": "DO NOT ask questions. DO NOT propose a plan. Output a precise Markdown "
+                          "spec for a Python function `fizzbuzz(n: int) -> list[str]` that returns "
+                          "the first n FizzBuzz values. Cover sections: Signature, Inputs, "
+                          "Outputs, Edge cases (n<=0), Three concrete example outputs. Output "
+                          "Markdown only."
             },
             {
                 "agent": "claude", "label": "implement",
-                "prompt": "Write a Python function `fizzbuzz(n: int) -> list[str]` per "
-                          "standard FizzBuzz rules (Fizz at multiples of 3, Buzz at 5, "
-                          "FizzBuzz at 15, otherwise the number). Output ONLY a fenced "
-                          "```python code block. No prose."
+                "depends_on": ["design"],
+                "prompt": "Implement the following spec exactly. Output ONLY a fenced "
+                          "```python code block, nothing before or after.\n\n"
+                          "# Spec\n\n{{design}}"
+            },
+            {
+                "agent": "gemini", "label": "critique",
+                "depends_on": ["design", "implement"],
+                "prompt": "Critically review this implementation against its spec. List bugs, "
+                          "missing edge cases, and concrete improvements as a Markdown bullet "
+                          "list. Be terse. If the implementation is correct, say so in one line.\n\n"
+                          "## Spec\n{{design}}\n\n## Implementation\n{{implement}}"
             },
         ],
     },
@@ -455,6 +588,13 @@ def create_app() -> FastAPI:
         if not run:
             raise HTTPException(404, "run not found")
         return run.to_public()
+
+    @app.delete("/api/runs/{run_id}")
+    async def cancel_run_ep(run_id: str) -> Any:
+        if run_id not in manager.runs:
+            raise HTTPException(404, "run not found")
+        manager.cancel_run(run_id)
+        return {"id": run_id, "cancelled": True}
 
     @app.get("/api/runs/{run_id}/output/{label}")
     async def get_output(run_id: str, label: str) -> Any:

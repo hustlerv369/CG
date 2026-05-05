@@ -27,11 +27,100 @@ async function init() {
   const p = await fetch("/api/presets").then(r => r.json());
   state.presets = p.presets;
   populatePresets();
+  populateWorkflows();
   await refreshHistory();
   ensureOneAgentRow();
+  requestNotificationPermission();
 
-  // Refresh history every 5 seconds
   setInterval(refreshHistory, 5000);
+}
+
+// ---------- saved workflows in localStorage ----------
+
+const WORKFLOW_KEY = "cg.workflows";
+
+function loadWorkflows() {
+  try {
+    return JSON.parse(localStorage.getItem(WORKFLOW_KEY) || "[]");
+  } catch { return []; }
+}
+
+function saveWorkflows(list) {
+  localStorage.setItem(WORKFLOW_KEY, JSON.stringify(list));
+}
+
+function populateWorkflows() {
+  const sel = $("#workflow-select");
+  if (!sel) return;
+  const items = loadWorkflows();
+  sel.innerHTML = '<option value="">— load saved —</option>' +
+    items.map((w, i) =>
+      `<option value="${i}">${escapeHtml(w.title || "(untitled)")}</option>`
+    ).join("");
+  sel.onchange = () => {
+    const i = parseInt(sel.value, 10);
+    if (isNaN(i)) return;
+    const w = loadWorkflows()[i];
+    if (!w) return;
+    $("#run-title").value = w.title || "";
+    $("#agent-rows").innerHTML = "";
+    (w.spec || []).forEach(addAgentRow);
+  };
+}
+
+function saveCurrentWorkflow() {
+  const title = $("#run-title").value.trim();
+  if (!title) {
+    alert("Give the workflow a Title before saving.");
+    return;
+  }
+  const spec = readSpec();
+  if (!spec.length) {
+    alert("Add at least one agent before saving.");
+    return;
+  }
+  const list = loadWorkflows();
+  // upsert on title
+  const existing = list.findIndex(w => w.title === title);
+  const entry = { title, spec, savedAt: Date.now() };
+  if (existing >= 0) list[existing] = entry; else list.push(entry);
+  saveWorkflows(list);
+  populateWorkflows();
+  setStatus(`saved "${title}"`, "ok");
+  setTimeout(() => setStatus("connected", "ok"), 1500);
+}
+
+function deleteSelectedWorkflow() {
+  const sel = $("#workflow-select");
+  const i = parseInt(sel.value, 10);
+  if (isNaN(i)) {
+    alert("Pick a saved workflow first.");
+    return;
+  }
+  const list = loadWorkflows();
+  const removed = list.splice(i, 1)[0];
+  saveWorkflows(list);
+  populateWorkflows();
+  setStatus(`deleted "${removed.title}"`, "ok");
+  setTimeout(() => setStatus("connected", "ok"), 1500);
+}
+
+// ---------- browser notifications ----------
+
+function requestNotificationPermission() {
+  if (!("Notification" in window)) return;
+  if (Notification.permission === "default") {
+    Notification.requestPermission();
+  }
+}
+
+function notify(title, body) {
+  if (!("Notification" in window)) return;
+  if (Notification.permission !== "granted") return;
+  if (document.hasFocus()) return;  // don't notify if user is looking
+  try {
+    new Notification(title, { body, silent: false });
+  } catch { /* ignore */ }
 }
 
 function setStatus(msg, klass) {
@@ -70,12 +159,14 @@ function addAgentRow(spec = {}) {
       <input type="text" class="label" placeholder="label (e.g. design)" />
       <button type="button" class="remove" title="Remove">×</button>
     </div>
-    <textarea class="prompt" placeholder="Prompt for this agent…"></textarea>
+    <input type="text" class="depends_on" placeholder="depends_on (comma-separated labels, e.g. design,review)" />
+    <textarea class="prompt" placeholder="Prompt — use {{label}} to inject a dependency's output"></textarea>
   `;
   const sel = tpl.querySelector(".agent-select");
   if (spec.agent) sel.value = spec.agent;
   tpl.querySelector(".label").value = spec.label || "";
   tpl.querySelector(".prompt").value = spec.prompt || "";
+  tpl.querySelector(".depends_on").value = (spec.depends_on || []).join(",");
   tpl.querySelector(".remove").onclick = () => tpl.remove();
   $("#agent-rows").appendChild(tpl);
 }
@@ -88,6 +179,8 @@ function readSpec() {
   return $$(".agent-row").map((row, i) => ({
     agent: row.querySelector(".agent-select").value,
     label: row.querySelector(".label").value.trim() || `agent-${i + 1}`,
+    depends_on: (row.querySelector(".depends_on").value || "")
+      .split(",").map(s => s.trim()).filter(Boolean),
     prompt: row.querySelector(".prompt").value,
   }));
 }
@@ -138,6 +231,38 @@ async function openRun(runId) {
 
   $("#run-title-display").textContent = meta.title;
   $("#run-meta").textContent = `id ${meta.id} · ${meta.agents.length} agents · started ${formatTime(meta.created)}`;
+  // Toolbar: cancel + re-run buttons
+  let tools = $("#run-tools");
+  if (!tools) {
+    tools = document.createElement("div");
+    tools.id = "run-tools";
+    tools.className = "run-tools";
+    $(".monitor-header").appendChild(tools);
+  }
+  const liveSpec = meta.agents.map(a => ({
+    agent: a.agent, label: a.label,
+    depends_on: a.depends_on || [],
+    prompt: "" /* original prompt not exposed by API; rerun uses spec from storage */
+  }));
+  tools.innerHTML = `
+    <button class="ghost" id="cancel-btn">⨯ Cancel</button>
+    <button class="ghost" id="rerun-btn">↻ Reload into editor</button>
+  `;
+  tools.querySelector("#cancel-btn").onclick = async () => {
+    if (!confirm("Cancel this run? Running agents will be killed.")) return;
+    await fetch(`/api/runs/${meta.id}`, { method: "DELETE" });
+  };
+  tools.querySelector("#rerun-btn").onclick = () => {
+    // Reload this run's spec into the designer (prompts intact for editing)
+    $("#run-title").value = meta.title + " (rerun)";
+    $("#agent-rows").innerHTML = "";
+    (meta.spec || []).forEach(a => addAgentRow({
+      agent: a.agent, label: a.label,
+      depends_on: a.depends_on || [],
+      prompt: a.prompt || "",
+    }));
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   // Build agent panels
   const grid = $("#agent-grid");
@@ -162,6 +287,14 @@ async function openRun(runId) {
     es.close();
     state.evtSource = null;
     refreshHistory();
+    // Browser notification when run completes (if user has tab in background)
+    const failed = Object.values(state.panels)
+      .filter(p => p.statusBadge.classList.contains("failed")).length;
+    const total = Object.keys(state.panels).length;
+    notify(
+      failed === 0 ? "✅ CG run complete" : `⚠️ CG run finished (${failed}/${total} failed)`,
+      meta.title
+    );
   });
   es.onerror = () => { /* ignore — server may close stream when run done */ };
 }
@@ -169,9 +302,11 @@ async function openRun(runId) {
 function buildPanel(agent) {
   const root = document.createElement("div");
   root.className = "agent-panel";
+  const depsHtml = (agent.depends_on && agent.depends_on.length)
+    ? `<span class="deps">deps: ${agent.depends_on.map(escapeHtml).join(", ")}</span>` : "";
   root.innerHTML = `
     <div class="agent-panel-head">
-      <div class="title">${escapeHtml(agent.label)}</div>
+      <div class="title">${escapeHtml(agent.label)} ${depsHtml}</div>
       <div class="badges">
         <span class="badge ${agent.agent}">${agent.agent}</span>
         <span class="badge status ${agent.status}">${agent.status}</span>
@@ -180,12 +315,19 @@ function buildPanel(agent) {
     <div class="agent-panel-log"></div>
     <div class="agent-panel-foot">
       <span class="bytes">0 chars</span>
+      <button class="copy-btn" title="Copy log to clipboard">copy</button>
       <span class="exit"></span>
     </div>
   `;
+  const logEl = root.querySelector(".agent-panel-log");
+  root.querySelector(".copy-btn").onclick = () => {
+    navigator.clipboard.writeText(logEl.textContent || "");
+    const btn = root.querySelector(".copy-btn");
+    btn.textContent = "✓"; setTimeout(() => btn.textContent = "copy", 1200);
+  };
   return {
     root,
-    log: root.querySelector(".agent-panel-log"),
+    log: logEl,
     statusBadge: root.querySelector(".badge.status"),
     bytesEl: root.querySelector(".bytes"),
     exitEl: root.querySelector(".exit"),
@@ -271,5 +413,26 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#run-title").value = "";
     ensureOneAgentRow();
   };
+  if ($("#save-workflow-btn")) {
+    $("#save-workflow-btn").onclick = saveCurrentWorkflow;
+  }
+  if ($("#del-workflow-btn")) {
+    $("#del-workflow-btn").onclick = deleteSelectedWorkflow;
+  }
+
+  // Keyboard shortcuts
+  document.addEventListener("keydown", (e) => {
+    // Ctrl/Cmd + Enter from anywhere = Run
+    if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+      e.preventDefault();
+      startRun();
+    }
+    // Ctrl/Cmd + S = save workflow
+    if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      e.preventDefault();
+      saveCurrentWorkflow();
+    }
+  });
+
   init();
 });

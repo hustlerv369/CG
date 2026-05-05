@@ -1,21 +1,21 @@
 [
   {
-    "id": "3420758397a1",
-    "title": "smoke-from-api",
-    "created": 1778014932.1927805,
-    "finished": true,
+    "id": "71723e849bfc",
+    "title": "deps validation",
+    "created": 1778016216.5811915,
+    "finished": false,
     "agents": [
       {
-        "label": "claude",
+        "label": "a",
         "agent": "claude",
-        "status": "done",
-        "exit_code": 0
+        "status": "queued",
+        "exit_code": null
       },
       {
-        "label": "gemini",
+        "label": "b",
         "agent": "gemini",
-        "status": "done",
-        "exit_code": 0
+        "status": "waiting",
+        "exit_code": null
       }
     ]
   }

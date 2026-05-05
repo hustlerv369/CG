@@ -157,3 +157,127 @@ def test_static_assets(client):
     r = client.get("/static/dashboard.js")
     assert r.status_code == 200
     assert "EventSource" in r.text
+
+
+def test_depends_on_runs_after_predecessor(client):
+    """A→B with depends_on should run sequentially with substitution."""
+    payload = {
+        "title": "deps test",
+        "spec": [
+            {"agent": "claude", "label": "first", "prompt": "step-A"},
+            {"agent": "gemini", "label": "second",
+             "depends_on": ["first"],
+             "prompt": "got: {{first}}"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+
+    import time
+    for _ in range(60):
+        r = client.get(f"/api/runs/{run_id}")
+        body = r.json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+
+    assert all(a["status"] == "done" for a in body["agents"]), \
+        f"agents did not all reach done: {[a['status'] for a in body['agents']]}"
+
+    # The 'second' agent should have received the first agent's output
+    # via the {{first}} substitution. Our mock claude prints
+    # "CLAUDE-MOCK <stdin>" so first.output = "CLAUDE-MOCK step-A".
+    # Mock gemini prints "GEMINI-MOCK <argv[1]>" so second.output should
+    # contain "got: CLAUDE-MOCK step-A".
+    r = client.get(f"/api/runs/{run_id}/output/second")
+    log = r.json()["log"]
+    assert "CLAUDE-MOCK step-A" in log, (
+        f"substitution failed; second's log was: {log!r}")
+
+
+def test_depends_on_propagates_failure(client, monkeypatch):
+    """If a dependency fails, dependents must be marked failed without running."""
+    # Force "first" to exit with code 1
+    monkeypatch.setitem(
+        dash.AGENT_KINDS, "claude",
+        {
+            "label": "Claude (mock-fail)",
+            "command": [sys.executable, "-c",
+                         "import sys; print('FAILED'); sys.exit(1)"],
+            "stdin_prompt": True,
+            "env": {},
+        },
+    )
+    payload = {
+        "title": "deps failure test",
+        "spec": [
+            {"agent": "claude", "label": "first", "prompt": "x"},
+            {"agent": "gemini", "label": "second",
+             "depends_on": ["first"], "prompt": "y"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+
+    import time
+    for _ in range(60):
+        r = client.get(f"/api/runs/{run_id}")
+        body = r.json()
+        if all(a["status"] in {"done", "failed", "cancelled"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+
+    statuses = {a["label"]: a["status"] for a in body["agents"]}
+    assert statuses["first"] == "failed"
+    assert statuses["second"] == "failed"
+
+
+def test_depends_on_unknown_label_is_400(client):
+    r = client.post("/api/runs", json={
+        "title": "bad deps",
+        "spec": [
+            {"agent": "claude", "label": "a", "depends_on": ["nonexistent"],
+             "prompt": "x"},
+        ],
+    })
+    assert r.status_code == 400
+
+
+def test_depends_on_self_is_400(client):
+    r = client.post("/api/runs", json={
+        "title": "self dep",
+        "spec": [
+            {"agent": "claude", "label": "loop", "depends_on": ["loop"],
+             "prompt": "x"},
+        ],
+    })
+    assert r.status_code == 400
+
+
+def test_duplicate_label_is_400(client):
+    r = client.post("/api/runs", json={
+        "title": "dupes",
+        "spec": [
+            {"agent": "claude", "label": "x", "prompt": "a"},
+            {"agent": "claude", "label": "x", "prompt": "b"},
+        ],
+    })
+    assert r.status_code == 400
+
+
+def test_cancel_endpoint(client):
+    r = client.post("/api/runs", json={
+        "title": "cancel test",
+        "spec": [{"agent": "claude", "label": "c", "prompt": "x"}],
+    })
+    run_id = r.json()["id"]
+    r = client.delete(f"/api/runs/{run_id}")
+    assert r.status_code == 200
+    assert r.json()["cancelled"] is True
+
+
+def test_cancel_unknown_run_404(client):
+    r = client.delete("/api/runs/does-not-exist")
+    assert r.status_code == 404

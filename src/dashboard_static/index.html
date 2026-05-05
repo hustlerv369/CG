@@ -25,6 +25,17 @@
       </div>
 
       <div class="row">
+        <label>Saved workflows (this browser)</label>
+        <div class="workflows-row">
+          <select id="workflow-select">
+            <option value="">— load saved —</option>
+          </select>
+          <button class="ghost" id="save-workflow-btn" title="Save current workflow">💾 save</button>
+          <button class="ghost" id="del-workflow-btn" title="Delete selected workflow">🗑</button>
+        </div>
+      </div>
+
+      <div class="row">
         <label>Title</label>
         <input id="run-title" type="text" placeholder="What is this run for?" />
       </div>

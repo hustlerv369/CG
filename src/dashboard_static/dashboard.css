@@ -98,6 +98,16 @@ main {
   cursor: pointer; padding: 2px 6px; font-size: 14px;
 }
 .agent-row .remove:hover { color: var(--error); }
+.agent-row .depends_on {
+  width: 100%;
+  margin: 4px 0;
+  padding: 4px 6px;
+  background: var(--bg);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: 11px var(--mono);
+}
 .agent-row textarea {
   width: 100%; min-height: 50px; resize: vertical;
   font: 11px var(--mono);
@@ -238,5 +248,57 @@ button:disabled {
   border-top: 1px solid var(--border-subtle);
   font: 10px var(--mono);
   color: var(--fg-dim);
-  display: flex; justify-content: space-between;
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 8px;
+}
+.agent-panel-foot .copy-btn {
+  padding: 1px 8px; font-size: 10px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-subtle);
+  color: var(--fg-dim);
+  cursor: pointer;
+  border-radius: 3px;
+}
+.agent-panel-foot .copy-btn:hover { color: var(--fg); border-color: var(--accent); }
+
+.agent-panel-head .deps {
+  font: 10px var(--mono);
+  color: var(--fg-dim);
+  margin-left: 8px;
+  font-weight: 400;
+}
+
+.run-tools {
+  display: flex; gap: 8px;
+  margin-top: 8px;
+}
+.run-tools button {
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.badge.waiting {
+  background: rgba(210, 153, 34, 0.2);
+  color: var(--warn);
+}
+.badge.cancelled {
+  background: rgba(139, 148, 158, 0.2);
+  color: var(--fg-dim);
+}
+
+/* Workflow save/load dropdown */
+.workflows-row {
+  display: flex; gap: 6px; margin-bottom: 10px;
+}
+.workflows-row select {
+  flex: 1; min-width: 0;
+  padding: 5px 6px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 4px;
+  font: 11px var(--mono);
+}
+.workflows-row button {
+  padding: 4px 8px; font-size: 11px;
+  white-space: nowrap;
 }
