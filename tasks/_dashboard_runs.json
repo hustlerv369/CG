@@ -1,21 +1,15 @@
 [
   {
-    "id": "71723e849bfc",
-    "title": "deps validation",
-    "created": 1778016216.5811915,
-    "finished": false,
+    "id": "338817a3f5b3",
+    "title": "model-selector smoke",
+    "created": 1778018285.0267036,
+    "finished": true,
     "agents": [
       {
-        "label": "a",
-        "agent": "claude",
-        "status": "queued",
-        "exit_code": null
-      },
-      {
-        "label": "b",
-        "agent": "gemini",
-        "status": "waiting",
-        "exit_code": null
+        "label": "test",
+        "agent": "claude-sonnet-4-6",
+        "status": "done",
+        "exit_code": 0
       }
     ]
   }

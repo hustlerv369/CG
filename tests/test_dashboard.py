@@ -27,28 +27,31 @@ def client(monkeypatch, tmp_path):
     dash.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(dash, "INDEX_PATH", tmp_path / "index.json")
 
-    # Replace claude/gemini with deterministic Python one-liners so tests
-    # don't actually call the subscriptions.
-    monkeypatch.setitem(
-        dash.AGENT_KINDS, "claude",
-        {
-            "label": "Claude (mock)",
-            "command": [sys.executable, "-c",
-                         "import sys; print('CLAUDE-MOCK ' + sys.stdin.read().strip())"],
-            "stdin_prompt": True,
-            "env": {},
-        },
-    )
-    monkeypatch.setitem(
-        dash.AGENT_KINDS, "gemini",
-        {
-            "label": "Gemini (mock)",
-            "command": [sys.executable, "-c",
-                         "import sys; print('GEMINI-MOCK ' + sys.argv[1])"],
-            "stdin_prompt": False,
-            "env": {},
-        },
-    )
+    # Replace each real model with a deterministic Python one-liner so
+    # tests don't actually call the subscriptions.
+    claude_mock = {
+        "label": "Claude (mock)",
+        "family": "claude",
+        "summary": "mock",
+        "command": [sys.executable, "-c",
+                     "import sys; print('CLAUDE-MOCK ' + sys.stdin.read().strip())"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    gemini_mock = {
+        "label": "Gemini (mock)",
+        "family": "gemini",
+        "summary": "mock",
+        "command": [sys.executable, "-c",
+                     "import sys; print('GEMINI-MOCK ' + sys.argv[1])"],
+        "stdin_prompt": False,
+        "env": {},
+    }
+    # Mock both legacy aliases AND the new specific model ids
+    for kid in ("claude", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6"):
+        monkeypatch.setitem(dash.AGENT_KINDS, kid, claude_mock)
+    for kid in ("gemini", "gemini-flash", "gemini-pro", "gemini-3-pro"):
+        monkeypatch.setitem(dash.AGENT_KINDS, kid, gemini_mock)
 
     app = dash.create_app()
     return TestClient(app)
@@ -59,7 +62,56 @@ def test_get_agents(client):
     assert r.status_code == 200
     body = r.json()
     ids = [a["id"] for a in body["agents"]]
-    assert "claude" in ids and "gemini" in ids
+    # New specific model ids must all be present
+    for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
+                 "gemini-flash", "gemini-pro", "gemini-3-pro"):
+        assert kid in ids, f"missing model id {kid!r} in {ids}"
+    # Each entry has family + summary
+    for a in body["agents"]:
+        assert a["family"] in {"claude", "gemini", "other"}
+        assert "summary" in a
+
+
+def test_legacy_alias_still_works(client):
+    """Old presets / clients using `agent: claude` should still resolve."""
+    r = client.post("/api/runs", json={
+        "title": "alias",
+        "spec": [{"agent": "claude", "label": "c", "prompt": "x"}],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+    assert body["agents"][0]["status"] == "done"
+    # The agent kind should have been normalized to the canonical id
+    assert body["agents"][0]["agent"] == "claude-sonnet-4-6"
+
+
+def test_specific_model_ids_dispatch(client):
+    """Each specific Claude/Gemini model id must be invokable."""
+    payload = {
+        "title": "all-models",
+        "spec": [
+            {"agent": "claude-sonnet-4-6", "label": "s46", "prompt": "x"},
+            {"agent": "claude-opus-4-7",   "label": "o47", "prompt": "y"},
+            {"agent": "gemini-flash",      "label": "gf",  "prompt": "z"},
+            {"agent": "gemini-3-pro",      "label": "g3",  "prompt": "w"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(60):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+    assert all(a["status"] == "done" for a in body["agents"])
 
 
 def test_get_presets(client):
@@ -198,17 +250,19 @@ def test_depends_on_runs_after_predecessor(client):
 
 def test_depends_on_propagates_failure(client, monkeypatch):
     """If a dependency fails, dependents must be marked failed without running."""
-    # Force "first" to exit with code 1
-    monkeypatch.setitem(
-        dash.AGENT_KINDS, "claude",
-        {
-            "label": "Claude (mock-fail)",
-            "command": [sys.executable, "-c",
-                         "import sys; print('FAILED'); sys.exit(1)"],
-            "stdin_prompt": True,
-            "env": {},
-        },
-    )
+    # Force the canonical claude model id to fail (legacy "claude" alias
+    # resolves to "claude-sonnet-4-6", so we must override that one).
+    fail_mock = {
+        "label": "Claude (mock-fail)",
+        "family": "claude",
+        "summary": "fail mock",
+        "command": [sys.executable, "-c",
+                     "import sys; print('FAILED'); sys.exit(1)"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    for kid in ("claude", "claude-sonnet-4-6"):
+        monkeypatch.setitem(dash.AGENT_KINDS, kid, fail_mock)
     payload = {
         "title": "deps failure test",
         "spec": [

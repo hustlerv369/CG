@@ -82,20 +82,79 @@ def _resolve_executable(name: str) -> str:
     return name
 
 
+# Each entry is one selectable model in the dashboard. The "family" lets
+# the UI group Claude vs Gemini in the dropdown.
 AGENT_KINDS: dict[str, dict[str, Any]] = {
-    "claude": {
-        "label": "Claude (Pro)",
-        "command": [_resolve_executable("claude"), "--print"],
+    # ---- Claude (Claude Pro subscription via OAuth) -----------------------
+    "claude-sonnet-4-6": {
+        "label": "Claude Sonnet 4.6",
+        "family": "claude",
+        "summary": "fast, balanced — daily driver",
+        "command": [_resolve_executable("claude"), "--print",
+                     "--model", "claude-sonnet-4-6"],
         "stdin_prompt": True,
         "env": {},
     },
-    "gemini": {
-        "label": "Gemini (Google)",
-        "command": [_resolve_executable("gemini"), "--skip-trust", "-p"],
-        "stdin_prompt": False,  # gemini takes prompt as arg via -p
+    "claude-opus-4-7": {
+        "label": "Claude Opus 4.7 (1M context)",
+        "family": "claude",
+        "summary": "smartest, 1M tokens — for big refactors",
+        "command": [_resolve_executable("claude"), "--print",
+                     "--model", "claude-opus-4-7"],
+        "stdin_prompt": True,
+        "env": {},
+    },
+    "claude-opus-4-6": {
+        "label": "Claude Opus 4.6",
+        "family": "claude",
+        "summary": "previous-gen Opus, still strong",
+        "command": [_resolve_executable("claude"), "--print",
+                     "--model", "claude-opus-4-6"],
+        "stdin_prompt": True,
+        "env": {},
+    },
+    # ---- Gemini (Google account via OAuth, GOOGLE_GENAI_USE_GCA=true) -----
+    "gemini-flash": {
+        "label": "Gemini Flash",
+        "family": "gemini",
+        "summary": "fastest Gemini — quick checks, drafts",
+        "command": [_resolve_executable("gemini"), "--skip-trust",
+                     "-m", "flash", "-p"],
+        "stdin_prompt": False,
+        "env": {"GOOGLE_GENAI_USE_GCA": "true"},
+    },
+    "gemini-pro": {
+        "label": "Gemini Pro",
+        "family": "gemini",
+        "summary": "default Gemini — balanced quality",
+        "command": [_resolve_executable("gemini"), "--skip-trust",
+                     "-m", "pro", "-p"],
+        "stdin_prompt": False,
+        "env": {"GOOGLE_GENAI_USE_GCA": "true"},
+    },
+    "gemini-3-pro": {
+        "label": "Gemini 3 Pro (preview)",
+        "family": "gemini",
+        "summary": "latest Gemini 3 Pro — slow but strongest",
+        "command": [_resolve_executable("gemini"), "--skip-trust",
+                     "-m", "gemini-3-pro-preview", "-p"],
+        "stdin_prompt": False,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
 }
+
+
+# Backward-compatible aliases for old presets / clients ("claude" → default
+# Sonnet, "gemini" → default Pro)
+AGENT_ALIASES = {
+    "claude": "claude-sonnet-4-6",
+    "gemini": "gemini-pro",
+}
+
+
+def _resolve_agent_kind(kind: str) -> str:
+    """Map legacy aliases to current ids; passthrough otherwise."""
+    return AGENT_ALIASES.get(kind, kind)
 
 
 # ---------------------------------------------------------------------------
@@ -199,9 +258,12 @@ class RunManager:
         labels_in_spec: set[str] = set()
         for i, item in enumerate(spec):
             label = item.get("label") or f"agent-{i+1}"
-            agent_kind = item.get("agent")
+            raw_kind = item.get("agent")
+            agent_kind = _resolve_agent_kind(raw_kind)
             if agent_kind not in AGENT_KINDS:
-                raise HTTPException(400, f"unknown agent {agent_kind!r} for {label}")
+                raise HTTPException(400, f"unknown agent {raw_kind!r} for {label}")
+            # Normalize spec to use canonical kind id everywhere downstream
+            item["agent"] = agent_kind
             if label in labels_in_spec:
                 raise HTTPException(400, f"duplicate label {label!r}")
             labels_in_spec.add(label)
@@ -454,16 +516,16 @@ class RunManager:
 PRESETS: list[dict[str, Any]] = [
     {
         "id": "compare",
-        "title": "Two-model compare",
-        "description": "Same task to Claude and Gemini in parallel — diff the two answers.",
+        "title": "Two-model compare (Sonnet × Gemini Pro)",
+        "description": "Same task to Claude Sonnet 4.6 and Gemini Pro in parallel — diff the two answers.",
         "spec": [
             {
-                "agent": "claude", "label": "claude",
+                "agent": "claude-sonnet-4-6", "label": "claude",
                 "prompt": "Write a Python function `is_prime(n: int) -> bool` "
                           "that handles n<2 correctly. Output ONLY a fenced ```python code block."
             },
             {
-                "agent": "gemini", "label": "gemini",
+                "agent": "gemini-pro", "label": "gemini",
                 "prompt": "DO NOT ask questions. DO NOT propose a plan. "
                           "Write a Python function `is_prime(n: int) -> bool` "
                           "that handles n<2 correctly. "
@@ -473,13 +535,13 @@ PRESETS: list[dict[str, Any]] = [
     },
     {
         "id": "pipeline",
-        "title": "Design → Implement → Critique (Gemini → Claude → Gemini)",
-        "description": "Gemini writes the spec, Claude implements from it, then Gemini "
-                        "reviews. Real sequential pipeline using depends_on + {{label}} "
-                        "prompt substitution.",
+        "title": "Design → Implement → Critique (Gemini Pro → Opus 4.7 → Gemini Pro)",
+        "description": "Real sequential pipeline. Gemini Pro writes the spec, "
+                        "Opus 4.7 implements it (1M context — handles big specs), "
+                        "Gemini Pro reviews both. Uses depends_on + {{label}} substitution.",
         "spec": [
             {
-                "agent": "gemini", "label": "design",
+                "agent": "gemini-pro", "label": "design",
                 "prompt": "DO NOT ask questions. DO NOT propose a plan. Output a precise Markdown "
                           "spec for a Python function `fizzbuzz(n: int) -> list[str]` that returns "
                           "the first n FizzBuzz values. Cover sections: Signature, Inputs, "
@@ -487,14 +549,14 @@ PRESETS: list[dict[str, Any]] = [
                           "Markdown only."
             },
             {
-                "agent": "claude", "label": "implement",
+                "agent": "claude-opus-4-7", "label": "implement",
                 "depends_on": ["design"],
                 "prompt": "Implement the following spec exactly. Output ONLY a fenced "
                           "```python code block, nothing before or after.\n\n"
                           "# Spec\n\n{{design}}"
             },
             {
-                "agent": "gemini", "label": "critique",
+                "agent": "gemini-pro", "label": "critique",
                 "depends_on": ["design", "implement"],
                 "prompt": "Critically review this implementation against its spec. List bugs, "
                           "missing edge cases, and concrete improvements as a Markdown bullet "
@@ -506,18 +568,48 @@ PRESETS: list[dict[str, Any]] = [
     {
         "id": "fanout",
         "title": "4-agent fan-out (creative diversity)",
-        "description": "Same prompt to 4 agents (2× Claude, 2× Gemini) — pick the best output.",
+        "description": "Same prompt to 4 different models in parallel — pick the best output.",
         "spec": [
-            {"agent": "claude", "label": "claude-1",
+            {"agent": "claude-sonnet-4-6", "label": "sonnet",
              "prompt": "Write a haiku about debugging. ASCII only."},
-            {"agent": "claude", "label": "claude-2",
+            {"agent": "claude-opus-4-6", "label": "opus-4-6",
              "prompt": "Write a haiku about debugging. ASCII only."},
-            {"agent": "gemini", "label": "gemini-1",
+            {"agent": "gemini-pro", "label": "gemini-pro",
              "prompt": "DO NOT add any prose. Output ONLY a haiku about debugging. "
                        "ASCII only. 3 lines."},
-            {"agent": "gemini", "label": "gemini-2",
+            {"agent": "gemini-flash", "label": "gemini-flash",
              "prompt": "DO NOT add any prose. Output ONLY a haiku about debugging. "
                        "ASCII only. 3 lines."},
+        ],
+    },
+    {
+        "id": "code-review",
+        "title": "Code review — 3 models cross-check",
+        "description": "Three models review the same diff: Sonnet for style + bugs, "
+                        "Opus 4.7 for architecture (1M context), Gemini Pro for "
+                        "edge cases. Use {{diff}} placeholder by editing the prompts "
+                        "and pasting the diff at the top of each.",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "style",
+                "prompt": "Review this code change. Focus on style, readability, "
+                          "obvious bugs, and missing tests. Be concise — bullet list, "
+                          "max 10 items.\n\n[paste diff here]"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "architecture",
+                "prompt": "Review this code change at the architecture level. "
+                          "Coupling, abstractions, future maintainability. Bullet "
+                          "list of concrete concerns + suggested fixes.\n\n"
+                          "[paste diff here]"
+            },
+            {
+                "agent": "gemini-pro", "label": "edge-cases",
+                "prompt": "Adversarially review this code change. List 5+ specific "
+                          "edge cases the author probably did not test. Be concrete: "
+                          "exact inputs, expected vs likely actual behavior.\n\n"
+                          "[paste diff here]"
+            },
         ],
     },
 ]
@@ -555,7 +647,12 @@ def create_app() -> FastAPI:
     async def get_agents() -> Any:
         return {
             "agents": [
-                {"id": k, "label": v["label"]}
+                {
+                    "id": k,
+                    "label": v["label"],
+                    "family": v.get("family", "other"),
+                    "summary": v.get("summary", ""),
+                }
                 for k, v in AGENT_KINDS.items()
             ]
         }

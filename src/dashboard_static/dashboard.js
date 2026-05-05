@@ -146,24 +146,52 @@ function populatePresets() {
 
 // ---------- agent row designer ----------
 
+function buildAgentSelectOptions() {
+  // Group models by family (claude, gemini, other) into <optgroup>s.
+  const groups = {};
+  state.agents.forEach(a => {
+    const fam = a.family || "other";
+    (groups[fam] = groups[fam] || []).push(a);
+  });
+  const familyLabels = {
+    claude: "Claude (Pro)",
+    gemini: "Gemini (Google)",
+    other: "Other",
+  };
+  const order = ["claude", "gemini", "other"];
+  return order
+    .filter(f => groups[f])
+    .map(f => `
+      <optgroup label="${escapeHtml(familyLabels[f] || f)}">
+        ${groups[f].map(a =>
+          `<option value="${a.id}" title="${escapeHtml(a.summary || '')}">${escapeHtml(a.label)}</option>`
+        ).join("")}
+      </optgroup>
+    `).join("");
+}
+
 function addAgentRow(spec = {}) {
   const tpl = document.createElement("div");
   tpl.className = "agent-row";
   tpl.innerHTML = `
     <div class="agent-row-head">
-      <select class="agent-select">
-        ${state.agents.map(a =>
-          `<option value="${a.id}">${escapeHtml(a.label)}</option>`
-        ).join("")}
+      <select class="agent-select" title="Pick a model">
+        ${buildAgentSelectOptions()}
       </select>
       <input type="text" class="label" placeholder="label (e.g. design)" />
       <button type="button" class="remove" title="Remove">×</button>
     </div>
-    <input type="text" class="depends_on" placeholder="depends_on (comma-separated labels, e.g. design,review)" />
+    <input type="text" class="depends_on" placeholder="depends_on (comma-separated labels)" />
     <textarea class="prompt" placeholder="Prompt — use {{label}} to inject a dependency's output"></textarea>
   `;
   const sel = tpl.querySelector(".agent-select");
-  if (spec.agent) sel.value = spec.agent;
+  if (spec.agent) {
+    // Tolerate legacy ids ("claude" / "gemini") by matching against options
+    const opts = Array.from(sel.options).map(o => o.value);
+    if (opts.includes(spec.agent)) sel.value = spec.agent;
+    else if (spec.agent === "claude" && opts.includes("claude-sonnet-4-6")) sel.value = "claude-sonnet-4-6";
+    else if (spec.agent === "gemini" && opts.includes("gemini-pro")) sel.value = "gemini-pro";
+  }
   tpl.querySelector(".label").value = spec.label || "";
   tpl.querySelector(".prompt").value = spec.prompt || "";
   tpl.querySelector(".depends_on").value = (spec.depends_on || []).join(",");
@@ -299,16 +327,34 @@ async function openRun(runId) {
   es.onerror = () => { /* ignore — server may close stream when run done */ };
 }
 
+function familyOf(agentId) {
+  const a = (state.agents || []).find(x => x.id === agentId);
+  if (a && a.family) return a.family;
+  if (typeof agentId === "string") {
+    if (agentId.startsWith("claude")) return "claude";
+    if (agentId.startsWith("gemini")) return "gemini";
+  }
+  return "other";
+}
+
+function shortAgentLabel(agentId) {
+  const a = (state.agents || []).find(x => x.id === agentId);
+  if (a) return a.label;
+  return agentId;
+}
+
 function buildPanel(agent) {
   const root = document.createElement("div");
   root.className = "agent-panel";
   const depsHtml = (agent.depends_on && agent.depends_on.length)
-    ? `<span class="deps">deps: ${agent.depends_on.map(escapeHtml).join(", ")}</span>` : "";
+    ? `<span class="deps">← ${agent.depends_on.map(escapeHtml).join(", ")}</span>` : "";
+  const fam = familyOf(agent.agent);
+  const modelLabel = shortAgentLabel(agent.agent);
   root.innerHTML = `
     <div class="agent-panel-head">
       <div class="title">${escapeHtml(agent.label)} ${depsHtml}</div>
       <div class="badges">
-        <span class="badge ${agent.agent}">${agent.agent}</span>
+        <span class="badge ${fam}" title="${escapeHtml(agent.agent)}">${escapeHtml(modelLabel)}</span>
         <span class="badge status ${agent.status}">${agent.status}</span>
       </div>
     </div>
