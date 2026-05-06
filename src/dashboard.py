@@ -65,6 +65,8 @@ RUNS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_PATH = ROOT / "tasks" / "_dashboard_runs.json"
 WORKFLOWS_DIR = ROOT / "workflows"
 WORKFLOWS_DIR.mkdir(parents=True, exist_ok=True)
+NOTES_DIR = ROOT / "notes"
+NOTES_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -1122,6 +1124,154 @@ def _extract_response_text(raw: str, http_cfg: dict[str, Any]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Notes (Obsidian-inspired knowledge base)
+# ---------------------------------------------------------------------------
+
+
+def _iso_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+
+
+def _safe_note_name(raw: str) -> str:
+    safe = _re.sub(r"[^a-zA-Z0-9._\- ]+", "-", raw.strip()) or "note"
+    safe = _re.sub(r"\s+", "-", safe)
+    return safe[:120].strip("-").lower()
+
+
+def _note_path(name: str) -> Path:
+    return NOTES_DIR / f"{_safe_note_name(name)}.md"
+
+
+_FM_RE = _re.compile(r"^---\s*\n(.*?)\n---\s*\n", _re.DOTALL)
+
+
+def _parse_note(path: Path) -> dict[str, Any]:
+    raw = path.read_text(encoding="utf-8")
+    frontmatter: dict[str, Any] = {}
+    body = raw
+    m = _FM_RE.match(raw)
+    if m:
+        body = raw[m.end():]
+        for line in m.group(1).splitlines():
+            if ":" not in line:
+                continue
+            k, _, v = line.partition(":")
+            v = v.strip()
+            if v.startswith("[") and v.endswith("]"):
+                inner = v[1:-1].strip()
+                frontmatter[k.strip()] = (
+                    [item.strip().strip('"\'') for item in inner.split(",")
+                     if item.strip()]
+                    if inner else []
+                )
+            else:
+                frontmatter[k.strip()] = v.strip('"\'')
+    name = path.stem
+    return {
+        "name": name,
+        "title": frontmatter.get("title") or name,
+        "tags": frontmatter.get("tags") or [],
+        "created": frontmatter.get("created"),
+        "updated": frontmatter.get("updated"),
+        "run_id": frontmatter.get("run_id"),
+        "content": body.lstrip("\n"),
+    }
+
+
+def _render_note(frontmatter: dict[str, Any], body: str) -> str:
+    lines = ["---"]
+    for k, v in frontmatter.items():
+        if v is None:
+            continue
+        if isinstance(v, list):
+            arr = ", ".join(f'"{item}"' for item in v)
+            lines.append(f"{k}: [{arr}]")
+        else:
+            lines.append(f"{k}: {v}")
+    lines.append("---")
+    lines.append("")
+    lines.append(body.rstrip())
+    lines.append("")
+    return "\n".join(lines)
+
+
+def _list_notes() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for p in sorted(NOTES_DIR.glob("*.md"), key=lambda x: x.stat().st_mtime,
+                    reverse=True):
+        try:
+            note = _parse_note(p)
+        except Exception:
+            continue
+        out.append({
+            "name": note["name"],
+            "title": note["title"],
+            "tags": note["tags"],
+            "updated": note["updated"],
+            "size": p.stat().st_size,
+        })
+    return out
+
+
+_WIKILINK_RE = _re.compile(r"\[\[([^\]\|]+)(?:\|[^\]]+)?\]\]")
+
+
+def _find_backlinks(target_name: str) -> list[dict[str, Any]]:
+    """Return notes whose body links to *target_name* via [[wikilink]]."""
+    target = _safe_note_name(target_name)
+    out: list[dict[str, Any]] = []
+    for p in NOTES_DIR.glob("*.md"):
+        if p.stem == target:
+            continue
+        try:
+            note = _parse_note(p)
+        except Exception:
+            continue
+        body = note["content"]
+        links = [_safe_note_name(m) for m in _WIKILINK_RE.findall(body)]
+        if target in links:
+            # Extract a 200-char excerpt around the first match
+            for m in _WIKILINK_RE.finditer(body):
+                if _safe_note_name(m.group(1)) == target:
+                    start = max(0, m.start() - 80)
+                    end = min(len(body), m.end() + 80)
+                    excerpt = body[start:end].replace("\n", " ")
+                    out.append({
+                        "name": note["name"],
+                        "title": note["title"],
+                        "excerpt": ("…" if start > 0 else "") + excerpt
+                                    + ("…" if end < len(body) else ""),
+                    })
+                    break
+    return out
+
+
+def _search_notes(query: str) -> list[dict[str, Any]]:
+    """Naive substring search across title + body. Good enough at this
+    scale; can be replaced with a proper indexer later."""
+    q = query.lower()
+    out: list[dict[str, Any]] = []
+    for p in NOTES_DIR.glob("*.md"):
+        try:
+            note = _parse_note(p)
+        except Exception:
+            continue
+        haystack = (note["title"] + "\n" + note["content"]).lower()
+        if q in haystack:
+            idx = haystack.find(q)
+            start = max(0, idx - 60)
+            end = min(len(haystack), idx + len(q) + 80)
+            excerpt = haystack[start:end].replace("\n", " ")
+            out.append({
+                "name": note["name"],
+                "title": note["title"],
+                "excerpt": ("…" if start > 0 else "") + excerpt
+                            + ("…" if end < len(haystack) else ""),
+            })
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Workflow filesystem helpers
 # ---------------------------------------------------------------------------
 
@@ -1362,6 +1512,81 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "workflow not found")
         path.unlink()
         return {"name": name, "deleted": True}
+
+    # ---- notes (Obsidian-inspired knowledge base in D:\CG\notes\) ---------
+
+    @app.get("/api/notes")
+    async def list_notes() -> Any:
+        """List every .md note with metadata for the sidebar."""
+        return {"notes": _list_notes()}
+
+    @app.get("/api/notes/{name}")
+    async def get_note(name: str) -> Any:
+        path = _note_path(name)
+        if not path.exists():
+            raise HTTPException(404, "note not found")
+        return _parse_note(path)
+
+    @app.put("/api/notes/{name}")
+    async def save_note(name: str, body: dict[str, Any]) -> Any:
+        if "content" not in body or not isinstance(body["content"], str):
+            raise HTTPException(400, "body.content must be a string")
+        title = body.get("title") or _safe_note_name(name)
+        tags = body.get("tags") or []
+        if not isinstance(tags, list):
+            tags = []
+        path = _note_path(name)
+        existing = _parse_note(path) if path.exists() else None
+        now = _iso_now()
+        created = (existing or {}).get("created") or now
+        frontmatter = {
+            "title": title,
+            "tags": tags,
+            "created": created,
+            "updated": now,
+        }
+        path.write_text(_render_note(frontmatter, body["content"]),
+                          encoding="utf-8")
+        return _parse_note(path)
+
+    @app.delete("/api/notes/{name}")
+    async def delete_note(name: str) -> Any:
+        path = _note_path(name)
+        if not path.exists():
+            raise HTTPException(404, "note not found")
+        path.unlink()
+        return {"name": name, "deleted": True}
+
+    @app.get("/api/notes/{name}/backlinks")
+    async def note_backlinks(name: str) -> Any:
+        target = _safe_note_name(name)
+        return {"name": target, "backlinks": _find_backlinks(target)}
+
+    @app.get("/api/notes-search")
+    async def notes_search(q: str = "") -> Any:
+        if not q.strip():
+            return {"results": []}
+        return {"results": _search_notes(q.strip())}
+
+    @app.post("/api/notes/from-run")
+    async def note_from_run(body: dict[str, Any]) -> Any:
+        """Save a CG run as a Markdown note for later reference."""
+        run_id = body.get("run_id")
+        run = manager.runs.get(run_id) if run_id else None
+        if not run:
+            raise HTTPException(404, "run not found")
+        slug = _safe_note_name(f"run-{run.id}-{run.title}")
+        body_md = _render_run_report(run)
+        frontmatter = {
+            "title": f"Run: {run.title}",
+            "tags": ["run"] + [a.agent for a in run.agents.values()],
+            "created": _iso_now(),
+            "updated": _iso_now(),
+            "run_id": run.id,
+        }
+        path = _note_path(slug)
+        path.write_text(_render_note(frontmatter, body_md), encoding="utf-8")
+        return _parse_note(path)
 
     # ---- file tree + editor (read/write within CG_PROJECT_ROOT) -----------
 

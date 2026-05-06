@@ -1,15 +1,21 @@
 [
   {
-    "id": "4fd44765fdc1",
-    "title": "placeholder smoke",
-    "created": 1778041663.9998775,
+    "id": "4026fcaba9c2",
+    "title": "deps failure test",
+    "created": 1778044567.2795808,
     "finished": true,
     "agents": [
       {
-        "label": "test",
+        "label": "first",
         "agent": "claude-sonnet-4-6",
-        "status": "done",
-        "exit_code": 0
+        "status": "failed",
+        "exit_code": 1
+      },
+      {
+        "label": "second",
+        "agent": "gemini-pro",
+        "status": "failed",
+        "exit_code": -1
       }
     ]
   }

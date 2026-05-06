@@ -197,8 +197,11 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ Markdown / diff render view-toggle (raw / md / diff segmented control)
 - ✅ Run report export (single Markdown bundle of any run)
 - ✅ Inline file editor (CodeMirror tab) with file tree + atomic save
+- ✅ Notes / knowledge base — Obsidian-style with `[[wikilinks]]`, backlinks, search
+- ✅ Settings tab for API keys + defaults (browser localStorage)
+- ✅ Save run as note (one click → run report → searchable note)
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 72 pytest tests passing
+- ✅ 80 pytest tests passing
 - ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 

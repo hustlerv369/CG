@@ -865,6 +865,326 @@ function editorRevert() {
   $("#editor-revert-btn").disabled = true;
 }
 
+// ============================================================
+// Notes (Obsidian-inspired knowledge base)
+// ============================================================
+
+const notesState = {
+  cm: null,
+  list: [],
+  currentName: null,
+  originalContent: "",
+  dirty: false,
+  previewMode: false,
+};
+
+function ensureNotesEditor() {
+  if (notesState.cm) return notesState.cm;
+  const host = $("#notes-host");
+  $("#notes-empty").style.display = "none";
+  notesState.cm = CodeMirror(host, {
+    value: "",
+    mode: "markdown",
+    theme: "material-darker",
+    lineNumbers: false,
+    lineWrapping: true,
+    autoCloseBrackets: true,
+    extraKeys: {
+      "Ctrl-S": () => saveNote(),
+      "Cmd-S":  () => saveNote(),
+    },
+  });
+  notesState.cm.on("change", () => {
+    const cur = notesState.cm.getValue();
+    const dirty = cur !== notesState.originalContent;
+    if (dirty !== notesState.dirty) {
+      notesState.dirty = dirty;
+      $("#note-dirty").hidden = !dirty;
+      $("#note-save-btn").disabled = !dirty;
+    }
+  });
+  return notesState.cm;
+}
+
+async function refreshNotesList(searchQuery = "") {
+  try {
+    let items;
+    if (searchQuery && searchQuery.trim()) {
+      const r = await fetch(`/api/notes-search?q=${encodeURIComponent(searchQuery)}`);
+      const data = await r.json();
+      items = (data.results || []).map(it => ({
+        name: it.name, title: it.title,
+        excerpt: it.excerpt, tags: [], updated: null,
+      }));
+    } else {
+      const r = await fetch("/api/notes");
+      const data = await r.json();
+      items = data.notes || [];
+    }
+    notesState.list = items;
+    const ul = $("#notes-list");
+    if (!items.length) {
+      ul.innerHTML = '<li style="color: var(--fg-tertiary); cursor: default; font-size: 12px;">No notes yet. Click + new.</li>';
+      return;
+    }
+    ul.innerHTML = items.map(n => `
+      <li data-name="${escapeHtml(n.name)}" class="${notesState.currentName === n.name ? 'active' : ''}">
+        <div class="nl-title">${escapeHtml(n.title)}</div>
+        <div class="nl-meta">
+          ${(n.tags || []).slice(0, 3).map(t => `<span class="nl-tag">${escapeHtml(t)}</span>`).join("")}
+          ${n.updated ? `<span>${escapeHtml(n.updated.slice(0, 10))}</span>` : ""}
+        </div>
+        ${n.excerpt ? `<div class="nl-excerpt">${escapeHtml(n.excerpt)}</div>` : ""}
+      </li>
+    `).join("");
+    ul.querySelectorAll("li[data-name]").forEach(li => {
+      li.onclick = () => openNote(li.dataset.name);
+    });
+  } catch (e) {
+    $("#notes-list").innerHTML =
+      `<li style="color:var(--error)">load failed: ${escapeHtml(String(e))}</li>`;
+  }
+}
+
+async function openNote(name) {
+  if (notesState.dirty) {
+    if (!confirm("Discard unsaved changes?")) return;
+  }
+  try {
+    const r = await fetch(`/api/notes/${encodeURIComponent(name)}`);
+    if (!r.ok) { alert("Open failed: " + await r.text()); return; }
+    const note = await r.json();
+    const cm = ensureNotesEditor();
+    cm.setValue(note.content);
+    notesState.originalContent = note.content;
+    notesState.currentName = note.name;
+    notesState.dirty = false;
+    $("#note-title").value = note.title;
+    $("#note-tags").value = (note.tags || []).join(", ");
+    $("#note-meta").textContent = note.updated ? `updated ${note.updated}` : "";
+    $("#note-dirty").hidden = true;
+    $("#note-save-btn").disabled = true;
+    $("#note-delete-btn").disabled = false;
+    document.querySelectorAll(".notes-list li.active")
+      .forEach(x => x.classList.remove("active"));
+    document.querySelector(`.notes-list li[data-name="${name}"]`)?.classList.add("active");
+    await refreshBacklinks(note.name);
+    if (notesState.previewMode) renderNotePreview();
+  } catch (e) {
+    alert("Network error: " + e);
+  }
+}
+
+async function newNote() {
+  if (notesState.dirty) {
+    if (!confirm("Discard unsaved changes?")) return;
+  }
+  const slug = "note-" + Date.now();
+  const cm = ensureNotesEditor();
+  cm.setValue("# Untitled\n\nStart writing…\n\nLink other notes with [[note-name]].\n");
+  notesState.originalContent = "";
+  notesState.currentName = slug;
+  notesState.dirty = true;
+  $("#note-title").value = "Untitled";
+  $("#note-tags").value = "";
+  $("#note-meta").textContent = "(unsaved)";
+  $("#note-dirty").hidden = false;
+  $("#note-save-btn").disabled = false;
+  $("#note-delete-btn").disabled = false;
+  cm.focus();
+  if (notesState.previewMode) renderNotePreview();
+}
+
+async function saveNote() {
+  if (!notesState.currentName) return;
+  const content = notesState.cm.getValue();
+  const title = $("#note-title").value.trim() || "Untitled";
+  const tags = $("#note-tags").value.split(",").map(s => s.trim()).filter(Boolean);
+  try {
+    const r = await fetch(`/api/notes/${encodeURIComponent(notesState.currentName)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, tags, content }),
+    });
+    if (!r.ok) { alert("Save failed: " + await r.text()); return; }
+    const saved = await r.json();
+    notesState.originalContent = content;
+    notesState.dirty = false;
+    notesState.currentName = saved.name;
+    $("#note-meta").textContent = `updated ${saved.updated}`;
+    $("#note-dirty").hidden = true;
+    $("#note-save-btn").disabled = true;
+    setStatus("note saved", "ok");
+    setTimeout(() => setStatus("connected", "ok"), 1500);
+    await refreshNotesList($("#notes-search").value);
+    await refreshBacklinks(saved.name);
+  } catch (e) { alert("Network error: " + e); }
+}
+
+async function deleteNote() {
+  if (!notesState.currentName) return;
+  if (!confirm("Delete this note?")) return;
+  try {
+    const r = await fetch(`/api/notes/${encodeURIComponent(notesState.currentName)}`,
+                          { method: "DELETE" });
+    if (!r.ok) { alert("Delete failed"); return; }
+    notesState.currentName = null;
+    notesState.dirty = false;
+    if (notesState.cm) notesState.cm.setValue("");
+    $("#note-title").value = "";
+    $("#note-tags").value = "";
+    $("#note-meta").textContent = "";
+    $("#note-save-btn").disabled = true;
+    $("#note-delete-btn").disabled = true;
+    await refreshNotesList($("#notes-search").value);
+  } catch (e) { alert("Network error: " + e); }
+}
+
+async function refreshBacklinks(name) {
+  try {
+    const r = await fetch(`/api/notes/${encodeURIComponent(name)}/backlinks`);
+    if (!r.ok) {
+      $("#backlinks-pane").hidden = true;
+      return;
+    }
+    const data = await r.json();
+    const ul = $("#backlinks-list");
+    if (!data.backlinks.length) {
+      $("#backlinks-pane").hidden = true;
+      return;
+    }
+    $("#backlinks-pane").hidden = false;
+    ul.innerHTML = data.backlinks.map(b => `
+      <li data-name="${escapeHtml(b.name)}">
+        <div class="bl-title">${escapeHtml(b.title)}</div>
+        <div class="bl-excerpt">${escapeHtml(b.excerpt)}</div>
+      </li>
+    `).join("");
+    ul.querySelectorAll("li[data-name]").forEach(li => {
+      li.onclick = () => openNote(li.dataset.name);
+    });
+  } catch { /* ignore */ }
+}
+
+function renderNotePreview() {
+  if (!notesState.cm) return;
+  const md = notesState.cm.getValue();
+  // Substitute [[wikilinks]] before passing to marked
+  const withLinks = md.replace(
+    /\[\[([^\]\|]+)(?:\|([^\]]+))?\]\]/g,
+    (m, name, alt) => {
+      const slug = name.toLowerCase().replace(/[^a-z0-9._\- ]+/g, "-")
+                         .replace(/\s+/g, "-").trim().slice(0, 120);
+      return `[${alt || name}](javascript:cgOpenNote("${slug}"))`;
+    }
+  );
+  const host = notesState.cm.getWrapperElement();
+  let preview = host.parentElement.querySelector(".markdown-preview");
+  if (!preview) {
+    preview = document.createElement("div");
+    preview.className = "markdown-preview";
+    host.parentElement.appendChild(preview);
+  }
+  host.style.display = "none";
+  preview.style.display = "block";
+  preview.innerHTML = (window.marked ? window.marked.parse(withLinks) : escapeHtml(withLinks));
+  preview.querySelectorAll('a[href^="javascript:cgOpenNote"]').forEach(a => {
+    const m = a.href.match(/cgOpenNote\("([^"]+)"\)/);
+    if (m) {
+      a.classList.add("wikilink");
+      a.href = "#";
+      a.onclick = (ev) => { ev.preventDefault(); openNote(m[1]); };
+    }
+  });
+}
+
+function exitPreview() {
+  if (!notesState.cm) return;
+  const host = notesState.cm.getWrapperElement();
+  const preview = host.parentElement.querySelector(".markdown-preview");
+  if (preview) preview.style.display = "none";
+  host.style.display = "";
+  notesState.cm.refresh();
+}
+
+function toggleNotePreview() {
+  notesState.previewMode = !notesState.previewMode;
+  const btn = $("#note-preview-btn");
+  if (notesState.previewMode) {
+    btn.textContent = "✏ edit";
+    btn.dataset.mode = "preview";
+    renderNotePreview();
+  } else {
+    btn.textContent = "👁 preview";
+    btn.dataset.mode = "edit";
+    exitPreview();
+  }
+}
+
+window.cgOpenNote = openNote;  // for inline anchors in preview
+
+// ============================================================
+// Settings (localStorage + send via headers)
+// ============================================================
+
+const SETTINGS_KEY = "cg.settings";
+
+function loadSettings() {
+  try {
+    return JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}");
+  } catch { return {}; }
+}
+function persistSettings(s) {
+  localStorage.setItem(SETTINGS_KEY, JSON.stringify(s));
+}
+function paintSettingsForm() {
+  const s = loadSettings();
+  $("#setting-openrouter").value = s.openrouter || "";
+  $("#setting-zhipu").value = s.zhipu || "";
+  $("#setting-anthropic").value = s.anthropic || "";
+  $("#setting-gemini").value = s.gemini || "";
+  $("#setting-project-root").value = s.projectRoot || "";
+  if ($("#setting-default-view")) $("#setting-default-view").value = s.defaultView || "raw";
+
+  const items = [
+    ["OpenRouter", s.openrouter],
+    ["Z.ai / Zhipu", s.zhipu],
+    ["Anthropic API", s.anthropic],
+    ["Gemini API", s.gemini],
+    ["Project root", s.projectRoot],
+  ];
+  $("#settings-active").innerHTML = items.map(([name, v]) =>
+    `<li class="${v ? 'ok' : 'off'}">${v ? '✓' : '○'} ${escapeHtml(name)}: ${v ? '<em>(set)</em>' : '<em>not set</em>'}</li>`
+  ).join("");
+}
+function saveSettingsForm() {
+  const s = {
+    openrouter: $("#setting-openrouter").value.trim(),
+    zhipu: $("#setting-zhipu").value.trim(),
+    anthropic: $("#setting-anthropic").value.trim(),
+    gemini: $("#setting-gemini").value.trim(),
+    projectRoot: $("#setting-project-root").value.trim(),
+    defaultView: $("#setting-default-view").value,
+  };
+  persistSettings(s);
+  paintSettingsForm();
+  setStatus("settings saved", "ok");
+  setTimeout(() => setStatus("connected", "ok"), 1500);
+  // Apply default view immediately
+  if (s.defaultView) {
+    state.viewMode = s.defaultView;
+    document.querySelectorAll("#view-toggle .seg")
+      .forEach(b => b.classList.toggle("active", b.dataset.view === s.defaultView));
+  }
+}
+function clearSettings() {
+  if (!confirm("Clear all settings from this browser?")) return;
+  localStorage.removeItem(SETTINGS_KEY);
+  paintSettingsForm();
+  setStatus("settings cleared", "ok");
+  setTimeout(() => setStatus("connected", "ok"), 1500);
+}
+
 function switchTab(tab) {
   document.querySelectorAll("nav.tabs .tab").forEach(b =>
     b.classList.toggle("active", b.dataset.tab === tab));
@@ -875,9 +1195,17 @@ function switchTab(tab) {
       loadFileTree("");
     }
     if (editorState.cm) {
-      // CodeMirror needs a refresh after being shown
       setTimeout(() => editorState.cm.refresh(), 50);
     }
+  }
+  if (tab === "notes") {
+    refreshNotesList();
+    if (notesState.cm) {
+      setTimeout(() => notesState.cm.refresh(), 50);
+    }
+  }
+  if (tab === "settings") {
+    paintSettingsForm();
   }
 }
 
@@ -898,6 +1226,36 @@ document.addEventListener("DOMContentLoaded", () => {
   if ($("#editor-revert-btn")) {
     $("#editor-revert-btn").onclick = editorRevert;
   }
+  // Notes handlers
+  if ($("#note-new-btn")) $("#note-new-btn").onclick = newNote;
+  if ($("#note-refresh-btn")) $("#note-refresh-btn").onclick = () => refreshNotesList($("#notes-search").value);
+  if ($("#note-save-btn")) $("#note-save-btn").onclick = saveNote;
+  if ($("#note-delete-btn")) $("#note-delete-btn").onclick = deleteNote;
+  if ($("#note-preview-btn")) $("#note-preview-btn").onclick = toggleNotePreview;
+  if ($("#note-title")) $("#note-title").addEventListener("input", () => {
+    if (notesState.currentName && !notesState.dirty) {
+      notesState.dirty = true;
+      $("#note-dirty").hidden = false;
+      $("#note-save-btn").disabled = false;
+    }
+  });
+  if ($("#note-tags")) $("#note-tags").addEventListener("input", () => {
+    if (notesState.currentName && !notesState.dirty) {
+      notesState.dirty = true;
+      $("#note-dirty").hidden = false;
+      $("#note-save-btn").disabled = false;
+    }
+  });
+  if ($("#notes-search")) {
+    let searchT = null;
+    $("#notes-search").addEventListener("input", () => {
+      clearTimeout(searchT);
+      searchT = setTimeout(() => refreshNotesList($("#notes-search").value), 200);
+    });
+  }
+  // Settings handlers
+  if ($("#settings-save-btn")) $("#settings-save-btn").onclick = saveSettingsForm;
+  if ($("#settings-clear-btn")) $("#settings-clear-btn").onclick = clearSettings;
   $("#clear-btn").onclick = () => {
     $("#agent-rows").innerHTML = "";
     $("#run-title").value = "";
@@ -934,13 +1292,17 @@ document.addEventListener("DOMContentLoaded", () => {
       startRun();
     }
     // Ctrl/Cmd + S = context-aware save
-    //   - if editor tab is open + a file is dirty: save the file
-    //   - otherwise: save the current workflow to localStorage
+    //   - editor tab + dirty file → save file
+    //   - notes tab + dirty note → save note
+    //   - otherwise → save current workflow to localStorage
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
       const editorActive = $("#tab-editor")?.classList.contains("active");
+      const notesActive = $("#tab-notes")?.classList.contains("active");
       if (editorActive && editorState.dirty) {
         editorSave();
+      } else if (notesActive && notesState.dirty) {
+        saveNote();
       } else {
         saveCurrentWorkflow();
       }

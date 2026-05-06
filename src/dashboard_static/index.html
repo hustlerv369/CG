@@ -26,6 +26,8 @@
     <nav class="tabs">
       <button class="tab active" data-tab="orchestrator">Orchestrator</button>
       <button class="tab" data-tab="editor">Editor</button>
+      <button class="tab" data-tab="notes">Notes</button>
+      <button class="tab" data-tab="settings">Settings</button>
     </nav>
     <div class="status" id="server-status">connecting…</div>
   </header>
@@ -129,6 +131,95 @@
           rooted at <code id="editor-root-display">D:\CG</code>.
         </div>
       </div>
+    </section>
+  </main>
+
+  <main id="tab-notes" class="tab-pane notes-pane">
+    <aside class="notes-sidebar">
+      <div class="notes-toolbar">
+        <input type="search" id="notes-search" placeholder="Search notes…" />
+      </div>
+      <div class="notes-actions">
+        <button class="primary" id="note-new-btn">+ new note</button>
+        <button class="ghost" id="note-refresh-btn" title="Refresh">↻</button>
+      </div>
+      <ul class="notes-list" id="notes-list"></ul>
+    </aside>
+    <section class="notes-area">
+      <div class="notes-area-toolbar">
+        <input type="text" id="note-title" placeholder="Untitled note" />
+        <input type="text" id="note-tags" placeholder="tags (comma-separated)" />
+        <span id="note-meta" class="note-meta"></span>
+        <div class="notes-actions-inline">
+          <span id="note-dirty" class="dirty-pill" hidden>● unsaved</span>
+          <button class="ghost" id="note-preview-btn" data-mode="edit" title="Toggle preview">👁 preview</button>
+          <button class="ghost" id="note-save-btn" disabled title="Save (Ctrl+S)">💾 save</button>
+          <button class="ghost" id="note-delete-btn" disabled title="Delete">🗑</button>
+        </div>
+      </div>
+      <div class="notes-host" id="notes-host">
+        <div class="empty-state" id="notes-empty">
+          ← pick a note from the sidebar, or click <strong>+ new note</strong>.<br />
+          Notes are plain Markdown saved to <code>D:\CG\notes\</code>.<br />
+          Use <code>[[other-note]]</code> for wikilinks, click them to navigate.
+        </div>
+      </div>
+      <aside class="backlinks-pane" id="backlinks-pane" hidden>
+        <h3>Backlinks</h3>
+        <ul id="backlinks-list"></ul>
+      </aside>
+    </section>
+  </main>
+
+  <main id="tab-settings" class="tab-pane settings-pane">
+    <section class="settings-area">
+      <h2>Settings</h2>
+      <p class="settings-hint">
+        Settings live only in this browser (localStorage). API keys here
+        are sent to the dashboard backend on each call <em>via headers</em>;
+        they're never written to disk by the browser.
+      </p>
+
+      <h3>API keys (opt-in providers)</h3>
+      <p class="settings-hint">
+        Set in your shell environment (recommended) <em>or</em> paste here
+        for browser-only override. Restart the dashboard server to pick up
+        env-var changes; browser-stored keys take effect immediately.
+      </p>
+
+      <div class="settings-grid">
+        <label>OpenRouter (GLM, DeepSeek, Qwen) <input type="password" id="setting-openrouter" placeholder="sk-or-..." /></label>
+        <label>Z.ai / Zhipu (GLM direct) <input type="password" id="setting-zhipu" placeholder="..." /></label>
+        <label>Anthropic API <input type="password" id="setting-anthropic" placeholder="sk-ant-..." /></label>
+        <label>Google AI (Gemini) <input type="password" id="setting-gemini" placeholder="..." /></label>
+      </div>
+
+      <h3>Project root override</h3>
+      <p class="settings-hint">
+        Lets the file tree + <code>{{file:}}</code> placeholder pull from
+        a sibling project. Empty = use D:\CG.
+      </p>
+      <div class="settings-row">
+        <input type="text" id="setting-project-root" placeholder="D:\CLAUDE\TEAMIDAS" />
+      </div>
+
+      <h3>Defaults</h3>
+      <div class="settings-row">
+        <label>Default view mode
+          <select id="setting-default-view">
+            <option value="raw">raw</option>
+            <option value="md">markdown</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button class="primary" id="settings-save-btn">Save settings</button>
+        <button class="ghost" id="settings-clear-btn">Clear all</button>
+      </div>
+
+      <h3>Currently active</h3>
+      <ul id="settings-active" class="settings-active"></ul>
     </section>
   </main>
 

@@ -384,6 +384,136 @@ def test_placeholder_multiple_in_one_prompt(tmp_path, monkeypatch):
     assert "AAA" in out and "BBB" in out
 
 
+# ---------------------------------------------------------------------------
+# Notes / knowledge base
+# ---------------------------------------------------------------------------
+
+
+def test_note_save_and_load(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    r = client.put("/api/notes/hello", json={
+        "title": "Hello",
+        "tags": ["a", "b"],
+        "content": "# Body\n\nLink: [[other]]",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "hello"
+    assert body["title"] == "Hello"
+    assert body["tags"] == ["a", "b"]
+    assert "Body" in body["content"]
+
+    r = client.get("/api/notes/hello")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "Hello"
+    assert body["created"]
+    assert body["updated"]
+
+
+def test_note_list_returns_recent_first(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    client.put("/api/notes/first", json={"title": "First", "content": "1"})
+    import time
+    time.sleep(0.05)
+    client.put("/api/notes/second", json={"title": "Second", "content": "2"})
+    r = client.get("/api/notes")
+    names = [n["name"] for n in r.json()["notes"]]
+    assert "first" in names and "second" in names
+
+
+def test_note_delete(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    client.put("/api/notes/doomed", json={"title": "x", "content": "y"})
+    r = client.delete("/api/notes/doomed")
+    assert r.status_code == 200
+    r = client.get("/api/notes/doomed")
+    assert r.status_code == 404
+
+
+def test_note_backlinks_finds_wikilinks(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    client.put("/api/notes/source-1", json={
+        "title": "Source 1",
+        "content": "Mentions [[target]] in passing.",
+    })
+    client.put("/api/notes/source-2", json={
+        "title": "Source 2",
+        "content": "Also mentions [[target]] over here.",
+    })
+    client.put("/api/notes/target", json={
+        "title": "Target",
+        "content": "I am the target.",
+    })
+    r = client.get("/api/notes/target/backlinks")
+    assert r.status_code == 200
+    backlinks = r.json()["backlinks"]
+    names = sorted(b["name"] for b in backlinks)
+    assert names == ["source-1", "source-2"]
+    # Each has an excerpt
+    assert all("target" in b["excerpt"] for b in backlinks)
+
+
+def test_note_search_substring(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    client.put("/api/notes/a", json={"title": "Alpha", "content": "the quick brown fox"})
+    client.put("/api/notes/b", json={"title": "Beta", "content": "lazy dog"})
+    r = client.get("/api/notes-search?q=brown")
+    assert r.status_code == 200
+    hits = [h["name"] for h in r.json()["results"]]
+    assert "a" in hits and "b" not in hits
+
+
+def test_note_save_round_trips_frontmatter(tmp_path, monkeypatch):
+    """Saving + loading preserves title, tags, created."""
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    fm = {"title": "Name", "tags": ["x"], "created": "2026-01-01T10:00:00",
+          "updated": "2026-01-02T10:00:00"}
+    body = "Content here"
+    rendered = dash._render_note(fm, body)
+    p = tmp_path / "name.md"
+    p.write_text(rendered, encoding="utf-8")
+    parsed = dash._parse_note(p)
+    assert parsed["title"] == "Name"
+    assert parsed["tags"] == ["x"]
+    assert parsed["created"] == "2026-01-01T10:00:00"
+    assert parsed["content"].strip() == "Content here"
+
+
+def test_note_name_sanitization(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    r = client.put("/api/notes/A Note With Spaces & symbols!", json={
+        "title": "Test", "content": "z",
+    })
+    assert r.status_code == 200
+    files = list(tmp_path.glob("*.md"))
+    assert len(files) == 1
+    assert " " not in files[0].name and "!" not in files[0].name
+
+
+def test_note_from_run(client, tmp_path, monkeypatch):
+    """POST /api/notes/from-run should turn a run into a note."""
+    monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
+    # Create a run
+    r = client.post("/api/runs", json={
+        "title": "saved as note",
+        "spec": [{"agent": "claude", "label": "x", "prompt": "y"}],
+    })
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+    r = client.post("/api/notes/from-run", json={"run_id": run_id})
+    assert r.status_code == 200
+    note = r.json()
+    assert "Run:" in note["title"]
+    assert "saved as note" in note["title"]
+    assert "run" in note["tags"]
+
+
 def test_files_tree_lists_root(client, tmp_path, monkeypatch):
     monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
     (tmp_path / "a.txt").write_text("A", encoding="utf-8")
