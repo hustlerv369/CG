@@ -309,6 +309,9 @@ AGENT_KINDS.update(_build_http_models())
 
 CUSTOM_AGENTS_PATH = ROOT / "custom_agents.json"
 SCHEDULES_PATH = ROOT / "schedules.json"
+TUNNEL_DIR = ROOT / "tunnel"
+TUNNEL_DIR.mkdir(parents=True, exist_ok=True)
+NOTIFICATIONS_PATH = ROOT / "notifications.json"
 
 
 def _load_custom_agents() -> dict[str, dict[str, Any]]:
@@ -347,6 +350,190 @@ def _save_custom_agents(items: list[dict[str, Any]]) -> None:
 
 # Apply custom agents on startup
 AGENT_KINDS.update(_load_custom_agents())
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare Tunnel — auto-download + spawn (phone dispatch enabler)
+# ---------------------------------------------------------------------------
+
+
+_tunnel_state: dict[str, Any] = {
+    "running": False,
+    "url": None,
+    "pid": None,
+    "started_at": None,
+    "port": int(os.environ.get("CG_DASHBOARD_PORT", "8765")),
+    "_proc": None,
+    "binary": None,
+}
+
+
+def _ensure_cloudflared() -> str | None:
+    r"""Find or auto-download a cloudflared binary. Returns absolute path
+    or None on failure.
+
+    Strategy:
+      1. Check PATH (shutil.which)
+      2. Check D:\CG\tunnel\cloudflared.exe (cached download)
+      3. Try to download from GitHub releases (Windows amd64 default)
+    """
+    import shutil
+    from urllib.request import urlretrieve
+
+    cached = TUNNEL_DIR / ("cloudflared.exe" if sys.platform.startswith("win") else "cloudflared")
+    if cached.exists() and cached.stat().st_size > 0:
+        return str(cached)
+
+    direct = shutil.which("cloudflared") or shutil.which("cloudflared.exe")
+    if direct:
+        return direct
+
+    # Auto-download (Windows amd64 — most common)
+    if sys.platform.startswith("win"):
+        url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe"
+    elif sys.platform == "darwin":
+        url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-darwin-amd64.tgz"
+        return None  # tgz needs extraction; user can install via brew
+    else:
+        url = "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
+
+    try:
+        urlretrieve(url, cached)
+        if not sys.platform.startswith("win"):
+            cached.chmod(0o755)
+        return str(cached)
+    except Exception:
+        return None
+
+
+def _spawn_tunnel(binary_path: str, port: int) -> tuple[str | None, Any]:
+    """Spawn cloudflared, parse output for the trycloudflare URL,
+    return (url, proc)."""
+    log_path = TUNNEL_DIR / "cloudflared.log"
+
+    proc = subprocess.Popen(
+        [binary_path, "tunnel", "--url", f"http://127.0.0.1:{port}",
+         "--no-autoupdate"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        creationflags=(0x08000000 if sys.platform.startswith("win") else 0),
+    )
+
+    url_holder: dict[str, str] = {}
+
+    def _scan_output() -> None:
+        with open(log_path, "w", encoding="utf-8") as logfp:
+            try:
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    logfp.write(line)
+                    logfp.flush()
+                    # Look for: "https://<random>.trycloudflare.com"
+                    if "trycloudflare.com" in line and "https://" in line:
+                        m = _re.search(r"https://[a-zA-Z0-9.-]+\.trycloudflare\.com", line)
+                        if m and "url" not in url_holder:
+                            url_holder["url"] = m.group(0)
+            except Exception:
+                pass
+
+    threading.Thread(target=_scan_output, daemon=True).start()
+
+    # Wait up to 20 seconds for the URL to appear
+    for _ in range(40):
+        if "url" in url_holder:
+            break
+        time.sleep(0.5)
+
+    return url_holder.get("url"), proc
+
+
+# ---------------------------------------------------------------------------
+# Run-finished webhook notifications
+# ---------------------------------------------------------------------------
+
+
+def _load_notifications() -> dict[str, Any]:
+    if not NOTIFICATIONS_PATH.exists():
+        return {"webhook_url": "", "kind": "ntfy",
+                "on_complete": True, "on_failed": True}
+    try:
+        return json.loads(NOTIFICATIONS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {"webhook_url": "", "kind": "ntfy",
+                "on_complete": True, "on_failed": True}
+
+
+def _send_notification(run: "RunState") -> None:
+    cfg = _load_notifications()
+    url = cfg.get("webhook_url", "").strip()
+    if not url:
+        return
+    failed_count = sum(1 for a in run.agents.values() if a.status == "failed")
+    if failed_count > 0 and not cfg.get("on_failed", True):
+        return
+    if failed_count == 0 and not cfg.get("on_complete", True):
+        return
+
+    title = f"CG run: {run.title}"
+    body_parts = [f"Run {run.id} finished",
+                    f"{len(run.agents)} agents — {failed_count} failed"]
+    for a in run.agents.values():
+        body_parts.append(
+            f"  • {a.label} ({a.agent}): {a.status} (exit={a.exit_code})"
+        )
+    body = "\n".join(body_parts)
+    kind = cfg.get("kind", "ntfy")
+
+    import urllib.request
+
+    try:
+        if kind == "ntfy":
+            # ntfy.sh expects PUT with title in header + plain body
+            req = urllib.request.Request(
+                url,
+                data=body.encode("utf-8"),
+                headers={"Title": title,
+                         "Tags": "robot,fire" if failed_count else "robot,white_check_mark"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10).read()
+        elif kind == "discord":
+            # Discord webhook expects {content: "..."}
+            payload = {"content": f"**{title}**\n```\n{body}\n```"}
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10).read()
+        elif kind == "slack":
+            # Slack incoming webhook expects {text: "..."}
+            payload = {"text": f"*{title}*\n```{body}```"}
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10).read()
+        else:  # generic
+            payload = {"title": title, "body": body, "run_id": run.id,
+                       "failed": failed_count > 0}
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            urllib.request.urlopen(req, timeout=10).read()
+    except Exception:
+        # Notifications are fire-and-forget — never crash the run
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -1056,11 +1243,17 @@ class RunManager:
     def _watch_run(self, run: RunState) -> None:
         while True:
             time.sleep(0.5)
-            if all(a.status in {"done", "failed"} for a in run.agents.values()):
+            if all(a.status in {"done", "failed", "cancelled"}
+                    for a in run.agents.values()):
                 break
         run.finished = True
         self._persist_index()
         self._emit_run(run.id, {"event": "run-finished", "data": {"id": run.id}})
+        # Fire run-finished webhook notifications (Discord/Slack/ntfy)
+        try:
+            _send_notification(run)
+        except Exception:
+            pass
 
     # SSE consumer registration
     def subscribe(self, run_id: str, label: str) -> asyncio.Queue:
@@ -2512,6 +2705,132 @@ def create_app() -> FastAPI:
             encoding="utf-8",
         )
         return {"saved": len(items)}
+
+    # ---- Cloudflare Tunnel (phone dispatch enabler) ----------------------
+
+    @app.get("/api/tunnel/status")
+    async def tunnel_status() -> Any:
+        # Hide internal _proc reference from public API
+        return {k: v for k, v in _tunnel_state.items() if not k.startswith("_")}
+
+    @app.post("/api/tunnel/start")
+    async def tunnel_start() -> Any:
+        if _tunnel_state.get("running"):
+            return _tunnel_state.copy()
+        path = _ensure_cloudflared()
+        if not path:
+            raise HTTPException(500,
+                "cloudflared not found and auto-download failed. "
+                "Install manually: https://github.com/cloudflare/cloudflared/releases")
+        port = _tunnel_state.get("port", 8765)
+        url, proc = _spawn_tunnel(path, port)
+        _tunnel_state.update({
+            "running": True,
+            "url": url,
+            "started_at": _iso_now(),
+            "pid": proc.pid,
+            "_proc": proc,
+            "binary": path,
+        })
+        return {k: v for k, v in _tunnel_state.items() if not k.startswith("_")}
+
+    @app.post("/api/tunnel/stop")
+    async def tunnel_stop() -> Any:
+        proc = _tunnel_state.get("_proc")
+        if proc is not None:
+            try:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+            except Exception:
+                pass
+        _tunnel_state.update({
+            "running": False, "url": None, "_proc": None,
+            "started_at": None, "pid": None,
+        })
+        return _tunnel_state.copy()
+
+    # ---- Phone dispatch (mobile-friendly entry point) --------------------
+
+    @app.post("/api/phone-dispatch")
+    async def phone_dispatch(body: dict[str, Any], request: Request) -> Any:
+        """Mobile-friendly entry point. Body: {message: str, agent?: str,
+        workflow?: str}. If workflow is specified, fires that saved
+        workflow with body.message overlayed as ${MESSAGE} variable.
+        Otherwise dispatches a single agent (default: gemini-flash) with
+        the message as the prompt.
+        """
+        message = body.get("message") or body.get("prompt") or body.get("text")
+        if not message:
+            raise HTTPException(400, "body.message is required")
+
+        # Per-run secrets from headers (so phone can pass GEMINI_API_KEY)
+        secrets: dict[str, str] = {}
+        for header, env_name in [
+            ("x-cg-openrouter-key", "OPENROUTER_API_KEY"),
+            ("x-cg-zhipu-key", "ZHIPU_API_KEY"),
+            ("x-cg-anthropic-key", "ANTHROPIC_API_KEY"),
+            ("x-cg-gemini-key", "GEMINI_API_KEY"),
+        ]:
+            v = request.headers.get(header)
+            if v and v.strip():
+                secrets[env_name] = v.strip()
+
+        workflow = body.get("workflow")
+        if workflow:
+            path = _workflow_path(workflow)
+            if not path.exists():
+                raise HTTPException(404, f"workflow {workflow!r} not found")
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(500, f"workflow JSON broken: {exc}")
+            spec = data.get("spec") or []
+            variables = dict(data.get("variables", {}) or {})
+            variables["MESSAGE"] = message
+            variables.update(body.get("variables", {}) or {})
+            run = manager.start_run(
+                f"phone: {workflow}", spec, secrets=secrets, variables=variables)
+            return {"id": run.id, "title": run.title, "workflow": workflow,
+                    "tunnel": _tunnel_state.get("url")}
+
+        agent = body.get("agent") or "gemini-flash"
+        run = manager.start_run(
+            f"phone: {message[:60]}",
+            [{"agent": agent, "label": "reply", "prompt": message}],
+            secrets=secrets,
+        )
+        return {"id": run.id, "title": run.title, "agent": agent,
+                "tunnel": _tunnel_state.get("url")}
+
+    # ---- Run-finished notifications --------------------------------------
+
+    @app.get("/api/notifications")
+    async def get_notifications() -> Any:
+        return _load_notifications()
+
+    @app.put("/api/notifications")
+    async def save_notifications_ep(body: dict[str, Any]) -> Any:
+        config = body.get("config") or {}
+        webhook_url = config.get("webhook_url", "").strip()
+        webhook_kind = config.get("kind", "ntfy")
+        if webhook_kind not in {"ntfy", "discord", "slack", "generic"}:
+            raise HTTPException(400, f"unknown kind {webhook_kind!r}")
+        on_complete = bool(config.get("on_complete", True))
+        on_failed = bool(config.get("on_failed", True))
+        out = {
+            "webhook_url": webhook_url,
+            "kind": webhook_kind,
+            "on_complete": on_complete,
+            "on_failed": on_failed,
+        }
+        NOTIFICATIONS_PATH.write_text(
+            json.dumps(out, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return out
 
     @app.post("/api/triggers/{workflow_name}")
     async def trigger_workflow(workflow_name: str, body: dict[str, Any] | None = None) -> Any:

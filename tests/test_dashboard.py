@@ -789,6 +789,109 @@ def test_webhook_trigger_404_for_missing(client, tmp_path, monkeypatch):
     assert r.status_code == 404
 
 
+def test_phone_dispatch_with_agent(client, monkeypatch):
+    """POST /api/phone-dispatch with body.message + body.agent should
+    start a run with that single agent."""
+    captured: list = []
+    real_start = dash.RunManager.start_run
+
+    def spy(self, title, spec, secrets=None, variables=None):
+        captured.append({"title": title, "spec": spec, "vars": variables})
+        return real_start(self, title, spec, secrets=secrets, variables=variables)
+
+    monkeypatch.setattr(dash.RunManager, "start_run", spy)
+    r = client.post("/api/phone-dispatch", json={
+        "message": "What time is it?",
+        "agent": "gemini-flash",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["id"]
+    assert "phone:" in body["title"]
+    assert captured[-1]["spec"][0]["agent"] == "gemini-flash"
+    assert captured[-1]["spec"][0]["prompt"] == "What time is it?"
+
+
+def test_phone_dispatch_with_workflow(client, tmp_path, monkeypatch):
+    """body.workflow should fire that saved workflow with body.message
+    overlaid as ${MESSAGE} variable."""
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    client.put("/api/workflows/quick-reply", json={
+        "title": "Quick reply",
+        "spec": [{"agent": "claude", "label": "x", "prompt": "Reply: ${MESSAGE}"}],
+    })
+    r = client.post("/api/phone-dispatch", json={
+        "message": "hello there",
+        "workflow": "quick-reply",
+    })
+    assert r.status_code == 200
+    body = r.json()
+    assert body["workflow"] == "quick-reply"
+
+
+def test_phone_dispatch_rejects_missing_message(client):
+    r = client.post("/api/phone-dispatch", json={})
+    assert r.status_code == 400
+
+
+def test_notifications_default_config(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTIFICATIONS_PATH", tmp_path / "notifications.json")
+    r = client.get("/api/notifications")
+    cfg = r.json()
+    assert cfg["webhook_url"] == ""
+    assert cfg["kind"] == "ntfy"
+    assert cfg["on_complete"] is True
+
+
+def test_notifications_save_and_reload(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTIFICATIONS_PATH", tmp_path / "notifications.json")
+    r = client.put("/api/notifications", json={"config": {
+        "webhook_url": "https://ntfy.sh/cg-test",
+        "kind": "ntfy",
+        "on_complete": True,
+        "on_failed": True,
+    }})
+    assert r.status_code == 200
+    r = client.get("/api/notifications")
+    cfg = r.json()
+    assert cfg["webhook_url"] == "https://ntfy.sh/cg-test"
+
+
+def test_notifications_rejects_unknown_kind(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "NOTIFICATIONS_PATH", tmp_path / "n.json")
+    r = client.put("/api/notifications", json={"config": {
+        "kind": "facebook-messenger",
+    }})
+    assert r.status_code == 400
+
+
+def test_tunnel_status_when_stopped(client):
+    r = client.get("/api/tunnel/status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["running"] is False
+    # Internal _proc must not leak
+    assert "_proc" not in body
+
+
+def test_send_notification_short_circuits_on_empty_url(monkeypatch, tmp_path):
+    """If no webhook_url configured, _send_notification returns silently
+    without making any HTTP call."""
+    monkeypatch.setattr(dash, "NOTIFICATIONS_PATH", tmp_path / "n.json")
+    called = []
+    import urllib.request
+    real = urllib.request.urlopen
+
+    def spy(*a, **kw):
+        called.append(a)
+        return real(*a, **kw)
+
+    monkeypatch.setattr(urllib.request, "urlopen", spy)
+    run = dash.RunState(id="t", title="t", created=0, spec=[])
+    dash._send_notification(run)
+    assert called == []
+
+
 def test_schedules_save_and_load(client, tmp_path, monkeypatch):
     monkeypatch.setattr(dash, "SCHEDULES_PATH", tmp_path / "schedules.json")
     body = {"schedules": [{

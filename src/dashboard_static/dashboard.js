@@ -1229,6 +1229,123 @@ function saveSettingsForm() {
       .forEach(b => b.classList.toggle("active", b.dataset.view === s.defaultView));
   }
 }
+// ============================================================
+// Cloudflare Tunnel + Notifications (Settings tab additions)
+// ============================================================
+
+async function refreshTunnelStatus() {
+  try {
+    const r = await fetch("/api/tunnel/status");
+    const data = await r.json();
+    const status = $("#tunnel-status");
+    if (!status) return;
+    if (data.running && data.url) {
+      status.textContent = "running";
+      status.className = "tunnel-status running";
+      $("#tunnel-url-row").hidden = false;
+      $("#tunnel-url-display").value = data.url;
+      $("#tunnel-shortcut").hidden = false;
+      $("#tunnel-shortcut-url").textContent = `${data.url}/api/phone-dispatch`;
+    } else {
+      status.textContent = "stopped";
+      status.className = "tunnel-status";
+      $("#tunnel-url-row").hidden = true;
+      $("#tunnel-shortcut").hidden = true;
+    }
+  } catch { /* ignore */ }
+}
+
+async function startTunnel() {
+  const status = $("#tunnel-status");
+  status.textContent = "starting…";
+  status.className = "tunnel-status starting";
+  try {
+    const r = await fetch("/api/tunnel/start", { method: "POST" });
+    if (!r.ok) {
+      const err = await r.text();
+      alert(`Failed to start tunnel: ${err}`);
+      status.textContent = "stopped";
+      status.className = "tunnel-status";
+      return;
+    }
+    await refreshTunnelStatus();
+  } catch (e) {
+    alert(`Network error: ${e}`);
+    status.textContent = "stopped";
+    status.className = "tunnel-status";
+  }
+}
+
+async function stopTunnel() {
+  await fetch("/api/tunnel/stop", { method: "POST" });
+  await refreshTunnelStatus();
+}
+
+async function copyTunnelUrl() {
+  const url = $("#tunnel-url-display").value;
+  if (!url) return;
+  await navigator.clipboard.writeText(url);
+  const btn = $("#tunnel-copy-btn");
+  btn.textContent = "✓"; setTimeout(() => btn.textContent = "📋", 1200);
+}
+
+async function loadNotificationsConfig() {
+  try {
+    const r = await fetch("/api/notifications");
+    const cfg = await r.json();
+    if ($("#notif-url"))         $("#notif-url").value = cfg.webhook_url || "";
+    if ($("#notif-kind"))        $("#notif-kind").value = cfg.kind || "ntfy";
+    if ($("#notif-on-complete")) $("#notif-on-complete").checked = !!cfg.on_complete;
+    if ($("#notif-on-failed"))   $("#notif-on-failed").checked = !!cfg.on_failed;
+  } catch { /* ignore */ }
+}
+
+async function saveNotificationsConfig() {
+  const config = {
+    webhook_url: $("#notif-url").value.trim(),
+    kind: $("#notif-kind").value,
+    on_complete: $("#notif-on-complete").checked,
+    on_failed: $("#notif-on-failed").checked,
+  };
+  const r = await fetch("/api/notifications", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config }),
+  });
+  if (r.ok) {
+    setStatus("notifications saved", "ok");
+    setTimeout(() => setStatus("connected", "ok"), 1500);
+  } else {
+    alert("Save failed: " + (await r.text()));
+  }
+}
+
+async function sendTestNotification() {
+  // Just trigger a fake "run-finished" by saving + start a dummy run
+  const url = $("#notif-url").value.trim();
+  if (!url) { alert("Set a webhook URL first."); return; }
+  await saveNotificationsConfig();
+  // Start a tiny mock run that finishes immediately so notification fires
+  const r = await fetch("/api/runs", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      title: "🔔 notification test",
+      spec: [{
+        agent: "browser",
+        label: "ping",
+        prompt: '{"steps": []}',
+      }],
+    }),
+  });
+  if (r.ok) {
+    setStatus("test ping fired — check your phone/Discord/Slack", "ok");
+    setTimeout(() => setStatus("connected", "ok"), 4000);
+  } else {
+    alert("Test failed: " + (await r.text()));
+  }
+}
+
 function clearSettings() {
   if (!confirm("Clear all settings from this browser?")) return;
   localStorage.removeItem(SETTINGS_KEY);
@@ -1258,6 +1375,8 @@ function switchTab(tab) {
   }
   if (tab === "settings") {
     paintSettingsForm();
+    refreshTunnelStatus();
+    loadNotificationsConfig();
   }
 }
 
@@ -1309,6 +1428,12 @@ document.addEventListener("DOMContentLoaded", () => {
   if ($("#settings-save-btn")) $("#settings-save-btn").onclick = saveSettingsForm;
   if ($("#settings-clear-btn")) $("#settings-clear-btn").onclick = clearSettings;
   if ($("#var-add-btn")) $("#var-add-btn").onclick = addVariable;
+  // Tunnel + notifications
+  if ($("#tunnel-start-btn")) $("#tunnel-start-btn").onclick = startTunnel;
+  if ($("#tunnel-stop-btn")) $("#tunnel-stop-btn").onclick = stopTunnel;
+  if ($("#tunnel-copy-btn")) $("#tunnel-copy-btn").onclick = copyTunnelUrl;
+  if ($("#notif-save-btn")) $("#notif-save-btn").onclick = saveNotificationsConfig;
+  if ($("#notif-test-btn")) $("#notif-test-btn").onclick = sendTestNotification;
   $("#clear-btn").onclick = () => {
     $("#agent-rows").innerHTML = "";
     $("#run-title").value = "";

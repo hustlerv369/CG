@@ -231,6 +231,62 @@
         <button class="ghost" id="settings-clear-btn">Clear all</button>
       </div>
 
+      <h3>📱 Phone Dispatch — Cloudflare Tunnel</h3>
+      <p class="settings-hint">
+        Spustí <code>cloudflared tunnel</code> co exposuje tvůj lokální
+        dashboard na <em>random.trycloudflare.com</em> URL — pro mobile
+        Shortcuts. Žádný Cloudflare účet potřeba; zdarma a anonymní.
+        Po stop URL přestane fungovat. <strong>Nikdy nesdílej URL veřejně</strong> —
+        kdokoli s URL může spouštět workflows + číst notes.
+      </p>
+      <div class="tunnel-row">
+        <button class="primary" id="tunnel-start-btn">▶ Start tunnel</button>
+        <button class="ghost" id="tunnel-stop-btn">⏹ Stop tunnel</button>
+        <span class="tunnel-status" id="tunnel-status">stopped</span>
+      </div>
+      <div class="tunnel-url-row" id="tunnel-url-row" hidden>
+        <label>Public URL:</label>
+        <input type="text" id="tunnel-url-display" readonly />
+        <button class="ghost" id="tunnel-copy-btn" title="Copy URL">📋</button>
+      </div>
+      <div class="tunnel-shortcut" id="tunnel-shortcut" hidden>
+        <p class="settings-hint">
+          ✨ Pro iOS Shortcuts: vytvoř shortcut "Get Contents of URL" s POST
+          na <code id="tunnel-shortcut-url"></code><br />
+          Headers: <code>Content-Type: application/json</code><br />
+          Body (JSON): <code>{"message": "Shortcut Input", "agent": "gemini-flash"}</code>
+        </p>
+      </div>
+
+      <h3>🔔 Run-finished notifications</h3>
+      <p class="settings-hint">
+        Když workflow doběhne, CG ti pingne. Podporované: <strong>ntfy.sh</strong>
+        (free push to phone), <strong>Discord</strong> webhook,
+        <strong>Slack</strong> webhook, nebo libovolná <strong>generic</strong>
+        URL co přijme JSON POST.
+      </p>
+      <div class="settings-row">
+        <label>Webhook URL
+          <input type="text" id="notif-url" placeholder="https://ntfy.sh/your-topic OR Discord webhook URL" />
+        </label>
+        <label>Service kind
+          <select id="notif-kind">
+            <option value="ntfy">ntfy.sh (push to phone — free)</option>
+            <option value="discord">Discord webhook</option>
+            <option value="slack">Slack incoming webhook</option>
+            <option value="generic">Generic JSON POST</option>
+          </select>
+        </label>
+        <label style="flex-direction: row; gap: 6px; align-items: center;">
+          <input type="checkbox" id="notif-on-complete" /> Notify on success
+        </label>
+        <label style="flex-direction: row; gap: 6px; align-items: center;">
+          <input type="checkbox" id="notif-on-failed" /> Notify on failure
+        </label>
+        <button class="ghost" id="notif-save-btn">Save notification config</button>
+        <button class="ghost" id="notif-test-btn">Send test ping</button>
+      </div>
+
       <h3>Currently active</h3>
       <ul id="settings-active" class="settings-active"></ul>
     </section>

@@ -620,6 +620,71 @@ main.settings-pane {
 }
 .vars-list .vrm:hover { color: var(--error); background: var(--error-soft); }
 
+.tunnel-row {
+  display: flex; gap: 8px; align-items: center;
+  margin: 8px 0;
+}
+.tunnel-status {
+  font: 11px var(--font-mono);
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-card);
+  color: var(--fg-tertiary);
+  border: 1px solid var(--border);
+}
+.tunnel-status.running {
+  background: var(--success-soft);
+  color: var(--success);
+  border-color: rgba(48, 209, 88, 0.3);
+}
+.tunnel-status.starting {
+  background: var(--warning-soft);
+  color: var(--warning);
+  border-color: rgba(255, 214, 10, 0.3);
+}
+.tunnel-status.starting::before {
+  content: '';
+  display: inline-block;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--warning);
+  margin-right: 5px;
+  vertical-align: middle;
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+.tunnel-url-row {
+  display: flex; gap: 8px; align-items: center;
+  margin: 8px 0 16px 0;
+}
+.tunnel-url-row label {
+  font: 11px var(--font-sans);
+  color: var(--fg-tertiary);
+}
+.tunnel-url-row input {
+  flex: 1;
+  background: var(--bg-input);
+  color: var(--accent);
+  border: 1px solid var(--accent-strong);
+  font: 11px var(--font-mono);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+}
+.tunnel-shortcut {
+  background: var(--accent-soft);
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  margin: 12px 0;
+}
+.tunnel-shortcut p { margin: 0; }
+.tunnel-shortcut code {
+  background: var(--bg-base);
+  padding: 1px 6px;
+  border-radius: 4px;
+  font: 11px var(--font-mono);
+}
+
 /* -------- left: designer panel -------- */
 .designer {
   border-right: 1px solid var(--border);
