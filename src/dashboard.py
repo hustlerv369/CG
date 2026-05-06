@@ -86,6 +86,77 @@ def _resolve_executable(name: str) -> str:
     return name
 
 
+def _parse_stream_json_line(family: str, line: str) -> list[str] | None:
+    """K3 — extract assistant text deltas from a stream-json output line.
+
+    Returns:
+      * ``None`` if the line is not parseable JSON (caller should treat
+        it as a raw log line).
+      * ``[]`` if the line parsed as a system / hook / init / result
+        event we want to filter out of the visible log.
+      * a non-empty list of strings — each is one text delta the UI
+        should append to the agent's stream.
+
+    Claude shape (`--output-format stream-json --verbose`)::
+
+        {"type":"system","subtype":"init", ...}
+        {"type":"assistant","message":{"content":[{"type":"text","text":"H"}]}}
+        {"type":"result", ...}
+
+    Gemini shape (`--output-format stream-json`)::
+
+        {"type":"init", ...}
+        {"type":"message","role":"assistant","content":"H","delta":true}
+        {"type":"result", ...}
+    """
+    line = line.strip()
+    if not line or line[0] not in "{[":
+        return None
+    try:
+        ev = json.loads(line)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(ev, dict):
+        return None
+
+    out: list[str] = []
+    ev_type = ev.get("type")
+
+    if family == "claude":
+        if ev_type == "assistant":
+            msg = ev.get("message") or {}
+            content = msg.get("content") or []
+            if isinstance(content, list):
+                for blk in content:
+                    if isinstance(blk, dict) and blk.get("type") == "text":
+                        text = blk.get("text") or ""
+                        if text:
+                            out.append(text)
+            elif isinstance(content, str) and content:
+                out.append(content)
+            return out
+        # Filter init / system / result / tool_use / hook events
+        return []
+
+    if family == "gemini":
+        if ev_type == "message" and ev.get("role") == "assistant":
+            content = ev.get("content")
+            if isinstance(content, str) and content:
+                out.append(content)
+            elif isinstance(content, list):
+                for blk in content:
+                    if isinstance(blk, dict):
+                        text = blk.get("text") or blk.get("content") or ""
+                        if text:
+                            out.append(text)
+                    elif isinstance(blk, str):
+                        out.append(blk)
+            return out
+        return []
+
+    return None
+
+
 # Each entry is one selectable model in the dashboard. The "family" lets
 # the UI group Claude vs Gemini in the dropdown.
 AGENT_KINDS: dict[str, dict[str, Any]] = {
@@ -641,6 +712,11 @@ class AgentRunState:
     log_lines: list[str] = field(default_factory=list)
     stderr_lines: list[str] = field(default_factory=list)
     process: Any = field(default=None, repr=False)  # subprocess.Popen
+    # K3: opt-in streaming. When True and the agent family supports it
+    # (claude / gemini), the underlying CLI is invoked with stream-json
+    # output and each assistant text delta is emitted as its own log
+    # event so the UI can show token-by-token output.
+    streaming: bool = False
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -654,6 +730,7 @@ class AgentRunState:
             "log_chars": sum(len(l) for l in self.log_lines),
             "log_tail": "\n".join(self.log_lines[-200:]),
             "stderr_chars": sum(len(l) for l in self.stderr_lines),
+            "streaming": self.streaming,
         }
 
 
@@ -764,6 +841,7 @@ class RunManager:
                 agent=item["agent"],
                 depends_on=list(item.get("depends_on", []) or []),
                 status="queued" if not item.get("depends_on") else "waiting",
+                streaming=bool(item.get("streaming", False)),
             )
         self.runs[run_id] = run
         self._persist_index()
@@ -909,6 +987,20 @@ class RunManager:
             return
 
         cmd = list(cfg["command"])
+        # K3: opt-in token-by-token streaming. We append the CLI's
+        # stream-json output flag and parse each line as JSON in the
+        # stdout loop below. Best-effort — if the CLI rejects the flag
+        # the subprocess will fail, which is the correct signal.
+        family = cfg.get("family", "")
+        use_streaming = bool(agent_state.streaming) and family in ("claude", "gemini")
+        if use_streaming:
+            if family == "claude":
+                # claude --print --output-format stream-json --verbose
+                cmd = cmd + ["--output-format", "stream-json", "--verbose"]
+            elif family == "gemini":
+                # gemini -p ...   →  gemini --output-format stream-json -p ...
+                cmd = cmd + ["--output-format", "stream-json"]
+
         if cfg["stdin_prompt"]:
             stdin_input: str | None = prompt
         else:
@@ -965,10 +1057,27 @@ class RunManager:
         assert proc.stdout is not None
         for line in proc.stdout:
             line_clean = line.rstrip("\n")
-            agent_state.log_lines.append(line_clean)
-            out_fp.write(line)
-            self._emit(run.id, label, {"event": "log", "data": {
-                "label": label, "line": line_clean}})
+            if use_streaming:
+                deltas = _parse_stream_json_line(family, line_clean)
+                if deltas is None:
+                    # Not JSON / unexpected — fall through to raw emit
+                    agent_state.log_lines.append(line_clean)
+                    out_fp.write(line)
+                    self._emit(run.id, label, {"event": "log", "data": {
+                        "label": label, "line": line_clean}})
+                else:
+                    # Filter ran — only assistant text deltas reach here
+                    for delta in deltas:
+                        agent_state.log_lines.append(delta)
+                        out_fp.write(delta + "\n")
+                        self._emit(run.id, label, {"event": "log", "data": {
+                            "label": label, "line": delta,
+                            "stream": True}})
+            else:
+                agent_state.log_lines.append(line_clean)
+                out_fp.write(line)
+                self._emit(run.id, label, {"event": "log", "data": {
+                    "label": label, "line": line_clean}})
 
         proc.wait()
         stderr_thread.join(timeout=2)

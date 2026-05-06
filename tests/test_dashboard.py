@@ -1502,3 +1502,112 @@ def test_dependency_substitution_combined_with_file_placeholder(client, tmp_path
     log = client.get(f"/api/runs/{run_id}/output/second").json()["log"]
     assert "CLAUDE-MOCK step-A" in log  # dep label substituted
     assert "EXTERNAL_CONTEXT" in log    # file placeholder expanded
+
+
+# ---------- K3: stream-json output parsing -------------------------------
+
+
+def test_parse_stream_json_claude_assistant_text():
+    """Claude stream-json: assistant events surface their text deltas."""
+    line = ('{"type":"assistant","message":{"content":'
+             '[{"type":"text","text":"HELLO"}]}}')
+    assert dash._parse_stream_json_line("claude", line) == ["HELLO"]
+
+
+def test_parse_stream_json_claude_filters_system_events():
+    """init / result / unknown events return [] (filtered, not raw)."""
+    for line in ('{"type":"system","subtype":"init","x":1}',
+                  '{"type":"result","status":"ok"}',
+                  '{"type":"tool_use","name":"Bash"}'):
+        assert dash._parse_stream_json_line("claude", line) == []
+
+
+def test_parse_stream_json_gemini_assistant_text():
+    line = ('{"type":"message","role":"assistant",'
+             '"content":"WORLD","delta":true}')
+    assert dash._parse_stream_json_line("gemini", line) == ["WORLD"]
+
+
+def test_parse_stream_json_non_json_returns_none():
+    """Non-JSON lines return None so the caller falls back to raw emit."""
+    assert dash._parse_stream_json_line("claude", "regular log line") is None
+    assert dash._parse_stream_json_line("claude", "") is None
+    assert dash._parse_stream_json_line("gemini", "[2025-01-01] log") is None
+
+
+def test_parse_stream_json_unknown_family_returns_none():
+    line = '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}'
+    assert dash._parse_stream_json_line("browser", line) is None
+    assert dash._parse_stream_json_line("", line) is None
+
+
+def test_streaming_flag_round_trips_through_run(client):
+    """Spec → AgentRunState → public payload preserves streaming flag."""
+    r = client.post("/api/runs", json={
+        "title": "stream-flag",
+        "spec": [
+            {"agent": "claude-sonnet-4-6", "label": "a",
+             "prompt": "hi", "streaming": True},
+            {"agent": "gemini-pro", "label": "b", "prompt": "hi"},
+        ],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    body = client.get(f"/api/runs/{run_id}").json()
+    by_label = {a["label"]: a for a in body["agents"]}
+    assert by_label["a"]["streaming"] is True
+    assert by_label["b"]["streaming"] is False
+
+
+def test_streaming_assistant_deltas_emitted_as_text(client, monkeypatch, tmp_path):
+    """When an agent streams, JSON lines are parsed and the assistant text
+    deltas land in the agent's log (system events are filtered)."""
+    # Mock script emits NDJSON with a system event + 2 assistant deltas +
+    # a result event — simulates the real claude CLI under
+    # `--output-format stream-json --verbose`.
+    script = tmp_path / "stream_mock.py"
+    script.write_text(
+        'import sys, json\n'
+        'lines = [\n'
+        '  {"type": "system", "subtype": "init"},\n'
+        '  {"type": "assistant", "message": {"content": ['
+        '{"type": "text", "text": "hello "}]}},\n'
+        '  {"type": "assistant", "message": {"content": ['
+        '{"type": "text", "text": "world"}]}},\n'
+        '  {"type": "result", "status": "ok"},\n'
+        ']\n'
+        'for ev in lines:\n'
+        '    print(json.dumps(ev), flush=True)\n',
+        encoding="utf-8",
+    )
+    streaming_mock = {
+        "label": "Claude (stream mock)",
+        "family": "claude",
+        "summary": "stream mock",
+        "command": [sys.executable, str(script)],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "claude-sonnet-4-6", streaming_mock)
+
+    r = client.post("/api/runs", json={
+        "title": "stream-out",
+        "spec": [{"agent": "claude-sonnet-4-6", "label": "c",
+                   "prompt": "x", "streaming": True}],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+
+    import time as _time
+    for _ in range(60):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        _time.sleep(0.1)
+
+    log = client.get(f"/api/runs/{run_id}/output/c").json()["log"]
+    assert "hello " in log
+    assert "world" in log
+    # System & result events filtered
+    assert '"type":"system"' not in log
+    assert '"type":"result"' not in log

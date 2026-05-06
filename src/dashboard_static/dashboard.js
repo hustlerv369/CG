@@ -331,6 +331,9 @@ function addAgentRow(spec = {}) {
         ${buildAgentSelectOptions()}
       </select>
       <input type="text" class="label" placeholder="label (e.g. design)" />
+      <label class="streaming-toggle" title="Stream token-by-token (claude/gemini stream-json)">
+        <input type="checkbox" class="streaming" /> stream
+      </label>
       <button type="button" class="remove" title="Remove">×</button>
     </div>
     <input type="text" class="depends_on" placeholder="depends_on (comma-separated labels)" />
@@ -347,6 +350,7 @@ function addAgentRow(spec = {}) {
   tpl.querySelector(".label").value = spec.label || "";
   tpl.querySelector(".prompt").value = spec.prompt || "";
   tpl.querySelector(".depends_on").value = (spec.depends_on || []).join(",");
+  tpl.querySelector(".streaming").checked = !!spec.streaming;
   tpl.querySelector(".remove").onclick = () => tpl.remove();
   $("#agent-rows").appendChild(tpl);
 }
@@ -361,6 +365,7 @@ function readSpec() {
     label: row.querySelector(".label").value.trim() || `agent-${i + 1}`,
     depends_on: (row.querySelector(".depends_on").value || "")
       .split(",").map(s => s.trim()).filter(Boolean),
+    streaming: !!row.querySelector(".streaming")?.checked,
     prompt: row.querySelector(".prompt").value,
   }));
 }
@@ -466,6 +471,7 @@ async function openRun(runId) {
     (meta.spec || []).forEach(a => addAgentRow({
       agent: a.agent, label: a.label,
       depends_on: a.depends_on || [],
+      streaming: !!a.streaming,
       prompt: a.prompt || "",
     }));
     window.scrollTo({ top: 0, behavior: "smooth" });

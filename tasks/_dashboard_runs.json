@@ -1,13 +1,19 @@
 [
   {
-    "id": "c165cc09f73b",
-    "title": "saved as note",
-    "created": 1778097378.147577,
+    "id": "18abf869edb1",
+    "title": "combined",
+    "created": 1778100131.2452824,
     "finished": true,
     "agents": [
       {
-        "label": "x",
+        "label": "first",
         "agent": "claude-sonnet-4-6",
+        "status": "done",
+        "exit_code": 0
+      },
+      {
+        "label": "second",
+        "agent": "gemini-pro",
         "status": "done",
         "exit_code": 0
       }
