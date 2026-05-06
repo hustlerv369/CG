@@ -70,11 +70,11 @@ def test_get_agents(client):
     ids = [a["id"] for a in body["agents"]]
     # New specific model ids must all be present
     for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
-                 "gemini-flash", "gemini-pro", "gemini-3-pro"):
+                 "gemini-flash", "gemini-pro", "gemini-3-pro", "browser"):
         assert kid in ids, f"missing model id {kid!r} in {ids}"
     # Each entry has family + summary
     for a in body["agents"]:
-        assert a["family"] in {"claude", "gemini", "other"}
+        assert a["family"] in {"claude", "gemini", "browser", "other", "custom"}
         assert "summary" in a
 
 
@@ -346,6 +346,152 @@ def test_cancel_unknown_run_404(client):
 # ---------------------------------------------------------------------------
 # Context placeholders ({{file:...}}, {{git:...}}, {{shell:...}})
 # ---------------------------------------------------------------------------
+
+
+def test_browser_step_executor_runs_basic_actions(monkeypatch):
+    """_run_browser_step should dispatch each action to the right
+    Playwright method and return the right thing."""
+    actions: list[tuple] = []
+
+    class FakePage:
+        url = "https://example.com/done"
+        def goto(self, url, **kw):
+            actions.append(("goto", url))
+        def click(self, sel, **kw):
+            actions.append(("click", sel))
+        def fill(self, sel, val, **kw):
+            actions.append(("fill", sel, val))
+        def title(self): return "Mock Title"
+        def content(self): return "<html>ok</html>"
+        def wait_for_selector(self, sel, **kw):
+            actions.append(("wait", sel))
+        def wait_for_timeout(self, ms):
+            actions.append(("wait_ms", ms))
+        def query_selector(self, sel):
+            class E:
+                def inner_text(self): return f"text-of-{sel}"
+                def get_attribute(self, a): return f"attr-{a}-of-{sel}"
+                def screenshot(self, **kw): pass
+            return E()
+        def query_selector_all(self, sel):
+            def _make(idx):
+                class E:
+                    def inner_text(self): return f"item-{idx}"
+                    def get_attribute(self, a): return f"attr-{idx}"
+                return E()
+            return [_make(i) for i in range(3)]
+        def screenshot(self, **kw):
+            from pathlib import Path as _P
+            _P(kw["path"]).parent.mkdir(parents=True, exist_ok=True)
+            _P(kw["path"]).write_bytes(b"\x89PNG\r\n")
+        def evaluate(self, js): return f"eval-result-of-{js[:20]}"
+        def set_default_timeout(self, *a, **kw): pass
+        def hover(self, sel): actions.append(("hover", sel))
+        def type(self, sel, text, **kw): actions.append(("type", sel, text))
+        def press(self, sel, key): actions.append(("press", sel, key))
+        def pdf(self, path): pass
+        def once(self, *a, **kw): pass
+
+    page = FakePage()
+    bindings: dict = {}
+    run = dash.RunState(id="t", title="t", created=0, spec=[],
+                          variables={"FOO": "bar"})
+
+    # Test variable substitution + goto
+    res = dash._run_browser_step(page, None, None,
+        {"action": "goto", "url": "https://${FOO}.com"},
+        run, "lbl", bindings)
+    assert "https://bar.com" in str(res)
+    assert actions[0] == ("goto", "https://bar.com")
+
+    # extract
+    res = dash._run_browser_step(page, None, None,
+        {"action": "extract", "selector": "h1"},
+        run, "lbl", bindings)
+    assert res == "text-of-h1"
+
+    # extract_all
+    res = dash._run_browser_step(page, None, None,
+        {"action": "extract_all", "selector": "li"},
+        run, "lbl", bindings)
+    assert res == ["item-0", "item-1", "item-2"]
+
+    # fill
+    res = dash._run_browser_step(page, None, None,
+        {"action": "fill", "selector": "#x", "value": "y"},
+        run, "lbl", bindings)
+    assert ("fill", "#x", "y") in actions
+
+    # title
+    res = dash._run_browser_step(page, None, None,
+        {"action": "title"}, run, "lbl", bindings)
+    assert res == "Mock Title"
+
+
+def test_browser_step_unknown_action_returns_marker(monkeypatch):
+    class FakePage:
+        def set_default_timeout(self, *a, **kw): pass
+
+    res = dash._run_browser_step(FakePage(), None, None,
+        {"action": "frobnicate"},
+        dash.RunState(id="t", title="t", created=0, spec=[]),
+        "lbl", {})
+    assert "[unknown action" in res
+
+
+def test_browser_step_screenshot_writes_file(tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "SCREENSHOTS_DIR", tmp_path)
+
+    class FakePage:
+        url = "https://example.com"
+        def screenshot(self, **kw):
+            from pathlib import Path as _P
+            _P(kw["path"]).write_bytes(b"\x89PNG")
+        def query_selector(self, sel): return None
+
+    res = dash._run_browser_step(FakePage(), None, None,
+        {"action": "screenshot", "full_page": True},
+        dash.RunState(id="t", title="t", created=0, spec=[]),
+        "shot", {})
+    assert "outputs/screenshots/" in res
+    assert any(p.suffix == ".png" for p in tmp_path.iterdir())
+
+
+def test_browser_runner_handles_invalid_json_prompt(client):
+    """If the prompt isn't valid JSON, browser agent should fail with
+    a clear message rather than crash."""
+    r = client.post("/api/runs", json={
+        "title": "bad json",
+        "spec": [{"agent": "browser", "label": "x",
+                   "prompt": "this is not json"}],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if body["agents"][0]["status"] in {"done", "failed"}:
+            break
+        time.sleep(0.1)
+    assert body["agents"][0]["status"] == "failed"
+    log = client.get(f"/api/runs/{run_id}/output/x").json()["log"]
+    assert "not valid JSON" in log or "browser:" in log
+
+
+def test_label_field_substitution_from_bindings(monkeypatch):
+    """{{label.field}} should pull from RunState.bindings."""
+    mgr = dash.RunManager()
+    run = dash.RunState(id="t", title="t", created=0, spec=[],
+                          bindings={"scrape": {"title": "Hello", "count": 5}})
+    # Add a fake agent for the dependency check
+    run.agents["scrape"] = dash.AgentRunState(label="scrape", agent="browser",
+                                                  log_lines=["full log"])
+    out = mgr._substitute_prompt(run,
+        "Title: {{scrape.title}} | Count: {{scrape.count}} | Full: {{scrape}}",
+        depends_on=["scrape"])
+    assert "Title: Hello" in out
+    assert "Count: 5" in out
+    assert "Full: full log" in out
 
 
 def test_web_placeholder_rejects_non_http_url(monkeypatch):

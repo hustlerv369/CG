@@ -204,9 +204,10 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ Webhook triggers — `POST /api/triggers/<workflow>` from anywhere
 - ✅ Cron-style scheduler — workflows on a periodic interval
 - ✅ Web placeholders (`{{web:URL}}`, `{{web-shot:URL}}`, …) — Playwright headless Chromium
+- ✅ **`browser` agent type** — JSON-defined Playwright scripts (16 actions: goto/click/fill/extract/screenshot/evaluate/…) with cross-step bindings via `{{label.field}}`
 - ✅ Save run as note (one click → run report → searchable note)
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 93 pytest tests passing
+- ✅ 98 pytest tests passing
 - ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 

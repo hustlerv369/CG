@@ -145,6 +145,13 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "stdin_prompt": False,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
+    # ---- browser agent (built-in) ----------------------------------------
+    "browser": {
+        "label": "🌐 Browser (Playwright)",
+        "family": "browser",
+        "summary": "Headless Chromium with full action API — prompt is JSON",
+        "runner": "browser",
+    },
 }
 
 
@@ -459,6 +466,9 @@ class RunState:
     # Settings) and ${VAR} substitutions for prompts.
     secrets: dict[str, str] = field(default_factory=dict)
     variables: dict[str, str] = field(default_factory=dict)
+    # Per-agent bindings (browser agents put extracted data here, so
+    # downstream agents can access them via {{label.field}})
+    bindings: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -608,11 +618,22 @@ class RunManager:
             for k, v in run.variables.items():
                 result = result.replace("${" + k + "}", str(v))
 
-        # Dependency outputs
+        # Dependency outputs (and browser agent bindings)
         for dep in depends_on or []:
             agent = run.agents.get(dep)
             if agent is None:
                 continue
+            # First: {{dep.field}} from browser bindings (more specific)
+            dep_bindings = (run.bindings or {}).get(dep, {})
+            for field_name, field_val in dep_bindings.items():
+                if isinstance(field_val, (list, dict)):
+                    field_str = json.dumps(field_val, indent=2,
+                                             ensure_ascii=False, default=str)
+                else:
+                    field_str = str(field_val) if field_val is not None else ""
+                result = result.replace(
+                    "{{" + dep + "." + field_name + "}}", field_str)
+            # Then: bare {{dep}} = full agent output
             output = "\n".join(agent.log_lines)
             result = result.replace("{{" + dep + "}}", output)
 
@@ -666,6 +687,13 @@ class RunManager:
         # the same log/output channels as the subprocess runner.
         if cfg.get("runner") == "http":
             self._run_one_http(run, label, agent, prompt, cfg, out_fp)
+            out_fp.close()
+            return
+
+        # Browser runner — Playwright headless Chromium driving a
+        # JSON-defined script (see _run_browser_step for action set)
+        if cfg.get("runner") == "browser":
+            self._run_one_browser(run, label, agent, prompt, cfg, out_fp)
             out_fp.close()
             return
 
@@ -849,6 +877,164 @@ class RunManager:
         self._emit(run.id, label, {"event": "status", "data": {
             "label": label, "status": agent_state.status,
             "exit_code": exit_code}})
+
+    def _run_one_browser(self, run: "RunState", label: str, agent: str,
+                          prompt: str, cfg: dict[str, Any], out_fp: Any) -> None:
+        """Browser agent runner — parses prompt as JSON ``browser_steps``
+        list, executes via Playwright, and stores per-step bindings into
+        ``agent.log_lines`` so the {{label}} substitution exposes the
+        full bindings dict to downstream agents.
+
+        Bindings are also written to ``run.bindings[label]`` so a custom
+        ``{{label.field}}`` placeholder can pull individual values
+        without round-tripping through JSON parse in the prompt.
+        """
+        agent_state = run.agents[label]
+        run_dir = RUNS_DIR / run.id
+
+        # Parse prompt as JSON; if it's a list, treat as steps directly,
+        # else expect {steps: [...], session: {...}}
+        try:
+            parsed = json.loads(prompt)
+        except json.JSONDecodeError as exc:
+            agent_state.status = "failed"
+            agent_state.exit_code = 2
+            agent_state.finished = time.time()
+            msg = f"[browser: prompt is not valid JSON — {exc}]"
+            agent_state.log_lines.append(msg)
+            self._emit(run.id, label, {"event": "log",
+                "data": {"label": label, "line": msg}})
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed",
+                         "exit_code": 2}})
+            return
+
+        if isinstance(parsed, list):
+            steps = parsed
+            session = {}
+        elif isinstance(parsed, dict):
+            steps = parsed.get("steps") or parsed.get("browser_steps") or []
+            session = parsed.get("session") or parsed.get("browser_session") or {}
+        else:
+            agent_state.status = "failed"
+            agent_state.log_lines.append("[browser: spec must be array of steps OR {steps, session}]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 2}})
+            return
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            agent_state.status = "failed"
+            agent_state.exit_code = 127
+            agent_state.finished = time.time()
+            msg = ("[browser: playwright not installed. "
+                    "pip install playwright && playwright install chromium]")
+            agent_state.log_lines.append(msg)
+            self._emit(run.id, label, {"event": "log",
+                "data": {"label": label, "line": msg}})
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed",
+                         "exit_code": 127}})
+            return
+
+        bindings: dict[str, Any] = {}
+
+        def emit_line(s: str) -> None:
+            agent_state.log_lines.append(s)
+            out_fp.write(s + "\n")
+            self._emit(run.id, label, {"event": "log",
+                "data": {"label": label, "line": s}})
+
+        # Per-run auth state directory
+        auth_dir = run_dir / "auth"
+
+        try:
+            with sync_playwright() as p:
+                headless = bool(session.get("headless", True))
+                browser = p.chromium.launch(headless=headless)
+                ctx_kwargs: dict[str, Any] = {}
+                if session.get("viewport"):
+                    vw, vh = session["viewport"]
+                    ctx_kwargs["viewport"] = {"width": int(vw), "height": int(vh)}
+                if session.get("user_agent"):
+                    ctx_kwargs["user_agent"] = session["user_agent"]
+                if session.get("locale"):
+                    ctx_kwargs["locale"] = session["locale"]
+                if session.get("timezone"):
+                    ctx_kwargs["timezone_id"] = session["timezone"]
+                # Load auth state if requested + file exists
+                load_auth = session.get("load_auth_state")
+                if load_auth:
+                    auth_path = (NOTES_DIR.parent / "browser_auth"
+                                   / f"{_safe_workflow_name(load_auth)}.json")
+                    if auth_path.exists():
+                        ctx_kwargs["storage_state"] = str(auth_path)
+                        emit_line(f"[browser] loaded auth state: {load_auth}")
+
+                ctx = browser.new_context(**ctx_kwargs)
+                page = ctx.new_page()
+                default_timeout = int(session.get("default_timeout_ms", 30000))
+                page.set_default_timeout(default_timeout)
+                emit_line(f"[browser] starting {len(steps)} steps "
+                            f"(headless={headless})")
+
+                for i, step in enumerate(steps):
+                    if not isinstance(step, dict) or "action" not in step:
+                        emit_line(f"[step {i+1}] SKIP — invalid step")
+                        continue
+                    action = step["action"]
+                    bind_as = step.get("as")  # name to store output under
+                    try:
+                        result = _run_browser_step(page, ctx, browser, step,
+                                                     run, label, bindings)
+                        # Format result for log
+                        if isinstance(result, str):
+                            preview = result[:200].replace("\n", " ")
+                            emit_line(f"[step {i+1}] {action}: {preview}")
+                        elif isinstance(result, list):
+                            emit_line(f"[step {i+1}] {action}: list({len(result)})")
+                        elif result is None:
+                            emit_line(f"[step {i+1}] {action}: ok")
+                        else:
+                            emit_line(f"[step {i+1}] {action}: {result}")
+                        if bind_as:
+                            bindings[bind_as] = result
+                    except Exception as exc:
+                        emit_line(f"[step {i+1}] {action}: ERROR {exc}")
+                        if step.get("optional"):
+                            continue
+                        raise
+
+                # Save auth state if requested
+                save_auth = session.get("save_auth_state")
+                if save_auth:
+                    auth_dir = NOTES_DIR.parent / "browser_auth"
+                    auth_dir.mkdir(parents=True, exist_ok=True)
+                    auth_path = auth_dir / f"{_safe_workflow_name(save_auth)}.json"
+                    ctx.storage_state(path=str(auth_path))
+                    emit_line(f"[browser] saved auth state: {save_auth}")
+
+                browser.close()
+
+            # Persist bindings to run + emit final summary
+            run.bindings = getattr(run, "bindings", {})
+            run.bindings[label] = bindings
+            agent_state.exit_code = 0
+            agent_state.status = "done"
+            agent_state.finished = time.time()
+            # Final binding dump in JSON for {{label}} substitution
+            emit_line("\n=== bindings ===")
+            emit_line(json.dumps(bindings, indent=2, ensure_ascii=False, default=str))
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "done", "exit_code": 0}})
+        except Exception as exc:
+            agent_state.exit_code = 1
+            agent_state.status = "failed"
+            agent_state.finished = time.time()
+            emit_line(f"[browser] error: {exc}")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
 
     def cancel_run(self, run_id: str) -> bool:
         """Kill any in-flight subprocesses for this run."""
@@ -1036,6 +1222,126 @@ PRESETS: list[dict[str, Any]] = [
                           "Markdown bullet list, terse.\n\n## Original\n"
                           "```python\n{{file:src/cg.py}}\n```\n\n## Refactor\n"
                           "{{draft}}"
+            },
+        ],
+    },
+    {
+        "id": "browser-scrape-and-summarize",
+        "title": "Browser scrape + AI summary (any URL)",
+        "description": "Headless Chromium navigates to ${TARGET_URL}, extracts "
+                        "the main heading + body + screenshot via the browser "
+                        "agent's action API, then Claude summarizes the page "
+                        "into 5 bullets. Demonstrates browser→LLM hand-off with "
+                        "{{label.field}} binding access.",
+        "spec": [
+            {
+                "agent": "browser",
+                "label": "fetch",
+                "prompt": "{\n  \"steps\": [\n"
+                          "    {\"action\": \"goto\", \"url\": \"${TARGET_URL}\"},\n"
+                          "    {\"action\": \"title\", \"as\": \"page_title\"},\n"
+                          "    {\"action\": \"extract\", \"selector\": \"h1\", \"as\": \"heading\", \"optional\": true},\n"
+                          "    {\"action\": \"extract\", \"selector\": \"body\", \"as\": \"body_text\"},\n"
+                          "    {\"action\": \"extract_all\", \"selector\": \"a\", \"attr\": \"href\", \"as\": \"links\"},\n"
+                          "    {\"action\": \"screenshot\", \"full_page\": true, \"as\": \"shot\"}\n"
+                          "  ]\n}"
+            },
+            {
+                "agent": "claude-sonnet-4-6",
+                "label": "summary",
+                "depends_on": ["fetch"],
+                "prompt": "Summarize this page in exactly 5 bullets, then "
+                          "list 3 quotable lines verbatim.\n\n"
+                          "Title: {{fetch.page_title}}\n"
+                          "Heading: {{fetch.heading}}\n"
+                          "Screenshot: {{fetch.shot}}\n"
+                          "Outbound link count: {{fetch.links}}\n\n"
+                          "## Body\n\n{{fetch.body_text}}"
+            },
+        ],
+    },
+    {
+        "id": "browser-visual-regression",
+        "title": "Visual regression (live URL × 2 screenshots → AI diff)",
+        "description": "Snapshots ${TARGET_URL} at two viewports (desktop + "
+                        "mobile), Sonnet diffs the visible content, Gemini "
+                        "spots layout regressions. Useful before/after a "
+                        "deploy: change ${TARGET_URL} between runs.",
+        "spec": [
+            {
+                "agent": "browser",
+                "label": "shoot-desktop",
+                "prompt": "{\n  \"session\": {\"viewport\": [1440, 900]},\n"
+                          "  \"steps\": [\n"
+                          "    {\"action\": \"goto\", \"url\": \"${TARGET_URL}\"},\n"
+                          "    {\"action\": \"wait_for\", \"time_ms\": 1500},\n"
+                          "    {\"action\": \"screenshot\", \"full_page\": true, \"as\": \"shot\"},\n"
+                          "    {\"action\": \"extract\", \"selector\": \"body\", \"as\": \"body\"}\n"
+                          "  ]\n}"
+            },
+            {
+                "agent": "browser",
+                "label": "shoot-mobile",
+                "prompt": "{\n  \"session\": {\"viewport\": [390, 844], \"user_agent\": \"Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15\"},\n"
+                          "  \"steps\": [\n"
+                          "    {\"action\": \"goto\", \"url\": \"${TARGET_URL}\"},\n"
+                          "    {\"action\": \"wait_for\", \"time_ms\": 1500},\n"
+                          "    {\"action\": \"screenshot\", \"full_page\": true, \"as\": \"shot\"},\n"
+                          "    {\"action\": \"extract\", \"selector\": \"body\", \"as\": \"body\"}\n"
+                          "  ]\n}"
+            },
+            {
+                "agent": "claude-sonnet-4-6",
+                "label": "compare",
+                "depends_on": ["shoot-desktop", "shoot-mobile"],
+                "prompt": "Compare desktop vs mobile rendering of "
+                          "${TARGET_URL}.\n\n## Desktop body\n"
+                          "{{shoot-desktop.body}}\n\n## Mobile body\n"
+                          "{{shoot-mobile.body}}\n\nList layout/content "
+                          "differences as Markdown bullets. Are any "
+                          "elements missing on mobile? Truncated? "
+                          "Reordered awkwardly?\n\nScreenshots: "
+                          "{{shoot-desktop.shot}} vs {{shoot-mobile.shot}}"
+            },
+        ],
+    },
+    {
+        "id": "browser-form-test",
+        "title": "Browser e2e form smoke test (fill, submit, verify)",
+        "description": "Navigates to ${FORM_URL}, fills the input named "
+                        "${INPUT_NAME} with ${INPUT_VALUE}, clicks submit, "
+                        "captures the response page. Sonnet verifies the "
+                        "expected confirmation text appeared. Edit the JSON "
+                        "to match your form's actual selectors.",
+        "spec": [
+            {
+                "agent": "browser",
+                "label": "submit",
+                "prompt": "{\n  \"steps\": [\n"
+                          "    {\"action\": \"goto\", \"url\": \"${FORM_URL}\"},\n"
+                          "    {\"action\": \"wait_for\", \"selector\": \"form\"},\n"
+                          "    {\"action\": \"fill\", \"selector\": \"input[name='${INPUT_NAME}']\", \"value\": \"${INPUT_VALUE}\"},\n"
+                          "    {\"action\": \"screenshot\", \"as\": \"before\"},\n"
+                          "    {\"action\": \"click\", \"selector\": \"button[type='submit'], input[type='submit']\"},\n"
+                          "    {\"action\": \"wait_for\", \"time_ms\": 2000},\n"
+                          "    {\"action\": \"url\", \"as\": \"final_url\"},\n"
+                          "    {\"action\": \"extract\", \"selector\": \"body\", \"as\": \"final_body\"},\n"
+                          "    {\"action\": \"screenshot\", \"as\": \"after\"}\n"
+                          "  ]\n}"
+            },
+            {
+                "agent": "claude-sonnet-4-6",
+                "label": "verify",
+                "depends_on": ["submit"],
+                "prompt": "I submitted a form. Verify whether the response "
+                          "indicates success.\n\n"
+                          "Final URL: {{submit.final_url}}\n"
+                          "Before screenshot: {{submit.before}}\n"
+                          "After screenshot: {{submit.after}}\n\n"
+                          "## Final page body\n{{submit.final_body}}\n\n"
+                          "Did the submit succeed? Quote the line in the "
+                          "body that proves it (or the line that suggests "
+                          "failure). Be terse."
             },
         ],
     },
@@ -1347,6 +1653,175 @@ def _shell_placeholder(cmd: str) -> str:
 
 
 SCREENSHOTS_DIR = ROOT / "outputs" / "screenshots"
+BROWSER_AUTH_DIR = ROOT / "browser_auth"
+
+
+def _run_browser_step(page: Any, ctx: Any, browser: Any, step: dict,
+                        run: "RunState", label: str,
+                        bindings: dict) -> Any:
+    """Execute a single Playwright step and return its result.
+
+    Supported actions (the canonical list — see docs/browser-actions.md):
+
+      goto         {url}                              navigate
+      click        {selector}                         click element
+      fill         {selector, value}                  text input
+      type         {selector, text, delay?}           keyboard typing
+      press        {selector?, key}                   key press (Enter, etc.)
+      hover        {selector}                         mouse hover
+      scroll       {to: 'top'|'bottom'|number}        scroll
+      wait_for     {selector?, time_ms?, state?}      wait for element/time
+      extract      {selector, attr?}                  innerText or attribute
+      extract_all  {selector, attr?}                  array of innerText/attr
+      screenshot   {full_page?, selector?}            saves PNG, returns path
+      evaluate     {script}                           run JS, return result
+      title        {}                                 page title
+      content      {}                                 full HTML
+      url          {}                                 current URL
+      accept_dialog {}                                accept next dialog
+      pdf          {}                                 save PDF (paid Chromium feature)
+    """
+    a = step["action"]
+
+    # Variable interpolation in step values from bindings + run.variables
+    def _resolve(v: Any) -> Any:
+        if not isinstance(v, str):
+            return v
+        # ${VAR} from run.variables
+        for k, val in (run.variables or {}).items():
+            v = v.replace("${" + k + "}", str(val))
+        # {{label.field}} from bindings collected so far
+        for binding_name, binding_val in bindings.items():
+            if isinstance(binding_val, dict):
+                for fk, fv in binding_val.items():
+                    v = v.replace("{{" + binding_name + "." + fk + "}}",
+                                    str(fv))
+            v = v.replace("{{" + binding_name + "}}", str(binding_val))
+        return v
+
+    if a == "goto":
+        url = _resolve(step["url"])
+        wait = step.get("wait_until", "domcontentloaded")
+        page.goto(url, wait_until=wait, timeout=step.get("timeout_ms", 30000))
+        try:
+            page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:
+            pass
+        return f"loaded {url}"
+
+    if a == "click":
+        sel = _resolve(step["selector"])
+        page.click(sel, timeout=step.get("timeout_ms", 10000))
+        return f"clicked {sel}"
+
+    if a == "fill":
+        sel = _resolve(step["selector"])
+        val = _resolve(step.get("value", ""))
+        page.fill(sel, val, timeout=step.get("timeout_ms", 10000))
+        return f"filled {sel}"
+
+    if a == "type":
+        sel = _resolve(step["selector"])
+        text = _resolve(step["text"])
+        delay = int(step.get("delay", 0))
+        page.type(sel, text, delay=delay)
+        return f"typed into {sel}"
+
+    if a == "press":
+        sel = _resolve(step.get("selector", "body"))
+        key = step["key"]
+        page.press(sel, key)
+        return f"pressed {key}"
+
+    if a == "hover":
+        sel = _resolve(step["selector"])
+        page.hover(sel)
+        return f"hovered {sel}"
+
+    if a == "scroll":
+        to = step.get("to", "bottom")
+        if to == "top":
+            page.evaluate("window.scrollTo(0, 0)")
+        elif to == "bottom":
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        elif isinstance(to, (int, float)):
+            page.evaluate(f"window.scrollTo(0, {to})")
+        return f"scrolled {to}"
+
+    if a == "wait_for":
+        sel = step.get("selector")
+        time_ms = step.get("time_ms")
+        state = step.get("state", "visible")
+        if sel:
+            page.wait_for_selector(_resolve(sel), state=state,
+                                     timeout=step.get("timeout_ms", 10000))
+            return f"waited for {sel}"
+        if time_ms:
+            page.wait_for_timeout(int(time_ms))
+            return f"waited {time_ms}ms"
+        return "wait_for: no-op"
+
+    if a == "extract":
+        sel = _resolve(step["selector"])
+        attr = step.get("attr")
+        elem = page.query_selector(sel)
+        if elem is None:
+            return None
+        if attr:
+            return elem.get_attribute(attr)
+        return elem.inner_text()
+
+    if a == "extract_all":
+        sel = _resolve(step["selector"])
+        attr = step.get("attr")
+        elements = page.query_selector_all(sel)
+        if attr:
+            return [e.get_attribute(attr) for e in elements]
+        return [e.inner_text() for e in elements]
+
+    if a == "screenshot":
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        import hashlib
+        digest = hashlib.sha1((page.url or "").encode("utf-8")).hexdigest()[:12]
+        fname = f"{int(time.time())}-{digest}-{label}.png"
+        out_path = SCREENSHOTS_DIR / fname
+        kwargs: dict[str, Any] = {"path": str(out_path),
+                                    "full_page": bool(step.get("full_page", True))}
+        sel = step.get("selector")
+        if sel:
+            elem = page.query_selector(_resolve(sel))
+            if elem is not None:
+                elem.screenshot(path=str(out_path))
+            else:
+                page.screenshot(**kwargs)
+        else:
+            page.screenshot(**kwargs)
+        return f"outputs/screenshots/{fname}"
+
+    if a == "evaluate":
+        return page.evaluate(_resolve(step["script"]))
+
+    if a == "title":
+        return page.title()
+
+    if a == "content":
+        return page.content()
+
+    if a == "url":
+        return page.url
+
+    if a == "accept_dialog":
+        page.once("dialog", lambda d: d.accept())
+        return "next dialog will be accepted"
+
+    if a == "pdf":
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+        fname = f"{int(time.time())}-{label}.pdf"
+        out_path = SCREENSHOTS_DIR / fname
+        page.pdf(path=str(out_path))
+        return f"outputs/screenshots/{fname}"
+
+    return f"[unknown action: {a}]"
 
 
 def _web_placeholder(kind: str, url: str) -> str:
