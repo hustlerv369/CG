@@ -152,6 +152,13 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "summary": "Headless Chromium with full action API — prompt is JSON",
         "runner": "browser",
     },
+    # ---- subworkflow agent (built-in) ------------------------------------
+    "subworkflow": {
+        "label": "🔁 Sub-workflow",
+        "family": "subworkflow",
+        "summary": "Run a saved workflow as a step. Prompt is JSON {workflow, variables?}",
+        "runner": "subworkflow",
+    },
 }
 
 
@@ -355,6 +362,15 @@ AGENT_KINDS.update(_load_custom_agents())
 # ---------------------------------------------------------------------------
 # Cloudflare Tunnel — auto-download + spawn (phone dispatch enabler)
 # ---------------------------------------------------------------------------
+
+
+_auth_session: dict[str, Any] = {
+    "active": None,        # {slug, url, started_at} or None
+    "save_event": None,    # threading.Event
+    "cancel_event": None,  # threading.Event
+    "thread": None,
+    "result": None,
+}
 
 
 _tunnel_state: dict[str, Any] = {
@@ -884,6 +900,14 @@ class RunManager:
             out_fp.close()
             return
 
+        # Sub-workflow runner — execute a saved workflow as a step,
+        # exposing each sub-agent's output as a binding under this
+        # parent label (so {{label.subagent}} works downstream).
+        if cfg.get("runner") == "subworkflow":
+            self._run_one_subworkflow(run, label, agent, prompt, cfg, out_fp)
+            out_fp.close()
+            return
+
         cmd = list(cfg["command"])
         if cfg["stdin_prompt"]:
             stdin_input: str | None = prompt
@@ -1064,6 +1088,144 @@ class RunManager:
         self._emit(run.id, label, {"event": "status", "data": {
             "label": label, "status": agent_state.status,
             "exit_code": exit_code}})
+
+    def _run_one_subworkflow(self, run: "RunState", label: str, agent: str,
+                                prompt: str, cfg: dict[str, Any],
+                                out_fp: Any) -> None:
+        """Sub-workflow runner — load a saved workflow JSON, execute its
+        spec inside the parent run as a child run, then merge the
+        child's per-agent outputs into parent's bindings[label] so
+        downstream parent agents can {{label.subagent}} them.
+
+        Prompt JSON shape::
+
+            {"workflow": "name-or-path", "variables": {"K": "v"}}
+        """
+        agent_state = run.agents[label]
+
+        def emit_line(s: str) -> None:
+            agent_state.log_lines.append(s)
+            out_fp.write(s + "\n")
+            self._emit(run.id, label, {"event": "log",
+                "data": {"label": label, "line": s}})
+
+        try:
+            spec_obj = json.loads(prompt)
+        except json.JSONDecodeError as exc:
+            agent_state.status = "failed"
+            agent_state.exit_code = 2
+            agent_state.finished = time.time()
+            emit_line(f"[subworkflow: prompt is not valid JSON — {exc}]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed",
+                         "exit_code": 2}})
+            return
+
+        wf_name = (spec_obj or {}).get("workflow")
+        if not wf_name:
+            agent_state.status = "failed"
+            agent_state.exit_code = 2
+            agent_state.finished = time.time()
+            emit_line("[subworkflow: missing 'workflow' field]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 2}})
+            return
+
+        # Load the named workflow from disk
+        wf_path = WORKFLOWS_DIR / f"{_safe_workflow_name(wf_name)}.json"
+        if not wf_path.exists():
+            agent_state.status = "failed"
+            agent_state.exit_code = 1
+            agent_state.finished = time.time()
+            emit_line(f"[subworkflow: workflow {wf_name!r} not found at {wf_path}]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
+            return
+
+        try:
+            wf_data = json.loads(wf_path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            agent_state.status = "failed"
+            agent_state.exit_code = 1
+            agent_state.finished = time.time()
+            emit_line(f"[subworkflow: failed to parse workflow JSON — {exc}]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
+            return
+
+        sub_spec = wf_data.get("spec") or []
+        if not sub_spec:
+            agent_state.status = "failed"
+            agent_state.exit_code = 1
+            agent_state.finished = time.time()
+            emit_line(f"[subworkflow: workflow {wf_name!r} has empty spec]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
+            return
+
+        # Merge variables: workflow defaults < parent run vars < step overlay
+        sub_vars: dict[str, str] = {}
+        sub_vars.update(wf_data.get("variables", {}) or {})
+        sub_vars.update(run.variables or {})
+        sub_vars.update((spec_obj.get("variables", {}) or {}))
+
+        # Spawn the child run synchronously here — block until done
+        emit_line(f"[subworkflow] launching {wf_name!r} with "
+                    f"{len(sub_spec)} agents, vars={list(sub_vars.keys())}")
+        child = self.start_run(
+            f"sub: {wf_data.get('title', wf_name)}",
+            sub_spec,
+            secrets=dict(run.secrets or {}),  # forward parent's secrets
+            variables=sub_vars,
+        )
+        emit_line(f"[subworkflow] child run id: {child.id}")
+
+        # Block on child completion (poll, since start_run is fire-and-forget)
+        deadline = time.time() + int(spec_obj.get("timeout_seconds", 1800))
+        while time.time() < deadline:
+            if all(a.status in {"done", "failed", "cancelled"}
+                    for a in child.agents.values()):
+                break
+            time.sleep(0.5)
+        else:
+            agent_state.status = "failed"
+            agent_state.exit_code = 124
+            agent_state.finished = time.time()
+            emit_line("[subworkflow: timed out waiting for child]")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed",
+                         "exit_code": 124}})
+            return
+
+        # Collect child outputs into bindings[label]
+        bindings: dict[str, Any] = {}
+        any_failed = False
+        for sub_label, sub_agent in child.agents.items():
+            output_text = "\n".join(sub_agent.log_lines)
+            bindings[sub_label] = output_text
+            status_marker = "✓" if sub_agent.status == "done" else "✗"
+            emit_line(f"  {status_marker} {sub_label} ({sub_agent.agent}): "
+                        f"{sub_agent.status}, exit={sub_agent.exit_code}, "
+                        f"chars={len(output_text)}")
+            if sub_agent.status != "done":
+                any_failed = True
+
+        # Also expose child run id for traceability
+        bindings["_child_run_id"] = child.id
+        run.bindings = getattr(run, "bindings", {})
+        run.bindings[label] = bindings
+        emit_line("\n=== child bindings ===")
+        emit_line(json.dumps({k: (v if not isinstance(v, str) or len(v) < 200
+                                     else v[:200] + "…")
+                               for k, v in bindings.items()},
+                              indent=2, ensure_ascii=False, default=str))
+
+        agent_state.exit_code = 0 if not any_failed else 1
+        agent_state.status = "done" if not any_failed else "failed"
+        agent_state.finished = time.time()
+        self._emit(run.id, label, {"event": "status",
+            "data": {"label": label, "status": agent_state.status,
+                     "exit_code": agent_state.exit_code}})
 
     def _run_one_browser(self, run: "RunState", label: str, agent: str,
                           prompt: str, cfg: dict[str, Any], out_fp: Any) -> None:
@@ -2705,6 +2867,140 @@ def create_app() -> FastAPI:
             encoding="utf-8",
         )
         return {"saved": len(items)}
+
+    # ---- Browser auth wizard (headed login → save storage_state) --------
+
+    @app.get("/api/browser-auth")
+    async def list_browser_auths() -> Any:
+        """List saved browser_auth/<slug>.json files."""
+        BROWSER_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+        out = []
+        for p in sorted(BROWSER_AUTH_DIR.glob("*.json")):
+            stat = p.stat()
+            out.append({
+                "slug": p.stem,
+                "size": stat.st_size,
+                "modified": time.strftime("%Y-%m-%dT%H:%M:%S",
+                                            time.localtime(stat.st_mtime)),
+            })
+        return {"auths": out, "active": _auth_session.get("active")}
+
+    @app.post("/api/browser-auth/start")
+    async def start_browser_auth(body: dict[str, Any]) -> Any:
+        """Spawn a headed Chromium for user-driven login. The browser
+        stays open until POST /api/browser-auth/save (success) or
+        /api/browser-auth/cancel (abort)."""
+        slug = body.get("slug") or ""
+        url = body.get("url") or "about:blank"
+        if not _re.match(r"^[a-zA-Z0-9._-]+$", slug):
+            raise HTTPException(400, "slug must be alphanumeric/dash/dot/underscore")
+
+        if _auth_session.get("active"):
+            raise HTTPException(409, "another auth session is in progress; "
+                                       "save or cancel it first")
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            raise HTTPException(500,
+                "playwright not installed. pip install playwright && playwright install chromium")
+
+        # Run the auth session in a background thread so this endpoint
+        # can return immediately. The thread keeps the browser context
+        # alive and waits for save/cancel signals.
+        BROWSER_AUTH_DIR.mkdir(parents=True, exist_ok=True)
+
+        ready_event = threading.Event()
+        save_event = threading.Event()
+        cancel_event = threading.Event()
+        result_holder: dict[str, Any] = {}
+
+        def _run() -> None:
+            try:
+                from playwright.sync_api import sync_playwright as _sp
+                with _sp() as p:
+                    browser = p.chromium.launch(headless=False)
+                    ctx = browser.new_context()
+                    page = ctx.new_page()
+                    page.goto(url, timeout=60000)
+                    ready_event.set()
+
+                    # Spin until either save or cancel fires
+                    while not save_event.is_set() and not cancel_event.is_set():
+                        time.sleep(0.5)
+
+                    if save_event.is_set():
+                        out_path = BROWSER_AUTH_DIR / f"{slug}.json"
+                        ctx.storage_state(path=str(out_path))
+                        result_holder["path"] = str(out_path)
+                        result_holder["status"] = "saved"
+                    else:
+                        result_holder["status"] = "cancelled"
+
+                    browser.close()
+            except Exception as exc:
+                result_holder["status"] = "error"
+                result_holder["error"] = str(exc)
+                ready_event.set()
+            finally:
+                _auth_session["active"] = None
+                _auth_session["save_event"] = None
+                _auth_session["cancel_event"] = None
+                _auth_session["result"] = result_holder
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+        # Wait briefly for browser to spawn
+        ready_event.wait(timeout=15)
+
+        _auth_session["active"] = {
+            "slug": slug, "url": url,
+            "started_at": _iso_now(),
+        }
+        _auth_session["save_event"] = save_event
+        _auth_session["cancel_event"] = cancel_event
+        _auth_session["thread"] = thread
+
+        return {"slug": slug, "url": url, "status": "started",
+                "instructions": ("A Chromium window has opened. Sign in to "
+                                 "the target site there, complete any 2FA, "
+                                 "then click 'Save & Close' here in the "
+                                 "dashboard to persist the storage_state.")}
+
+    @app.post("/api/browser-auth/save")
+    async def save_browser_auth() -> Any:
+        save_event = _auth_session.get("save_event")
+        if save_event is None:
+            raise HTTPException(409, "no auth session in progress")
+        save_event.set()
+        # Wait briefly for the thread to finish saving
+        thread = _auth_session.get("thread")
+        if thread is not None:
+            thread.join(timeout=10)
+        result = _auth_session.get("result", {})
+        return {"status": result.get("status", "unknown"),
+                "path": result.get("path")}
+
+    @app.post("/api/browser-auth/cancel")
+    async def cancel_browser_auth() -> Any:
+        cancel_event = _auth_session.get("cancel_event")
+        if cancel_event is None:
+            return {"status": "no-op"}
+        cancel_event.set()
+        thread = _auth_session.get("thread")
+        if thread is not None:
+            thread.join(timeout=10)
+        return {"status": "cancelled"}
+
+    @app.delete("/api/browser-auth/{slug}")
+    async def delete_browser_auth(slug: str) -> Any:
+        if not _re.match(r"^[a-zA-Z0-9._-]+$", slug):
+            raise HTTPException(400, "invalid slug")
+        path = BROWSER_AUTH_DIR / f"{slug}.json"
+        if not path.exists():
+            raise HTTPException(404, "auth state not found")
+        path.unlink()
+        return {"slug": slug, "deleted": True}
 
     # ---- Cloudflare Tunnel (phone dispatch enabler) ----------------------
 

@@ -231,6 +231,27 @@
         <button class="ghost" id="settings-clear-btn">Clear all</button>
       </div>
 
+      <h3>🔐 Browser auth states</h3>
+      <p class="settings-hint">
+        Login once in a real (non-headless) Chromium window, save the
+        cookies + localStorage as a named auth state. Then any browser
+        agent step can include <code>{"session": {"load_auth_state": "&lt;slug&gt;"}}</code>
+        to scrape behind the login.
+      </p>
+      <ul class="vars-list" id="auth-list"></ul>
+      <div class="settings-row" style="flex-direction: row; gap: 8px;">
+        <input type="text" id="auth-slug-input" placeholder="auth name (e.g. github-login)" />
+        <input type="text" id="auth-url-input" placeholder="login URL (e.g. https://github.com/login)" />
+        <button class="ghost" id="auth-start-btn">▶ Start login</button>
+      </div>
+      <div id="auth-active-row" hidden>
+        <p class="settings-hint" id="auth-active-msg"></p>
+        <div class="settings-row" style="flex-direction: row; gap: 8px;">
+          <button class="primary" id="auth-save-btn">💾 Save & Close</button>
+          <button class="ghost" id="auth-cancel-btn">⨯ Cancel</button>
+        </div>
+      </div>
+
       <h3>📱 Phone Dispatch — Cloudflare Tunnel</h3>
       <p class="settings-hint">
         Spustí <code>cloudflared tunnel</code> co exposuje tvůj lokální

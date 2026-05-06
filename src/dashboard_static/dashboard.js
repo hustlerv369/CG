@@ -1233,6 +1233,74 @@ function saveSettingsForm() {
 // Cloudflare Tunnel + Notifications (Settings tab additions)
 // ============================================================
 
+// Browser auth wizard
+async function refreshAuthList() {
+  try {
+    const r = await fetch("/api/browser-auth");
+    if (!r.ok) return;
+    const data = await r.json();
+    const ul = $("#auth-list");
+    if (!ul) return;
+    if (!data.auths.length) {
+      ul.innerHTML = '<li style="color: var(--fg-tertiary); justify-content: center;"><em>(no auth states yet)</em></li>';
+    } else {
+      ul.innerHTML = data.auths.map(a =>
+        `<li><span class="vk">${escapeHtml(a.slug)}</span><span class="vv">${escapeHtml(a.modified)} · ${a.size} bytes</span><button class="vrm" data-slug="${escapeHtml(a.slug)}">delete</button></li>`
+      ).join("");
+      ul.querySelectorAll(".vrm").forEach(b => {
+        b.onclick = async () => {
+          if (!confirm(`Delete auth "${b.dataset.slug}"?`)) return;
+          await fetch(`/api/browser-auth/${encodeURIComponent(b.dataset.slug)}`,
+                       { method: "DELETE" });
+          refreshAuthList();
+        };
+      });
+    }
+    if (data.active) {
+      $("#auth-active-row").hidden = false;
+      $("#auth-active-msg").textContent =
+        `Chromium is open at ${data.active.url} as "${data.active.slug}". Sign in there, then click Save & Close.`;
+    } else {
+      $("#auth-active-row").hidden = true;
+    }
+  } catch { /* ignore */ }
+}
+
+async function startBrowserAuth() {
+  const slug = $("#auth-slug-input").value.trim();
+  const url = $("#auth-url-input").value.trim() || "about:blank";
+  if (!/^[a-zA-Z0-9._-]+$/.test(slug)) {
+    alert("Slug must be alphanumeric/dot/underscore/dash.");
+    return;
+  }
+  const r = await fetch("/api/browser-auth/start", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ slug, url }),
+  });
+  if (!r.ok) {
+    alert(`Start failed: ${await r.text()}`);
+    return;
+  }
+  $("#auth-slug-input").value = "";
+  $("#auth-url-input").value = "";
+  refreshAuthList();
+}
+
+async function saveBrowserAuth() {
+  const r = await fetch("/api/browser-auth/save", { method: "POST" });
+  if (r.ok) {
+    setStatus("auth state saved", "ok");
+    setTimeout(() => setStatus("connected", "ok"), 2000);
+  }
+  refreshAuthList();
+}
+
+async function cancelBrowserAuth() {
+  await fetch("/api/browser-auth/cancel", { method: "POST" });
+  refreshAuthList();
+}
+
 async function refreshTunnelStatus() {
   try {
     const r = await fetch("/api/tunnel/status");
@@ -1377,6 +1445,7 @@ function switchTab(tab) {
     paintSettingsForm();
     refreshTunnelStatus();
     loadNotificationsConfig();
+    refreshAuthList();
   }
 }
 
@@ -1429,6 +1498,9 @@ document.addEventListener("DOMContentLoaded", () => {
   if ($("#settings-clear-btn")) $("#settings-clear-btn").onclick = clearSettings;
   if ($("#var-add-btn")) $("#var-add-btn").onclick = addVariable;
   // Tunnel + notifications
+  if ($("#auth-start-btn")) $("#auth-start-btn").onclick = startBrowserAuth;
+  if ($("#auth-save-btn")) $("#auth-save-btn").onclick = saveBrowserAuth;
+  if ($("#auth-cancel-btn")) $("#auth-cancel-btn").onclick = cancelBrowserAuth;
   if ($("#tunnel-start-btn")) $("#tunnel-start-btn").onclick = startTunnel;
   if ($("#tunnel-stop-btn")) $("#tunnel-stop-btn").onclick = stopTunnel;
   if ($("#tunnel-copy-btn")) $("#tunnel-copy-btn").onclick = copyTunnelUrl;

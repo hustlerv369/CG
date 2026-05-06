@@ -70,11 +70,13 @@ def test_get_agents(client):
     ids = [a["id"] for a in body["agents"]]
     # New specific model ids must all be present
     for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
-                 "gemini-flash", "gemini-pro", "gemini-3-pro", "browser"):
+                 "gemini-flash", "gemini-pro", "gemini-3-pro",
+                 "browser", "subworkflow"):
         assert kid in ids, f"missing model id {kid!r} in {ids}"
     # Each entry has family + summary
     for a in body["agents"]:
-        assert a["family"] in {"claude", "gemini", "browser", "other", "custom"}
+        assert a["family"] in {"claude", "gemini", "browser", "subworkflow",
+                                 "other", "custom"}
         assert "summary" in a
 
 
@@ -346,6 +348,112 @@ def test_cancel_unknown_run_404(client):
 # ---------------------------------------------------------------------------
 # Context placeholders ({{file:...}}, {{git:...}}, {{shell:...}})
 # ---------------------------------------------------------------------------
+
+
+def test_browser_auth_list_empty(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "BROWSER_AUTH_DIR", tmp_path)
+    r = client.get("/api/browser-auth")
+    assert r.status_code == 200
+    assert r.json()["auths"] == []
+    assert r.json()["active"] is None
+
+
+def test_browser_auth_rejects_bad_slug(client):
+    r = client.post("/api/browser-auth/start", json={
+        "slug": "../escape/path", "url": "https://example.com",
+    })
+    assert r.status_code == 400
+
+
+def test_browser_auth_delete_nonexistent_404(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "BROWSER_AUTH_DIR", tmp_path)
+    r = client.delete("/api/browser-auth/nonexistent")
+    assert r.status_code == 404
+
+
+def test_browser_auth_delete_existing(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "BROWSER_AUTH_DIR", tmp_path)
+    (tmp_path / "github.json").write_text("{}", encoding="utf-8")
+    r = client.delete("/api/browser-auth/github")
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+
+
+def test_subworkflow_runs_saved_workflow(client, tmp_path, monkeypatch):
+    """A 'subworkflow' agent should load + execute a saved workflow,
+    and expose each child agent's output as a binding."""
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    # Save a child workflow
+    client.put("/api/workflows/child-flow", json={
+        "title": "Child Flow",
+        "spec": [
+            {"agent": "claude", "label": "echo1", "prompt": "child1: ${WHO}"},
+            {"agent": "gemini", "label": "echo2", "prompt": "child2"},
+        ],
+    })
+    # Run a parent workflow that invokes it
+    payload = {
+        "title": "parent run",
+        "spec": [
+            {"agent": "subworkflow", "label": "child",
+             "prompt": '{"workflow": "child-flow", "variables": {"WHO": "world"}}'},
+            {"agent": "claude", "label": "consumer",
+             "depends_on": ["child"],
+             "prompt": "Got from child: {{child.echo1}} | {{child.echo2}}"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(80):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed", "cancelled"}
+                for a in body["agents"]):
+            break
+        time.sleep(0.1)
+    statuses = {a["label"]: a["status"] for a in body["agents"]}
+    assert statuses["child"] == "done", f"child run failed: {statuses}"
+    assert statuses["consumer"] == "done"
+    # The consumer should have received both echo outputs from the child
+    log = client.get(f"/api/runs/{run_id}/output/consumer").json()["log"]
+    assert "CLAUDE-MOCK child1: world" in log
+    assert "GEMINI-MOCK child2" in log
+
+
+def test_subworkflow_invalid_json_fails_clean(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    r = client.post("/api/runs", json={
+        "title": "bad",
+        "spec": [{"agent": "subworkflow", "label": "x",
+                   "prompt": "this is not json"}],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if body["agents"][0]["status"] in {"done", "failed", "cancelled"}:
+            break
+        time.sleep(0.1)
+    assert body["agents"][0]["status"] == "failed"
+
+
+def test_subworkflow_missing_workflow_404s_run(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    r = client.post("/api/runs", json={
+        "title": "missing",
+        "spec": [{"agent": "subworkflow", "label": "x",
+                   "prompt": '{"workflow": "does-not-exist"}'}],
+    })
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if body["agents"][0]["status"] in {"done", "failed"}:
+            break
+        time.sleep(0.1)
+    assert body["agents"][0]["status"] == "failed"
 
 
 def test_browser_step_executor_runs_basic_actions(monkeypatch):
