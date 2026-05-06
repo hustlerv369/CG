@@ -9,6 +9,7 @@ quota burned during CI).
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -383,6 +384,109 @@ def test_placeholder_multiple_in_one_prompt(tmp_path, monkeypatch):
     assert "AAA" in out and "BBB" in out
 
 
+def test_files_tree_lists_root(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "a.txt").write_text("A", encoding="utf-8")
+    (tmp_path / "sub").mkdir()
+    (tmp_path / "sub" / "b.py").write_text("B", encoding="utf-8")
+    r = client.get("/api/files/tree")
+    assert r.status_code == 200
+    data = r.json()
+    names = [e["name"] for e in data["entries"]]
+    assert "a.txt" in names
+    assert "sub" in names
+
+
+def test_files_tree_blocks_traversal(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    r = client.get("/api/files/tree?path=../..")
+    assert r.status_code == 403
+
+
+def test_files_content_read(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "hello.md").write_text("# hi\n", encoding="utf-8")
+    r = client.get("/api/files/content?path=hello.md")
+    assert r.status_code == 200
+    assert r.json()["content"] == "# hi\n"
+
+
+def test_files_content_blocks_traversal(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    r = client.get("/api/files/content?path=../etc/passwd")
+    assert r.status_code in {403, 404}
+
+
+def test_files_save_round_trip(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    p = tmp_path / "edit-me.txt"
+    p.write_text("original", encoding="utf-8")
+    r = client.put("/api/files/content",
+                     json={"path": "edit-me.txt", "content": "updated"})
+    assert r.status_code == 200
+    assert p.read_text(encoding="utf-8") == "updated"
+
+
+def test_files_save_blocks_creating_new_file(client, tmp_path, monkeypatch):
+    """Save endpoint edits only — creating new files needs a separate
+    explicit gesture."""
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    r = client.put("/api/files/content",
+                     json={"path": "brand-new.txt", "content": "nope"})
+    assert r.status_code == 404
+
+
+def test_files_save_blocks_traversal(client, tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    r = client.put("/api/files/content",
+                     json={"path": "../escape.txt", "content": "x"})
+    assert r.status_code == 403
+
+
+def test_workflow_import_inline_json(client, tmp_path, monkeypatch):
+    """POST /api/workflows/import with body.json saves + returns spec."""
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    payload = {"json": {
+        "title": "Imported flow",
+        "spec": [{"agent": "claude", "label": "x", "prompt": "hi"}],
+    }}
+    r = client.post("/api/workflows/import", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "Imported flow"
+    assert len(body["spec"]) == 1
+    # Saved on disk under sanitized name
+    files = list(tmp_path.glob("*.json"))
+    assert len(files) == 1
+
+
+def test_workflow_import_from_path(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    src = tmp_path / "ext.json"
+    src.write_text(json.dumps({
+        "title": "From file",
+        "spec": [{"agent": "gemini", "label": "g", "prompt": "yo"}],
+    }), encoding="utf-8")
+    r = client.post("/api/workflows/import", json={"path": str(src)})
+    assert r.status_code == 200
+    assert r.json()["title"] == "From file"
+
+
+def test_workflow_import_rejects_invalid(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    # No json or path
+    r = client.post("/api/workflows/import", json={})
+    assert r.status_code == 400
+    # Empty spec
+    r = client.post("/api/workflows/import",
+                     json={"json": {"title": "x", "spec": []}})
+    assert r.status_code == 400
+    # Non-existent path
+    r = client.post("/api/workflows/import",
+                     json={"path": str(tmp_path / "nope.json")})
+    assert r.status_code == 404
+
+
 def test_workflow_save_load_delete_cycle(client, tmp_path, monkeypatch):
     """End-to-end: PUT a workflow, GET it back, list it, DELETE it."""
     monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
@@ -432,6 +536,145 @@ def test_workflow_name_sanitization(client, tmp_path, monkeypatch):
     # Should be sanitized — no spaces, no special chars
     assert " " not in files[0].name
     assert "&" not in files[0].name
+
+
+def test_extract_openai_compatible_response():
+    raw = json.dumps({
+        "choices": [{"message": {"content": "hello world"}}],
+        "usage": {"total_tokens": 12},
+    })
+    out = dash._extract_response_text(raw, {})
+    assert out == "hello world"
+
+
+def test_extract_anthropic_native_response():
+    raw = json.dumps({
+        "content": [
+            {"type": "text", "text": "first part"},
+            {"type": "text", "text": "second part"},
+        ],
+        "model": "claude-sonnet-4-6",
+    })
+    out = dash._extract_response_text(raw, {"anthropic_native": True})
+    assert out == "first part\nsecond part"
+
+
+def test_extract_google_native_response():
+    raw = json.dumps({
+        "candidates": [{
+            "content": {"parts": [{"text": "from gemini api"}]},
+        }],
+    })
+    out = dash._extract_response_text(raw, {"google_native": True})
+    assert out == "from gemini api"
+
+
+def test_extract_handles_error_payload():
+    raw = json.dumps({"error": {"type": "rate_limit", "message": "slow down"}})
+    out = dash._extract_response_text(raw, {"anthropic_native": True})
+    assert "anthropic error" in out
+    assert "rate_limit" in out
+
+
+def test_extract_falls_back_to_raw_on_invalid_json():
+    raw = "not actually json {oops"
+    out = dash._extract_response_text(raw, {})
+    assert out == raw
+
+
+def test_http_runner_missing_api_key_marks_failed(client, monkeypatch):
+    """If the env var named in http.api_key_env is empty, the agent
+    should mark itself failed with exit_code 401 — not crash."""
+    monkeypatch.setitem(dash.AGENT_KINDS, "test-http", {
+        "label": "test http", "family": "glm", "summary": "test",
+        "runner": "http",
+        "http": {
+            "endpoint": "https://example.invalid/v1",
+            "model": "test",
+            "api_key_env": "DEFINITELY_NOT_SET_TEST_VAR",
+            "headers": {},
+        },
+    })
+    monkeypatch.delenv("DEFINITELY_NOT_SET_TEST_VAR", raising=False)
+    r = client.post("/api/runs", json={
+        "title": "no key",
+        "spec": [{"agent": "test-http", "label": "x", "prompt": "y"}],
+    })
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+    assert body["agents"][0]["status"] == "failed"
+    assert body["agents"][0]["exit_code"] == 401
+
+
+def test_http_runner_calls_provider_endpoint(client, monkeypatch):
+    """Mock urllib.request.urlopen and verify the runner builds an
+    OpenAI-compatible request with the right headers + body, then
+    parses the response correctly."""
+    captured: dict[str, Any] = {}
+
+    class _MockResp:
+        status = 200
+        def __init__(self, body: bytes):
+            self._body = body
+        def read(self) -> bytes:
+            return self._body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def mock_urlopen(req, timeout=180):
+        captured["url"] = req.full_url
+        captured["headers"] = dict(req.header_items())
+        captured["body"] = req.data.decode("utf-8")
+        body = json.dumps({"choices": [{"message": {"content": "PROVIDER PONG"}}]})
+        return _MockResp(body.encode("utf-8"))
+
+    monkeypatch.setenv("MOCK_PROVIDER_KEY", "sk-test-12345")
+    monkeypatch.setitem(dash.AGENT_KINDS, "mock-provider", {
+        "label": "mock", "family": "glm", "summary": "test",
+        "runner": "http",
+        "http": {
+            "endpoint": "https://mock-provider.example/v1/chat/completions",
+            "model": "mock-model-1",
+            "api_key_env": "MOCK_PROVIDER_KEY",
+            "headers": {"X-Custom": "yes"},
+        },
+    })
+
+    import urllib.request
+    monkeypatch.setattr(urllib.request, "urlopen", mock_urlopen)
+
+    r = client.post("/api/runs", json={
+        "title": "mock provider run",
+        "spec": [{"agent": "mock-provider", "label": "p", "prompt": "say hi"}],
+    })
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+
+    assert body["agents"][0]["status"] == "done"
+    log = client.get(f"/api/runs/{run_id}/output/p").json()["log"]
+    assert "PROVIDER PONG" in log
+    # Verify the runner shaped the request correctly
+    assert captured["url"] == "https://mock-provider.example/v1/chat/completions"
+    auth = next(v for k, v in captured["headers"].items() if k.lower() == "authorization")
+    assert auth == "Bearer sk-test-12345"
+    custom = next(v for k, v in captured["headers"].items() if k.lower() == "x-custom")
+    assert custom == "yes"
+    body_json = json.loads(captured["body"])
+    assert body_json["model"] == "mock-model-1"
+    assert body_json["messages"][0]["content"] == "say hi"
 
 
 def test_run_report_renders_markdown(client):

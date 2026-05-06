@@ -187,15 +187,19 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ Doctor passes
 - ✅ Task store + run history
 - ✅ Web dashboard with live SSE streaming
-- ✅ 6 model selector (Sonnet 4.6 / Opus 4.7 / Opus 4.6 / Flash / Pro / 3 Pro)
+- ✅ 6 subscription models + opt-in API providers (OpenRouter / GLM / Anthropic / Google API)
 - ✅ Apple + Revolut dark redesign (glassmorphism, purple accent)
 - ✅ Sequential pipelines (`depends_on` + `{{label}}` substitution)
 - ✅ Context placeholders (`{{file:path}}`, `{{git:diff}}`, `{{git:log:5}}`, etc.)
 - ✅ Workflow files on disk (`D:\CG\workflows\*.json`) — share via git
+- ✅ Workflow JSON import (paste / file / `cg dashboard --workflow <name>`)
+- ✅ Workflow generator helper (`src/workflow_gen.py`) for orchestrating Claude Code sessions
 - ✅ Markdown / diff render view-toggle (raw / md / diff segmented control)
 - ✅ Run report export (single Markdown bundle of any run)
+- ✅ Inline file editor (CodeMirror tab) with file tree + atomic save
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 44 pytest tests passing (15 cg + 29 dashboard)
+- ✅ 72 pytest tests passing
+- ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 
 ## Migrating from CLAUDEGRAVITY

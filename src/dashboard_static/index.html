@@ -8,14 +8,29 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/theme/material-darker.css" />
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/javascript/javascript.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/python/python.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/markdown/markdown.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/htmlmixed/htmlmixed.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/css/css.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/mode/xml/xml.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/closebrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.16/addon/edit/matchbrackets.js"></script>
 </head>
 <body>
   <header>
     <h1>CG <span class="dim">— multi-agent</span></h1>
+    <nav class="tabs">
+      <button class="tab active" data-tab="orchestrator">Orchestrator</button>
+      <button class="tab" data-tab="editor">Editor</button>
+    </nav>
     <div class="status" id="server-status">connecting…</div>
   </header>
 
-  <main>
+  <main id="tab-orchestrator" class="tab-pane active">
     <!-- LEFT: workflow designer -->
     <section class="designer">
       <h2>Workflow</h2>
@@ -36,6 +51,15 @@
           <button class="ghost" id="save-workflow-btn" title="Save current workflow (Ctrl+S)">💾</button>
           <button class="ghost" id="save-disk-btn" title="Save to disk (D:\CG\workflows\)">📁</button>
           <button class="ghost" id="del-workflow-btn" title="Delete selected workflow">🗑</button>
+        </div>
+      </div>
+
+      <div class="row">
+        <label>Import workflow JSON</label>
+        <div class="workflows-row">
+          <button class="ghost" id="import-paste-btn" title="Paste a JSON workflow (e.g. one Claude Code generated)">📋 paste</button>
+          <input type="file" id="import-file" accept=".json,application/json" style="display:none" />
+          <button class="ghost" id="import-file-btn" title="Import from a .json file on disk">📂 file</button>
         </div>
       </div>
 
@@ -74,6 +98,35 @@
         <div class="empty-state">
           ← define a workflow on the left, then hit Run.<br />
           Each agent's live stdout will appear here in its own panel.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  </main>
+
+  <main id="tab-editor" class="tab-pane editor-pane">
+    <aside class="file-tree-pane">
+      <div class="file-tree-head">
+        <span class="root-label" id="editor-root-label">project root</span>
+        <button class="ghost" id="editor-refresh-btn" title="Refresh tree">↻</button>
+      </div>
+      <ul class="file-tree" id="file-tree"></ul>
+    </aside>
+    <section class="editor-area">
+      <div class="editor-toolbar">
+        <span id="editor-current-file" class="editor-path">no file open</span>
+        <div class="editor-actions">
+          <span id="editor-dirty" class="dirty-pill" hidden>● unsaved</span>
+          <button class="ghost" id="editor-save-btn" disabled title="Save (Ctrl+S)">💾 save</button>
+          <button class="ghost" id="editor-revert-btn" disabled title="Revert">↶ revert</button>
+        </div>
+      </div>
+      <div class="editor-host" id="editor-host">
+        <div class="empty-state" id="editor-empty">
+          ← pick a file from the tree to open it.<br />
+          Editing here writes back to your local filesystem,
+          rooted at <code id="editor-root-display">D:\CG</code>.
         </div>
       </div>
     </section>

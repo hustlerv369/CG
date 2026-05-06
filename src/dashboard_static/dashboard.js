@@ -28,10 +28,12 @@ async function init() {
   const p = await fetch("/api/presets").then(r => r.json());
   state.presets = p.presets;
   populatePresets();
-  populateWorkflows();
+  await populateWorkflows();
   await refreshHistory();
   ensureOneAgentRow();
   requestNotificationPermission();
+  // CLI auto-load: cg dashboard --workflow <name>
+  await autoLoadFromUrl();
 
   setInterval(refreshHistory, 5000);
 }
@@ -118,6 +120,83 @@ async function saveWorkflowToDisk() {
   } catch (e) {
     alert("Network error: " + e);
   }
+}
+
+async function importWorkflowFromPaste() {
+  const text = prompt(
+    "Paste workflow JSON here.\n\n" +
+    'Schema: { "title": "...", "spec": [{ "agent": "claude-sonnet-4-6", ' +
+    '"label": "...", "depends_on": [], "prompt": "..." }] }'
+  );
+  if (!text || !text.trim()) return;
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) { alert("Not valid JSON: " + e); return; }
+  await sendImport({ json: data });
+}
+
+async function importWorkflowFromFile(ev) {
+  const file = ev.target.files && ev.target.files[0];
+  if (!file) return;
+  const text = await file.text();
+  let data;
+  try { data = JSON.parse(text); }
+  catch (e) { alert("Not valid JSON: " + e); return; }
+  await sendImport({ json: data });
+  ev.target.value = "";  // allow re-import same file
+}
+
+async function sendImport(body) {
+  try {
+    const r = await fetch("/api/workflows/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) {
+      const err = await r.text();
+      alert("Import failed: " + err);
+      return;
+    }
+    const data = await r.json();
+    setStatus(`imported "${data.title}"`, "ok");
+    setTimeout(() => setStatus("connected", "ok"), 2000);
+    await populateWorkflows();
+    loadSpecIntoDesigner({ title: data.title, spec: data.spec });
+  } catch (e) { alert("Network error: " + e); }
+}
+
+async function autoLoadFromUrl() {
+  // Support  /?workflow=<name>  for cg dashboard --workflow <name>
+  const params = new URLSearchParams(window.location.search);
+  const wf = params.get("workflow");
+  if (!wf) return;
+  try {
+    let url;
+    if (wf.endsWith(".json") || wf.includes("/") || wf.includes("\\")) {
+      // Treat as path → ask backend to read it
+      const r = await fetch("/api/workflows/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: wf }),
+      });
+      if (r.ok) {
+        const data = await r.json();
+        loadSpecIntoDesigner({ title: data.title, spec: data.spec });
+        await populateWorkflows();
+        setStatus(`auto-loaded "${data.title}"`, "ok");
+        setTimeout(() => setStatus("connected", "ok"), 2500);
+      }
+    } else {
+      // Treat as saved workflow name
+      const r = await fetch(`/api/workflows/${encodeURIComponent(wf)}`);
+      if (r.ok) {
+        loadSpecIntoDesigner(await r.json());
+        setStatus(`auto-loaded "${wf}"`, "ok");
+        setTimeout(() => setStatus("connected", "ok"), 2500);
+      }
+    }
+  } catch (e) { /* ignore — no workflow auto-load */ }
 }
 
 async function deleteSelectedWorkflowEither() {
@@ -615,9 +694,210 @@ function formatTime(ts) {
 
 // ---------- wire up buttons ----------
 
+// ---------- editor tab (file tree + CodeMirror) ----------
+
+const editorState = {
+  cm: null,
+  currentPath: null,
+  originalContent: "",
+  dirty: false,
+  expandedDirs: new Set(),
+};
+
+function modeForPath(path) {
+  const ext = (path.split(".").pop() || "").toLowerCase();
+  return {
+    "py": "python",
+    "js": "javascript", "mjs": "javascript", "ts": "javascript",
+    "tsx": "javascript", "jsx": "javascript",
+    "md": "markdown",
+    "html": "htmlmixed", "htm": "htmlmixed",
+    "css": "css",
+    "json": { name: "javascript", json: true },
+    "xml": "xml", "svg": "xml",
+  }[ext] || null;
+}
+
+function ensureCodeMirror() {
+  if (editorState.cm) return editorState.cm;
+  const host = $("#editor-host");
+  $("#editor-empty").style.display = "none";
+  editorState.cm = CodeMirror(host, {
+    value: "",
+    theme: "material-darker",
+    lineNumbers: true,
+    autoCloseBrackets: true,
+    matchBrackets: true,
+    indentUnit: 2,
+    tabSize: 2,
+    extraKeys: {
+      "Ctrl-S": () => editorSave(),
+      "Cmd-S":  () => editorSave(),
+    },
+  });
+  editorState.cm.on("change", () => {
+    const cur = editorState.cm.getValue();
+    const dirty = cur !== editorState.originalContent;
+    if (dirty !== editorState.dirty) {
+      editorState.dirty = dirty;
+      $("#editor-dirty").hidden = !dirty;
+      $("#editor-save-btn").disabled = !dirty;
+      $("#editor-revert-btn").disabled = !dirty;
+    }
+  });
+  return editorState.cm;
+}
+
+async function loadFileTree(path = "") {
+  try {
+    const r = await fetch(`/api/files/tree?path=${encodeURIComponent(path)}`);
+    if (!r.ok) {
+      $("#file-tree").innerHTML =
+        `<li style="color:var(--error);padding:8px 14px">${(await r.text()).slice(0, 200)}</li>`;
+      return;
+    }
+    const data = await r.json();
+    $("#editor-root-label").textContent = data.root.replace(/^.*[\\/]/, "");
+    $("#editor-root-label").title = data.root;
+    if ($("#editor-root-display")) $("#editor-root-display").textContent = data.root;
+
+    const root = document.createDocumentFragment();
+    data.entries.forEach(entry => root.appendChild(buildFileTreeNode(entry)));
+    const ul = $("#file-tree");
+    ul.innerHTML = "";
+    ul.appendChild(root);
+  } catch (e) {
+    $("#file-tree").innerHTML =
+      `<li style="color:var(--error);padding:8px 14px">network error: ${e}</li>`;
+  }
+}
+
+function buildFileTreeNode(entry) {
+  const li = document.createElement("li");
+  li.className = entry.is_dir ? "dir" : "file";
+  li.dataset.path = entry.path;
+  const icon = entry.is_dir ? "▸" : "·";
+  li.innerHTML = `<span class="icon">${icon}</span><span>${escapeHtml(entry.name)}</span>`;
+  li.onclick = async (ev) => {
+    ev.stopPropagation();
+    if (entry.is_dir) {
+      // toggle expand
+      const existing = li.querySelector(":scope > .nested");
+      if (existing) {
+        existing.remove();
+        li.querySelector(".icon").textContent = "▸";
+        editorState.expandedDirs.delete(entry.path);
+        return;
+      }
+      const r = await fetch(`/api/files/tree?path=${encodeURIComponent(entry.path)}`);
+      if (!r.ok) return;
+      const data = await r.json();
+      const nested = document.createElement("ul");
+      nested.className = "nested";
+      data.entries.forEach(child => nested.appendChild(buildFileTreeNode(child)));
+      li.appendChild(nested);
+      li.querySelector(".icon").textContent = "▾";
+      editorState.expandedDirs.add(entry.path);
+    } else {
+      await openFileInEditor(entry.path);
+      document.querySelectorAll(".file-tree li.active")
+        .forEach(x => x.classList.remove("active"));
+      li.classList.add("active");
+    }
+  };
+  return li;
+}
+
+async function openFileInEditor(path) {
+  if (editorState.dirty) {
+    if (!confirm("Discard unsaved changes?")) return;
+  }
+  try {
+    const r = await fetch(`/api/files/content?path=${encodeURIComponent(path)}`);
+    if (!r.ok) {
+      alert(`Open failed: ${await r.text()}`);
+      return;
+    }
+    const data = await r.json();
+    const cm = ensureCodeMirror();
+    cm.setValue(data.content);
+    cm.setOption("mode", modeForPath(path));
+    editorState.originalContent = data.content;
+    editorState.currentPath = path;
+    editorState.dirty = false;
+    $("#editor-current-file").textContent = path;
+    $("#editor-dirty").hidden = true;
+    $("#editor-save-btn").disabled = true;
+    $("#editor-revert-btn").disabled = true;
+  } catch (e) { alert("Network error: " + e); }
+}
+
+async function editorSave() {
+  if (!editorState.currentPath || !editorState.dirty || !editorState.cm) return;
+  const content = editorState.cm.getValue();
+  try {
+    const r = await fetch("/api/files/content", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: editorState.currentPath, content }),
+    });
+    if (!r.ok) {
+      alert(`Save failed: ${await r.text()}`);
+      return;
+    }
+    editorState.originalContent = content;
+    editorState.dirty = false;
+    $("#editor-dirty").hidden = true;
+    $("#editor-save-btn").disabled = true;
+    $("#editor-revert-btn").disabled = true;
+    setStatus(`saved ${editorState.currentPath}`, "ok");
+    setTimeout(() => setStatus("connected", "ok"), 1500);
+  } catch (e) { alert("Network error: " + e); }
+}
+
+function editorRevert() {
+  if (!editorState.cm || !editorState.dirty) return;
+  if (!confirm("Discard unsaved changes?")) return;
+  editorState.cm.setValue(editorState.originalContent);
+  editorState.dirty = false;
+  $("#editor-dirty").hidden = true;
+  $("#editor-save-btn").disabled = true;
+  $("#editor-revert-btn").disabled = true;
+}
+
+function switchTab(tab) {
+  document.querySelectorAll("nav.tabs .tab").forEach(b =>
+    b.classList.toggle("active", b.dataset.tab === tab));
+  document.querySelectorAll(".tab-pane").forEach(p =>
+    p.classList.toggle("active", p.id === `tab-${tab}`));
+  if (tab === "editor") {
+    if (!$("#file-tree").firstChild) {
+      loadFileTree("");
+    }
+    if (editorState.cm) {
+      // CodeMirror needs a refresh after being shown
+      setTimeout(() => editorState.cm.refresh(), 50);
+    }
+  }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   $("#add-agent").onclick = () => addAgentRow();
   $("#run-btn").onclick = startRun;
+  // Tab switcher
+  document.querySelectorAll("nav.tabs .tab").forEach(b => {
+    b.addEventListener("click", () => switchTab(b.dataset.tab));
+  });
+  // Editor handlers
+  if ($("#editor-refresh-btn")) {
+    $("#editor-refresh-btn").onclick = () => loadFileTree("");
+  }
+  if ($("#editor-save-btn")) {
+    $("#editor-save-btn").onclick = editorSave;
+  }
+  if ($("#editor-revert-btn")) {
+    $("#editor-revert-btn").onclick = editorRevert;
+  }
   $("#clear-btn").onclick = () => {
     $("#agent-rows").innerHTML = "";
     $("#run-title").value = "";
@@ -632,6 +912,15 @@ document.addEventListener("DOMContentLoaded", () => {
   if ($("#save-disk-btn")) {
     $("#save-disk-btn").onclick = saveWorkflowToDisk;
   }
+  if ($("#import-paste-btn")) {
+    $("#import-paste-btn").onclick = importWorkflowFromPaste;
+  }
+  if ($("#import-file-btn")) {
+    $("#import-file-btn").onclick = () => $("#import-file").click();
+  }
+  if ($("#import-file")) {
+    $("#import-file").addEventListener("change", importWorkflowFromFile);
+  }
   // View mode segmented control
   document.querySelectorAll("#view-toggle .seg").forEach(b => {
     b.addEventListener("click", () => setViewMode(b.dataset.view));
@@ -644,10 +933,17 @@ document.addEventListener("DOMContentLoaded", () => {
       e.preventDefault();
       startRun();
     }
-    // Ctrl/Cmd + S = save workflow
+    // Ctrl/Cmd + S = context-aware save
+    //   - if editor tab is open + a file is dirty: save the file
+    //   - otherwise: save the current workflow to localStorage
     if ((e.ctrlKey || e.metaKey) && e.key === "s") {
       e.preventDefault();
-      saveCurrentWorkflow();
+      const editorActive = $("#tab-editor")?.classList.contains("active");
+      if (editorActive && editorState.dirty) {
+        editorSave();
+      } else {
+        saveCurrentWorkflow();
+      }
     }
   });
 

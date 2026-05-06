@@ -146,6 +146,151 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# Optional HTTP-based providers (require user-supplied API keys, opt-in)
+#
+# NOT a subscription token reuse — each provider below is invoked through
+# its OWN paid API with the user's own key. Anthropic and Google's recent
+# ToS updates ban OAuth-token reuse from third-party tools; subprocess
+# invocation of the official CLIs (the rest of AGENT_KINDS above) is the
+# documented and supported path. This block is for users who want to add
+# direct paid API access to additional providers (GLM via Z.ai, anything
+# via OpenRouter, etc.) — the dashboard auto-detects which API keys are
+# present in the environment and exposes only those models.
+# ---------------------------------------------------------------------------
+
+
+def _build_http_models() -> dict[str, dict[str, Any]]:
+    """Detect which API keys are set in the environment and return a dict
+    of new model entries to merge into AGENT_KINDS."""
+    out: dict[str, dict[str, Any]] = {}
+
+    # OpenRouter — any model, single API, ~no markup over native pricing
+    if os.environ.get("OPENROUTER_API_KEY"):
+        out.update({
+            "or-glm-4.7": {
+                "label": "GLM-4.7 via OpenRouter",
+                "family": "glm",
+                "summary": "$0.38/$1.74 per M tokens — strong + cheap",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "z-ai/glm-4.7",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+            "or-deepseek-v3": {
+                "label": "DeepSeek V3 via OpenRouter",
+                "family": "deepseek",
+                "summary": "$0.27/$1.10 per M — strongest value coding model",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "deepseek/deepseek-chat-v3",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+            "or-qwen3-coder": {
+                "label": "Qwen3 Coder via OpenRouter",
+                "family": "qwen",
+                "summary": "$0.15/$1.00 per M — agentic coding, 262k ctx",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "qwen/qwen3-coder",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+        })
+
+    # Z.ai GLM direct
+    if os.environ.get("ZHIPU_API_KEY") or os.environ.get("ZAI_API_KEY"):
+        env_var = "ZHIPU_API_KEY" if os.environ.get("ZHIPU_API_KEY") else "ZAI_API_KEY"
+        out.update({
+            "glm-4.7": {
+                "label": "GLM-4.7 (Z.ai direct)",
+                "family": "glm",
+                "summary": "$0.60/$2.20 per M — Z.ai flagship",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://api.z.ai/api/paas/v4/chat/completions",
+                    "model": "glm-4.7",
+                    "api_key_env": env_var,
+                    "headers": {},
+                },
+            },
+            "glm-4.7-flash": {
+                "label": "GLM-4.7 Flash (FREE tier)",
+                "family": "glm",
+                "summary": "Free tier — fastest GLM",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://api.z.ai/api/paas/v4/chat/completions",
+                    "model": "glm-4.7-flash",
+                    "api_key_env": env_var,
+                    "headers": {},
+                },
+            },
+            "glm-4.7-flashx": {
+                "label": "GLM-4.7 FlashX (ultra-cheap)",
+                "family": "glm",
+                "summary": "$0.07/$0.40 per M — cheapest paid GLM",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://api.z.ai/api/paas/v4/chat/completions",
+                    "model": "glm-4.7-flashx",
+                    "api_key_env": env_var,
+                    "headers": {},
+                },
+            },
+        })
+
+    # Anthropic API direct (separate billing — costs money outside Pro)
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        out["claude-api-sonnet"] = {
+            "label": "Claude Sonnet 4.6 (API)",
+            "family": "claude",
+            "summary": "API billing — independent of Claude Pro quota",
+            "runner": "http",
+            "http": {
+                "endpoint": "https://api.anthropic.com/v1/messages",
+                "model": "claude-sonnet-4-6",
+                "api_key_env": "ANTHROPIC_API_KEY",
+                "anthropic_native": True,  # different request shape
+            },
+        }
+
+    # Google AI Studio (Gemini API direct)
+    if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
+        env_var = "GEMINI_API_KEY" if os.environ.get("GEMINI_API_KEY") else "GOOGLE_API_KEY"
+        out["gemini-api-pro"] = {
+            "label": "Gemini Pro (API)",
+            "family": "gemini",
+            "summary": "API billing — independent of Google subscription",
+            "runner": "http",
+            "http": {
+                "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent",
+                "model": "gemini-pro",
+                "api_key_env": env_var,
+                "google_native": True,
+            },
+        }
+
+    return out
+
+
+# Merge HTTP-based models into AGENT_KINDS at startup so they appear in
+# the dropdown. Re-evaluated each time get_agents is called so adding a
+# new env var and refreshing /api/agents picks them up without restart.
+AGENT_KINDS.update(_build_http_models())
+
+
 # Backward-compatible aliases for old presets / clients ("claude" → default
 # Sonnet, "gemini" → default Pro)
 AGENT_ALIASES = {
@@ -389,6 +534,14 @@ class RunManager:
         out_path = run_dir / f"{label}.out.md"
         out_fp = open(out_path, "w", encoding="utf-8", buffering=1)
 
+        # HTTP-based provider runner — for OpenRouter, Z.ai, Anthropic
+        # API, Google API. Stateless one-shot HTTP call, mirrored into
+        # the same log/output channels as the subprocess runner.
+        if cfg.get("runner") == "http":
+            self._run_one_http(run, label, agent, prompt, cfg, out_fp)
+            out_fp.close()
+            return
+
         cmd = list(cfg["command"])
         if cfg["stdin_prompt"]:
             stdin_input: str | None = prompt
@@ -465,6 +618,105 @@ class RunManager:
         self._emit(run.id, label, {"event": "status", "data": {
             "label": label, "status": agent_state.status,
             "exit_code": agent_state.exit_code}})
+
+    def _run_one_http(self, run: "RunState", label: str, agent: str,
+                       prompt: str, cfg: dict[str, Any], out_fp: Any) -> None:
+        """HTTP runner for paid-API models (OpenRouter / Z.ai / Anthropic
+        API / Google AI Studio). One non-streaming POST per call; the
+        full response text is appended to the agent's log buffer in one
+        chunk (we could stream later, but most providers' SSE shapes
+        differ enough that batch-then-emit is simpler and reliable)."""
+        import urllib.request
+        import urllib.error
+
+        agent_state = run.agents[label]
+        http_cfg = cfg["http"]
+        api_key = os.environ.get(http_cfg["api_key_env"])
+        if not api_key:
+            agent_state.status = "failed"
+            agent_state.exit_code = 401
+            agent_state.finished = time.time()
+            agent_state.log_lines.append(
+                f"[error] env var {http_cfg['api_key_env']!r} is empty"
+            )
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": agent_state.log_lines[-1]}})
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "failed", "exit_code": 401}})
+            return
+
+        # Build provider-specific request
+        if http_cfg.get("anthropic_native"):
+            url = http_cfg["endpoint"]
+            payload = {
+                "model": http_cfg["model"],
+                "max_tokens": 4096,
+                "messages": [{"role": "user", "content": prompt}],
+            }
+            headers = {
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            }
+        elif http_cfg.get("google_native"):
+            url = f"{http_cfg['endpoint']}?key={api_key}"
+            payload = {
+                "contents": [{"parts": [{"text": prompt}]}],
+            }
+            headers = {"content-type": "application/json"}
+        else:
+            # OpenAI-compatible (OpenRouter, Z.ai, etc.)
+            url = http_cfg["endpoint"]
+            payload = {
+                "model": http_cfg["model"],
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            }
+            headers = {
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            }
+            for k, v in (http_cfg.get("headers") or {}).items():
+                headers[k] = v
+
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=headers,
+            method="POST",
+        )
+
+        try:
+            with urllib.request.urlopen(req, timeout=180) as resp:
+                raw = resp.read().decode("utf-8", errors="replace")
+                exit_code = 0 if resp.status < 300 else resp.status
+        except urllib.error.HTTPError as exc:
+            raw = exc.read().decode("utf-8", errors="replace")
+            exit_code = exc.code
+        except Exception as exc:
+            agent_state.status = "failed"
+            agent_state.exit_code = 1
+            agent_state.finished = time.time()
+            agent_state.log_lines.append(f"[network error] {exc}")
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": agent_state.log_lines[-1]}})
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "failed", "exit_code": 1}})
+            return
+
+        text = _extract_response_text(raw, http_cfg)
+        for line in text.splitlines() or [""]:
+            agent_state.log_lines.append(line)
+            out_fp.write(line + "\n")
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": line}})
+
+        agent_state.exit_code = exit_code
+        agent_state.status = "done" if exit_code == 0 else "failed"
+        agent_state.finished = time.time()
+        self._emit(run.id, label, {"event": "status", "data": {
+            "label": label, "status": agent_state.status,
+            "exit_code": exit_code}})
 
     def cancel_run(self, run_id: str) -> bool:
         """Kill any in-flight subprocesses for this run."""
@@ -816,6 +1068,60 @@ def _expand_context_placeholders(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# HTTP response text extraction (per-provider shape differences)
+# ---------------------------------------------------------------------------
+
+
+def _extract_response_text(raw: str, http_cfg: dict[str, Any]) -> str:
+    """Pull plain text out of the JSON response, accounting for provider
+    differences. Falls back to the raw body if parsing fails so the user
+    still sees the error payload."""
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+
+    # Provider-specific shapes
+    if http_cfg.get("anthropic_native"):
+        # {"content": [{"type":"text", "text":"..."}], ...}
+        content = data.get("content") or []
+        parts = [c.get("text", "") for c in content if c.get("type") == "text"]
+        if parts:
+            return "\n".join(parts)
+        # Errors: {"error": {"type":"...", "message":"..."}}
+        if "error" in data:
+            return f"[anthropic error] {data['error']}"
+        return raw
+
+    if http_cfg.get("google_native"):
+        # {"candidates": [{"content": {"parts": [{"text":"..."}]}}]}
+        cands = data.get("candidates") or []
+        if cands:
+            content = cands[0].get("content", {})
+            parts = content.get("parts", [])
+            text_parts = [p.get("text", "") for p in parts if "text" in p]
+            if text_parts:
+                return "".join(text_parts)
+        if "error" in data:
+            return f"[google error] {data['error']}"
+        return raw
+
+    # OpenAI-compatible (OpenRouter / Z.ai / DeepSeek)
+    # {"choices": [{"message": {"content": "..."}}], "usage": {...}}
+    choices = data.get("choices") or []
+    if choices:
+        msg = choices[0].get("message", {})
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):  # multi-part content blocks
+            return "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    if "error" in data:
+        return f"[provider error] {data['error']}"
+    return raw
+
+
+# ---------------------------------------------------------------------------
 # Workflow filesystem helpers
 # ---------------------------------------------------------------------------
 
@@ -1057,6 +1363,135 @@ def create_app() -> FastAPI:
         path.unlink()
         return {"name": name, "deleted": True}
 
+    # ---- file tree + editor (read/write within CG_PROJECT_ROOT) -----------
+
+    @app.get("/api/files/tree")
+    async def files_tree(path: str = "") -> Any:
+        """List files & directories under the project root. Used by the
+        inline editor to render a tree on the left of the editor pane.
+        Returns a single level (not recursive); the UI lazy-loads
+        subdirs on click.
+        """
+        root = ROOT_PROJECT_FOR_FILES()
+        target = (root / path).resolve() if path else root
+        try:
+            target.relative_to(root)
+        except ValueError:
+            raise HTTPException(403, "path escapes project root")
+        if not target.exists():
+            raise HTTPException(404, "not found")
+        if not target.is_dir():
+            raise HTTPException(400, "not a directory")
+        entries = []
+        for child in sorted(target.iterdir(),
+                              key=lambda p: (not p.is_dir(), p.name.lower())):
+            # Skip noisy / private dirs by default
+            if child.name in {".git", "__pycache__", "node_modules",
+                                ".pytest_cache", ".venv", ".vscode"}:
+                continue
+            rel = str(child.relative_to(root)).replace("\\", "/")
+            entries.append({
+                "name": child.name,
+                "path": rel,
+                "is_dir": child.is_dir(),
+                "size": child.stat().st_size if child.is_file() else None,
+            })
+        return {
+            "root": str(root),
+            "path": str(target.relative_to(root)).replace("\\", "/") if target != root else "",
+            "entries": entries,
+        }
+
+    @app.get("/api/files/content")
+    async def file_content(path: str) -> Any:
+        """Read a UTF-8 text file from within the project root."""
+        root = ROOT_PROJECT_FOR_FILES()
+        p = (root / path).resolve()
+        try:
+            p.relative_to(root)
+        except ValueError:
+            raise HTTPException(403, "path escapes project root")
+        if not p.exists() or not p.is_file():
+            raise HTTPException(404, "not found")
+        size = p.stat().st_size
+        if size > 2_000_000:
+            raise HTTPException(413, f"file too large ({size} bytes)")
+        try:
+            content = p.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(415, "not a UTF-8 text file")
+        return {"path": path, "content": content, "size": size}
+
+    @app.put("/api/files/content")
+    async def file_save(body: dict[str, Any]) -> Any:
+        """Write a UTF-8 text file within the project root.
+
+        Editing only — must already exist (use the same UI gesture as
+        opening). Creating new files via this endpoint is a separate
+        future feature (would need explicit confirmation UI).
+        """
+        path = body.get("path") or ""
+        content = body.get("content")
+        if content is None or not isinstance(content, str):
+            raise HTTPException(400, "body.content must be a string")
+        root = ROOT_PROJECT_FOR_FILES()
+        p = (root / path).resolve()
+        try:
+            p.relative_to(root)
+        except ValueError:
+            raise HTTPException(403, "path escapes project root")
+        if not p.exists() or not p.is_file():
+            raise HTTPException(404, "not found (this endpoint edits, not creates)")
+        # Atomic write via temp + replace, so a crashed write doesn't
+        # leave a half-written source file
+        tmp = p.with_suffix(p.suffix + ".cg-tmp")
+        tmp.write_text(content, encoding="utf-8")
+        tmp.replace(p)
+        return {"path": path, "size": len(content.encode("utf-8"))}
+
+    @app.post("/api/workflows/import")
+    async def import_workflow(body: dict[str, Any]) -> Any:
+        """Import a workflow JSON either from inline body or by reading
+        a path on disk. Body shape::
+
+            { "json": { "title": "...", "spec": [...] } }
+            or
+            { "path": "absolute/or/cg-relative/path/to/workflow.json" }
+
+        On success, persists the workflow into ``D:\\CG\\workflows\\``
+        and returns the saved name plus the parsed spec so the frontend
+        can populate the designer immediately.
+        """
+        if "json" in body:
+            data = body["json"]
+        elif "path" in body:
+            p = Path(body["path"])
+            if not p.is_absolute():
+                p = (ROOT / p).resolve()
+            if not p.exists():
+                raise HTTPException(404, f"file not found: {p}")
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                raise HTTPException(400, f"not valid JSON: {exc}")
+        else:
+            raise HTTPException(400, "body must contain either 'json' or 'path'")
+
+        if not isinstance(data, dict):
+            raise HTTPException(400, "imported workflow must be a JSON object")
+        if not isinstance(data.get("spec"), list) or not data["spec"]:
+            raise HTTPException(400, "workflow.spec must be a non-empty array")
+        title = data.get("title") or "imported"
+        save_name = _safe_workflow_name(title)
+        save_path = _workflow_path(save_name)
+        data.setdefault("title", title)
+        data["importedAt"] = time.time()
+        save_path.write_text(
+            json.dumps(data, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return {"name": save_name, "title": title, "spec": data["spec"]}
+
     @app.get("/api/runs/{run_id}/stream")
     async def stream(run_id: str, request: Request) -> Any:
         run = manager.runs.get(run_id)
@@ -1127,9 +1562,19 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--no-open", action="store_true",
                          help="do not open browser automatically")
+    parser.add_argument("--workflow", default=None,
+                         help="auto-load this workflow on startup. Pass a "
+                              "name (looks up D:\\CG\\workflows\\<name>.json) "
+                              "or an absolute path to any .json file.")
     args = parser.parse_args()
 
     url = f"http://{args.host}:{args.port}"
+    if args.workflow:
+        # The dashboard frontend reads ?workflow=<name> from the URL
+        # at boot time and POSTs to /api/workflows/import, which both
+        # persists it and returns the spec for the designer.
+        url = f"{url}/?workflow={args.workflow}"
+
     if not args.no_open:
         try:
             import webbrowser
