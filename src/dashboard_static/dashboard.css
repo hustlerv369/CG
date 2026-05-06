@@ -825,6 +825,105 @@ main.settings-pane {
   font-size: 11.5px;
 }
 
+/* K4 — browser step builder */
+.browser-builder {
+  margin-top: 8px;
+  padding: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.browser-builder-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 8px;
+}
+.browser-builder-head .builder-title {
+  flex: 1;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--fg-secondary);
+  letter-spacing: 0.4px;
+}
+.browser-builder-head button {
+  font-size: 11px;
+  padding: 4px 10px;
+}
+.browser-steps {
+  display: flex; flex-direction: column; gap: 6px;
+}
+.browser-step {
+  background: var(--bg-card, var(--bg));
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px;
+}
+.browser-step-head {
+  display: flex; align-items: center; gap: 6px;
+}
+.browser-step-head .drag-handle {
+  color: var(--fg-tertiary);
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
+}
+.browser-step-head .step-action {
+  flex: 0 0 130px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.browser-step-head .step-bind-as {
+  flex: 1;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+.browser-step-head button {
+  background: none;
+  border: 1px solid transparent;
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  padding: 2px 7px;
+  font-size: 12px;
+  border-radius: 4px;
+  transition: all var(--transition);
+}
+.browser-step-head button:hover {
+  color: var(--fg);
+  background: var(--bg-hover, var(--bg-input));
+}
+.browser-step-head .step-remove:hover {
+  color: var(--error);
+  background: var(--error-soft);
+}
+.browser-step-fields {
+  margin-top: 6px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.browser-step-fields .step-field {
+  width: 100%;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+.browser-step-fields textarea.step-field {
+  min-height: 40px;
+}
+.browser-step-fields .step-bool {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--fg-secondary);
+}
+.browser-step-fields .step-empty {
+  font-size: 10.5px;
+  color: var(--fg-tertiary);
+  font-style: italic;
+  padding: 2px 4px;
+}
+
 .agent-controls {
   margin: 8px 0 18px 0;
 }

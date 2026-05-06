@@ -322,6 +322,213 @@ function buildAgentSelectOptions() {
     `).join("");
 }
 
+// ---------- K4: browser step builder ------------------------------------
+//
+// Each entry describes one Playwright action and which form fields the
+// builder UI exposes for it. `fields` are rendered in order. The schema
+// matches the action set in dashboard.py::_run_browser_step exactly.
+const BROWSER_ACTIONS = [
+  { id: "goto",          fields: [["url",      "text", "https://…"]] },
+  { id: "click",         fields: [["selector", "text", "CSS selector"]] },
+  { id: "fill",          fields: [["selector", "text", "CSS selector"],
+                                   ["value",    "text", "value"]] },
+  { id: "type",          fields: [["selector", "text", "CSS selector"],
+                                   ["text",     "text", "text to type"],
+                                   ["delay",    "num",  "delay ms (0)"]] },
+  { id: "press",         fields: [["selector", "text", "selector (default body)"],
+                                   ["key",      "text", "Enter / Tab / …"]] },
+  { id: "hover",         fields: [["selector", "text", "CSS selector"]] },
+  { id: "scroll",        fields: [["to",       "text", "top | bottom | <px>"]] },
+  { id: "wait_for",      fields: [["selector", "text", "selector (optional)"],
+                                   ["time_ms",  "num",  "or wait N ms"],
+                                   ["state",    "text", "visible / attached / hidden"]] },
+  { id: "extract",       fields: [["selector", "text", "CSS selector"],
+                                   ["attr",     "text", "attribute (optional)"]] },
+  { id: "extract_all",   fields: [["selector", "text", "CSS selector"],
+                                   ["attr",     "text", "attribute (optional)"]] },
+  { id: "screenshot",    fields: [["selector",  "text", "selector (optional)"],
+                                   ["full_page", "bool", "full page (default true)"]] },
+  { id: "evaluate",      fields: [["script",   "ta",   "JavaScript expression"]] },
+  { id: "title",         fields: [] },
+  { id: "content",       fields: [] },
+  { id: "url",           fields: [] },
+  { id: "accept_dialog", fields: [] },
+  { id: "pdf",           fields: [] },
+];
+
+function browserActionMeta(id) {
+  return BROWSER_ACTIONS.find(a => a.id === id) || BROWSER_ACTIONS[0];
+}
+
+function renderBrowserStepCard(stepData = { action: "goto" }) {
+  const card = document.createElement("div");
+  card.className = "browser-step";
+  card.innerHTML = `
+    <div class="browser-step-head">
+      <span class="drag-handle" title="Reorder">⋮⋮</span>
+      <select class="step-action">
+        ${BROWSER_ACTIONS.map(a => `<option value="${a.id}">${a.id}</option>`).join("")}
+      </select>
+      <input type="text" class="step-bind-as" placeholder="bind_as (optional)" />
+      <button type="button" class="step-up"  title="Move up">↑</button>
+      <button type="button" class="step-down" title="Move down">↓</button>
+      <button type="button" class="step-remove" title="Remove">×</button>
+    </div>
+    <div class="browser-step-fields"></div>
+  `;
+  const actionSel = card.querySelector(".step-action");
+  actionSel.value = stepData.action || "goto";
+  card.querySelector(".step-bind-as").value = stepData.bind_as || "";
+
+  function rebuildFields() {
+    const meta = browserActionMeta(actionSel.value);
+    const wrap = card.querySelector(".browser-step-fields");
+    wrap.innerHTML = "";
+    if (meta.fields.length === 0) {
+      const note = document.createElement("div");
+      note.className = "step-empty";
+      note.textContent = "(no parameters)";
+      wrap.appendChild(note);
+      return;
+    }
+    for (const [name, type, placeholder] of meta.fields) {
+      const fieldId = `f-${name}`;
+      let el;
+      if (type === "ta") {
+        el = document.createElement("textarea");
+      } else if (type === "bool") {
+        const lab = document.createElement("label");
+        lab.className = "step-bool";
+        const cb = document.createElement("input");
+        cb.type = "checkbox";
+        cb.className = "step-field";
+        cb.dataset.field = name;
+        cb.dataset.kind = "bool";
+        if (stepData[name] !== undefined) cb.checked = !!stepData[name];
+        else cb.checked = name === "full_page";  // default true for screenshot
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(" " + (placeholder || name)));
+        wrap.appendChild(lab);
+        continue;
+      } else {
+        el = document.createElement("input");
+        el.type = type === "num" ? "number" : "text";
+      }
+      el.className = "step-field";
+      el.dataset.field = name;
+      el.dataset.kind = type;
+      el.placeholder = placeholder || name;
+      const v = stepData[name];
+      if (v !== undefined && v !== null) el.value = String(v);
+      wrap.appendChild(el);
+    }
+  }
+  actionSel.addEventListener("change", rebuildFields);
+  rebuildFields();
+
+  card.querySelector(".step-remove").onclick = () => card.remove();
+  card.querySelector(".step-up").onclick = () => {
+    const prev = card.previousElementSibling;
+    if (prev && prev.classList.contains("browser-step")) {
+      card.parentNode.insertBefore(card, prev);
+    }
+  };
+  card.querySelector(".step-down").onclick = () => {
+    const next = card.nextElementSibling;
+    if (next && next.classList.contains("browser-step")) {
+      card.parentNode.insertBefore(next, card);
+    }
+  };
+  return card;
+}
+
+function readBrowserBuilderSteps(builder) {
+  return Array.from(builder.querySelectorAll(".browser-step")).map(card => {
+    const out = { action: card.querySelector(".step-action").value };
+    const bindAs = card.querySelector(".step-bind-as").value.trim();
+    if (bindAs) out.bind_as = bindAs;
+    for (const fld of card.querySelectorAll(".step-field")) {
+      const name = fld.dataset.field;
+      const kind = fld.dataset.kind;
+      if (kind === "bool") {
+        out[name] = !!fld.checked;
+      } else if (kind === "num") {
+        if (fld.value !== "") out[name] = Number(fld.value);
+      } else {
+        if (fld.value !== "") out[name] = fld.value;
+      }
+    }
+    return out;
+  });
+}
+
+function renderBrowserBuilder(row, spec) {
+  const builder = document.createElement("div");
+  builder.className = "browser-builder";
+  builder.innerHTML = `
+    <div class="browser-builder-head">
+      <span class="builder-title">🌐 Browser steps</span>
+      <button type="button" class="ghost browser-builder-toggle"
+              title="Switch to raw JSON for this step">{ } JSON</button>
+      <button type="button" class="ghost browser-add-step">+ add step</button>
+    </div>
+    <div class="browser-steps"></div>
+  `;
+  const stepsHost = builder.querySelector(".browser-steps");
+  const addBtn = builder.querySelector(".browser-add-step");
+  const toggleBtn = builder.querySelector(".browser-builder-toggle");
+
+  // Seed steps from incoming spec.prompt (best-effort JSON parse)
+  let initial = [];
+  try {
+    const parsed = JSON.parse(spec.prompt || "{}");
+    initial = parsed.steps || parsed.browser_steps || [];
+  } catch (e) { /* fall through, empty list */ }
+  if (initial.length === 0) initial = [{ action: "goto", url: "" }];
+  initial.forEach(s => stepsHost.appendChild(renderBrowserStepCard(s)));
+
+  addBtn.onclick = () => stepsHost.appendChild(renderBrowserStepCard());
+
+  // Toggle to raw JSON edit (rare escape hatch — preserves builder state)
+  toggleBtn.onclick = () => {
+    const ta = row.querySelector(".prompt");
+    const steps = readBrowserBuilderSteps(builder);
+    ta.value = JSON.stringify({ steps }, null, 2);
+    builder.style.display = "none";
+    ta.style.display = "block";
+    ta.dataset.builderHidden = "1";
+  };
+
+  return builder;
+}
+
+function applyBrowserMode(row, spec = {}) {
+  const isBrowser = row.querySelector(".agent-select").value === "browser";
+  const ta = row.querySelector(".prompt");
+  const deps = row.querySelector(".depends_on");
+  const streamLabel = row.querySelector(".streaming-toggle");
+  let builder = row.querySelector(".browser-builder");
+
+  if (isBrowser) {
+    if (!builder) {
+      builder = renderBrowserBuilder(row, spec);
+      row.appendChild(builder);
+    }
+    // Builder visible → hide plain prompt unless user opted into raw JSON.
+    if (!ta.dataset.builderHidden) {
+      ta.style.display = "none";
+    }
+    deps.placeholder = "depends_on (comma-separated, optional for browser)";
+    if (streamLabel) streamLabel.style.display = "none";  // streaming N/A
+  } else {
+    if (builder) builder.remove();
+    ta.style.display = "block";
+    delete ta.dataset.builderHidden;
+    deps.placeholder = "depends_on (comma-separated labels)";
+    if (streamLabel) streamLabel.style.display = "";
+  }
+}
+
 function addAgentRow(spec = {}) {
   const tpl = document.createElement("div");
   tpl.className = "agent-row";
@@ -353,6 +560,10 @@ function addAgentRow(spec = {}) {
   tpl.querySelector(".streaming").checked = !!spec.streaming;
   tpl.querySelector(".remove").onclick = () => tpl.remove();
   $("#agent-rows").appendChild(tpl);
+
+  // K4 — toggle step builder on agent change + on initial render
+  applyBrowserMode(tpl, spec);
+  sel.addEventListener("change", () => applyBrowserMode(tpl, { prompt: tpl.querySelector(".prompt").value }));
 }
 
 function ensureOneAgentRow() {
@@ -360,14 +571,25 @@ function ensureOneAgentRow() {
 }
 
 function readSpec() {
-  return $$(".agent-row").map((row, i) => ({
-    agent: row.querySelector(".agent-select").value,
-    label: row.querySelector(".label").value.trim() || `agent-${i + 1}`,
-    depends_on: (row.querySelector(".depends_on").value || "")
-      .split(",").map(s => s.trim()).filter(Boolean),
-    streaming: !!row.querySelector(".streaming")?.checked,
-    prompt: row.querySelector(".prompt").value,
-  }));
+  return $$(".agent-row").map((row, i) => {
+    const agent = row.querySelector(".agent-select").value;
+    let prompt = row.querySelector(".prompt").value;
+    // K4 — when the browser builder is active, serialize cards → JSON
+    // and use that as the prompt the backend's browser runner consumes.
+    const builder = row.querySelector(".browser-builder");
+    if (agent === "browser" && builder && builder.style.display !== "none") {
+      const steps = readBrowserBuilderSteps(builder);
+      prompt = JSON.stringify({ steps }, null, 2);
+    }
+    return {
+      agent,
+      label: row.querySelector(".label").value.trim() || `agent-${i + 1}`,
+      depends_on: (row.querySelector(".depends_on").value || "")
+        .split(",").map(s => s.trim()).filter(Boolean),
+      streaming: !!row.querySelector(".streaming")?.checked,
+      prompt,
+    };
+  });
 }
 
 // ---------- run lifecycle ----------
