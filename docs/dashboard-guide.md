@@ -144,6 +144,13 @@ prompts can pull live project context:
 | `{{git:show:HEAD}}` | `git show --stat HEAD` |
 | `{{git:branch}}` | current branch name |
 | `{{shell:cmd ...}}` | output of any shell command (DISABLED unless `CG_ALLOW_SHELL=1`) |
+| `{{web:URL}}` | innerText of rendered page (Playwright headless Chromium) |
+| `{{web-html:URL}}` | full rendered HTML |
+| `{{web-shot:URL}}` | screenshot saved to `outputs/screenshots/`, returns path |
+| `{{web-title:URL}}` | page `<title>` |
+| `{{web-meta:URL}}` | meta tags + OpenGraph + Twitter cards as JSON |
+
+Web placeholders require Playwright: `pip install playwright && playwright install chromium`. The dashboard runs without it; placeholders just return an install message instead of content.
 
 Project root is the CG repo by default. Override with `CG_PROJECT_ROOT`
 env var so the dashboard pulls files from a sibling project (e.g. set

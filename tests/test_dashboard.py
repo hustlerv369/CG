@@ -348,6 +348,123 @@ def test_cancel_unknown_run_404(client):
 # ---------------------------------------------------------------------------
 
 
+def test_web_placeholder_rejects_non_http_url(monkeypatch):
+    out = dash._expand_context_placeholders("{{web:not-a-url}}")
+    assert "must start with http" in out
+
+
+def test_web_placeholder_handles_missing_playwright(monkeypatch):
+    """If playwright is not installed, the placeholder must return a
+    helpful error string instead of raising."""
+    import builtins
+    real_import = builtins.__import__
+
+    def fake_import(name, *a, **kw):
+        if name.startswith("playwright"):
+            raise ImportError("simulated missing playwright")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    out = dash._expand_context_placeholders("{{web:https://example.com}}")
+    assert "playwright not installed" in out
+    assert "pip install playwright" in out
+
+
+def test_web_placeholder_text_uses_inner_text(monkeypatch, tmp_path):
+    """Mock the playwright stack to verify _web_placeholder calls
+    page.inner_text('body') for the default 'web' kind."""
+    calls = {"goto": None, "method": None}
+
+    class FakePage:
+        def goto(self, url, **kw):
+            calls["goto"] = url
+        def wait_for_load_state(self, *a, **kw):
+            pass
+        def inner_text(self, sel):
+            calls["method"] = ("inner_text", sel)
+            return "BODY TEXT FROM MOCK"
+        def title(self):
+            calls["method"] = ("title",)
+            return "MOCK TITLE"
+        def content(self):
+            calls["method"] = ("content",)
+            return "<html><body>MOCK</body></html>"
+        def screenshot(self, path, **kw):
+            calls["method"] = ("screenshot", path)
+            from pathlib import Path as _P
+            _P(path).write_bytes(b"\x89PNG\r\n\x1a\n")
+        def evaluate(self, js):
+            calls["method"] = ("evaluate",)
+            return {"title": "T", "description": "D", "og": {}, "twitter": {}}
+
+    class FakeContext:
+        def new_page(self):
+            return FakePage()
+    class FakeBrowser:
+        def new_context(self, **kw):
+            return FakeContext()
+        def close(self):
+            pass
+    class FakeChromium:
+        def launch(self, **kw):
+            return FakeBrowser()
+    class FakeP:
+        chromium = FakeChromium()
+
+    class FakePW:
+        def __enter__(self):
+            return FakeP()
+        def __exit__(self, *a):
+            return False
+
+    import playwright.sync_api as ps
+    monkeypatch.setattr(ps, "sync_playwright", lambda: FakePW())
+
+    out = dash._web_placeholder("web", "https://example.com")
+    assert out == "BODY TEXT FROM MOCK"
+    assert calls["goto"] == "https://example.com"
+    assert calls["method"] == ("inner_text", "body")
+
+
+def test_web_placeholder_screenshot_returns_path(monkeypatch, tmp_path):
+    """{{web-shot:URL}} should write a PNG into outputs/screenshots/
+    and return its repo-relative path."""
+    monkeypatch.setattr(dash, "SCREENSHOTS_DIR", tmp_path)
+
+    class FakePage:
+        def goto(self, url, **kw): pass
+        def wait_for_load_state(self, *a, **kw): pass
+        def screenshot(self, path, **kw):
+            from pathlib import Path as _P
+            _P(path).write_bytes(b"\x89PNG\r\n")
+        def inner_text(self, sel): return ""
+        def title(self): return ""
+        def content(self): return ""
+        def evaluate(self, js): return {}
+    class FakeBrowser:
+        def new_context(self, **kw):
+            class C:
+                def new_page(s2): return FakePage()
+            return C()
+        def close(self): pass
+    class FakePW:
+        def __enter__(self):
+            class P:
+                chromium = type("Cr", (), {"launch": lambda s, **k: FakeBrowser()})()
+            return P()
+        def __exit__(self, *a): return False
+
+    import playwright.sync_api as ps
+    monkeypatch.setattr(ps, "sync_playwright", lambda: FakePW())
+
+    out = dash._web_placeholder("web-shot", "https://example.com")
+    assert "screenshot saved" in out
+    assert "outputs/screenshots/" in out
+    # Confirm a PNG was actually written
+    files = list(tmp_path.glob("*.png"))
+    assert len(files) == 1
+
+
 def test_placeholder_unknown_kind_left_intact(monkeypatch):
     out = dash._expand_context_placeholders("hello {{foo:bar}} world")
     assert out == "hello {{foo:bar}} world"

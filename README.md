@@ -198,10 +198,15 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ Run report export (single Markdown bundle of any run)
 - ✅ Inline file editor (CodeMirror tab) with file tree + atomic save
 - ✅ Notes / knowledge base — Obsidian-style with `[[wikilinks]]`, backlinks, search
-- ✅ Settings tab for API keys + defaults (browser localStorage)
+- ✅ Settings tab for API keys + defaults (browser localStorage, forwarded to backend)
+- ✅ Workflow variables — `${VAR}` substitution per project
+- ✅ Custom HTTP tool agents — wire up any provider (Cohere, Mistral, …)
+- ✅ Webhook triggers — `POST /api/triggers/<workflow>` from anywhere
+- ✅ Cron-style scheduler — workflows on a periodic interval
+- ✅ Web placeholders (`{{web:URL}}`, `{{web-shot:URL}}`, …) — Playwright headless Chromium
 - ✅ Save run as note (one click → run report → searchable note)
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 80 pytest tests passing
+- ✅ 93 pytest tests passing
 - ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 

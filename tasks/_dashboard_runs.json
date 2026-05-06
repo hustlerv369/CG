@@ -1,15 +1,15 @@
 [
   {
-    "id": "c29d4068fcbf",
-    "title": "trigger: Trigger demo",
-    "created": 1778078353.190259,
-    "finished": false,
+    "id": "9098afb956b6",
+    "title": "secrets test",
+    "created": 1778089114.2130454,
+    "finished": true,
     "agents": [
       {
-        "label": "echo",
+        "label": "x",
         "agent": "claude-sonnet-4-6",
-        "status": "queued",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       }
     ]
   }

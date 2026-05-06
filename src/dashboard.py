@@ -1040,6 +1040,79 @@ PRESETS: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "seo-audit",
+        "title": "SEO audit (live page → 3 angles → action plan)",
+        "description": "Headless Chromium fetches the live URL (rendered JS), "
+                        "three models analyze different angles, and Opus synthesizes "
+                        "a prioritized action plan. Set ${TARGET_URL} in Settings.",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "technical",
+                "prompt": "SEO technical audit of ${TARGET_URL}.\n\n"
+                          "## Page meta (machine-extracted)\n\n"
+                          "{{web-meta:${TARGET_URL}}}\n\n"
+                          "## Rendered body (innerText)\n\n"
+                          "{{web:${TARGET_URL}}}\n\n"
+                          "Identify: missing/weak meta tags, title issues, "
+                          "OG/Twitter card problems, heading hierarchy, "
+                          "thin content. Markdown bullet list, max 12 items, "
+                          "ordered by impact."
+            },
+            {
+                "agent": "gemini-pro", "label": "content",
+                "prompt": "Content quality audit of ${TARGET_URL}.\n\n"
+                          "## Rendered text\n\n{{web:${TARGET_URL}}}\n\n"
+                          "Critique: keyword targeting, intent match, "
+                          "E-E-A-T signals, readability, depth vs surface, "
+                          "thin/duplicate sections. Concrete suggestions."
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "competitive",
+                "prompt": "Identify the top 3 competitors for ${TARGET_URL} "
+                          "and what they do better, based on the page content.\n\n"
+                          "{{web:${TARGET_URL}}}\n\n"
+                          "List competitors with one URL each + concrete deltas."
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "plan",
+                "depends_on": ["technical", "content", "competitive"],
+                "prompt": "Synthesize a 30-day SEO action plan from these "
+                          "three audits. Group by week, prioritize by "
+                          "impact/effort. Markdown.\n\n"
+                          "## Technical\n{{technical}}\n\n"
+                          "## Content\n{{content}}\n\n"
+                          "## Competitive\n{{competitive}}"
+            },
+        ],
+    },
+    {
+        "id": "competitor-analysis",
+        "title": "Competitor analysis (live scrape → comparison table)",
+        "description": "Pulls live content from your URL + competitor URLs, "
+                        "Sonnet builds a feature comparison table, Opus suggests "
+                        "positioning angles. Set ${OUR_URL} and ${COMP_URL} "
+                        "(comma-separated for multiple competitors).",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "compare",
+                "prompt": "Build a feature comparison table from these pages:\n\n"
+                          "## Us — ${OUR_URL}\n\n{{web:${OUR_URL}}}\n\n"
+                          "## Competitor — ${COMP_URL}\n\n{{web:${COMP_URL}}}\n\n"
+                          "Output a Markdown table: Feature | Us | Them. "
+                          "Include only features where they differ meaningfully."
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "positioning",
+                "depends_on": ["compare"],
+                "prompt": "Based on this comparison, suggest 3 specific "
+                          "positioning angles we could lean into where we "
+                          "have an advantage, and 3 areas where we're behind "
+                          "and should improve. Concrete + actionable.\n\n"
+                          "{{compare}}"
+            },
+        ],
+    },
+    {
         "id": "github-pr-review",
         "title": "GitHub PR review (current diff → 3 models → save as note)",
         "description": "Reviews the current working-tree diff with three models and "
@@ -1273,18 +1346,118 @@ def _shell_placeholder(cmd: str) -> str:
         return "[shell: timeout 30s]"
 
 
+SCREENSHOTS_DIR = ROOT / "outputs" / "screenshots"
+
+
+def _web_placeholder(kind: str, url: str) -> str:
+    """Resolve ``{{web:URL}}`` family of placeholders by driving headless
+    Chromium via Playwright. Lazy-imports playwright so the dashboard
+    runs without it; returns an actionable error if missing.
+
+    kind options:
+      ``web``, ``web-text``    — innerText of body
+      ``web-html``             — full rendered outerHTML
+      ``web-shot``, ``web-screenshot`` — save PNG, return repo-relative path
+      ``web-title``            — page <title>
+      ``web-meta``             — meta tags + OG as JSON
+    """
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        return ("[web: playwright not installed. "
+                "pip install playwright; playwright install chromium]")
+
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return f"[web: URL must start with http:// or https:// (got {url!r})]"
+
+    SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+    from playwright.sync_api import sync_playwright
+
+    timeout_ms = int(os.environ.get("CG_WEB_TIMEOUT_MS", "30000"))
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            try:
+                ctx = browser.new_context(
+                    user_agent=("Mozilla/5.0 (CG dashboard headless "
+                                 "via Playwright Chromium)"),
+                    viewport={"width": 1280, "height": 800},
+                )
+                page = ctx.new_page()
+                page.goto(url, timeout=timeout_ms,
+                            wait_until="domcontentloaded")
+                # Brief settle wait for rendering — use load OR network idle,
+                # whichever finishes first
+                try:
+                    page.wait_for_load_state("networkidle", timeout=5000)
+                except Exception:
+                    pass
+
+                if kind in {"web", "web-text"}:
+                    body = page.inner_text("body") or ""
+                    return body.strip()
+
+                if kind == "web-html":
+                    return page.content() or ""
+
+                if kind in {"web-shot", "web-screenshot"}:
+                    import hashlib
+                    digest = hashlib.sha1(url.encode("utf-8")).hexdigest()[:12]
+                    safe_url = (
+                        url.replace("https://", "").replace("http://", "")
+                           .replace("/", "_").replace(":", "-")[:80]
+                    )
+                    fname = f"{int(time.time())}-{digest}-{safe_url}.png"
+                    out_path = SCREENSHOTS_DIR / fname
+                    page.screenshot(path=str(out_path), full_page=True)
+                    return f"[screenshot saved] outputs/screenshots/{fname}"
+
+                if kind == "web-title":
+                    return page.title() or ""
+
+                if kind == "web-meta":
+                    meta = page.evaluate("""() => {
+                        const out = { title: document.title || '',
+                                       description: '', og: {}, twitter: {} };
+                        document.querySelectorAll('meta').forEach(m => {
+                            const name = m.getAttribute('name');
+                            const prop = m.getAttribute('property');
+                            const content = m.getAttribute('content') || '';
+                            if (name === 'description') out.description = content;
+                            if (prop && prop.startsWith('og:'))
+                                out.og[prop.slice(3)] = content;
+                            if (name && name.startsWith('twitter:'))
+                                out.twitter[name.slice(8)] = content;
+                        });
+                        return out;
+                    }""")
+                    return json.dumps(meta, indent=2, ensure_ascii=False)
+
+                return f"[web: unknown subkind {kind!r}]"
+            finally:
+                browser.close()
+    except Exception as exc:
+        return f"[web: error — {exc}]"
+
+
 def _expand_context_placeholders(text: str) -> str:
     """Replace ``{{kind:arg}}`` patterns with their resolved values.
 
     Supports:
-      ``{{file:path/to/file}}``   — repo-relative file content (UTF-8)
-      ``{{git:diff}}``            — current git diff (working tree)
-      ``{{git:diff:HEAD~1}}``     — git diff vs ref
-      ``{{git:log:5}}``           — last N commits oneline
-      ``{{git:status}}``          — git status --short --branch
-      ``{{git:show:HEAD}}``       — git show with --stat
-      ``{{git:branch}}``          — current branch name
-      ``{{shell:cmd ...}}``       — disabled unless CG_ALLOW_SHELL=1
+      ``{{file:path/to/file}}``     — repo-relative file content (UTF-8)
+      ``{{git:diff}}``              — current git diff (working tree)
+      ``{{git:diff:HEAD~1}}``       — git diff vs ref
+      ``{{git:log:5}}``             — last N commits oneline
+      ``{{git:status}}``            — git status --short --branch
+      ``{{git:show:HEAD}}``         — git show with --stat
+      ``{{git:branch}}``            — current branch name
+      ``{{shell:cmd ...}}``         — disabled unless CG_ALLOW_SHELL=1
+      ``{{web:URL}}``               — innerText of rendered page
+      ``{{web-html:URL}}``          — full rendered HTML
+      ``{{web-shot:URL}}``          — screenshot saved, returns relative path
+      ``{{web-title:URL}}``         — <title> tag text
+      ``{{web-meta:URL}}``          — meta tags + OpenGraph as JSON
     Unknown ``kind`` is left as-is so the agent can complain.
     """
     def replace_one(match: "_re.Match[str]") -> str:
@@ -1310,6 +1483,10 @@ def _expand_context_placeholders(text: str) -> str:
                 if not _ALLOW_SHELL:
                     return "[shell: disabled — set CG_ALLOW_SHELL=1 to enable]"
                 return _shell_placeholder(arg)
+
+            if kind in {"web", "web-text", "web-html", "web-shot",
+                         "web-screenshot", "web-title", "web-meta"}:
+                return _web_placeholder(kind, arg)
         except Exception as exc:
             return f"[{kind}: error — {exc}]"
         return match.group(0)
