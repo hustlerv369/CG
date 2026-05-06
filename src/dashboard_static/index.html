@@ -213,6 +213,19 @@
         </label>
       </div>
 
+      <h3>Workflow variables — ${VAR} substitution</h3>
+      <p class="settings-hint">
+        Reference these in any prompt as <code>${NAME}</code>. Useful for
+        per-project values (target site URL, repo path, default branch).
+        Auto-injected on every run.
+      </p>
+      <ul class="vars-list" id="vars-list"></ul>
+      <div class="settings-row" style="flex-direction: row; gap: 8px;">
+        <input type="text" id="var-key-input" placeholder="VAR_NAME" />
+        <input type="text" id="var-value-input" placeholder="value" />
+        <button class="ghost" id="var-add-btn">+ add</button>
+      </div>
+
       <div class="actions">
         <button class="primary" id="settings-save-btn">Save settings</button>
         <button class="ghost" id="settings-clear-btn">Clear all</button>

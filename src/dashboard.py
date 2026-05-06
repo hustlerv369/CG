@@ -293,6 +293,114 @@ def _build_http_models() -> dict[str, dict[str, Any]]:
 AGENT_KINDS.update(_build_http_models())
 
 
+# ---------------------------------------------------------------------------
+# Custom HTTP "tool" agents — user-defined endpoints as workflow steps.
+# Saved to D:\CG\custom_agents.json as a list of { id, label, family,
+# summary, http: {endpoint, model, api_key_env, headers, format} }.
+# Loaded on startup and merged into AGENT_KINDS.
+# ---------------------------------------------------------------------------
+
+CUSTOM_AGENTS_PATH = ROOT / "custom_agents.json"
+SCHEDULES_PATH = ROOT / "schedules.json"
+
+
+def _load_custom_agents() -> dict[str, dict[str, Any]]:
+    if not CUSTOM_AGENTS_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(CUSTOM_AGENTS_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    if not isinstance(raw, list):
+        return {}
+    out: dict[str, dict[str, Any]] = {}
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        kid = entry.get("id")
+        if not kid:
+            continue
+        # Normalize to AGENT_KINDS shape
+        out[kid] = {
+            "label": entry.get("label", kid),
+            "family": entry.get("family", "custom"),
+            "summary": entry.get("summary", "user-defined HTTP agent"),
+            "runner": "http",
+            "http": entry["http"],
+        }
+    return out
+
+
+def _save_custom_agents(items: list[dict[str, Any]]) -> None:
+    CUSTOM_AGENTS_PATH.write_text(
+        json.dumps(items, indent=2, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+
+# Apply custom agents on startup
+AGENT_KINDS.update(_load_custom_agents())
+
+
+# ---------------------------------------------------------------------------
+# Schedules (cron-style periodic runs)
+# ---------------------------------------------------------------------------
+
+
+def _load_schedules() -> list[dict[str, Any]]:
+    if not SCHEDULES_PATH.exists():
+        return []
+    try:
+        data = json.loads(SCHEDULES_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _start_scheduler(manager: "RunManager") -> None:
+    """Background thread polling schedules.json every 30s and dispatching
+    enabled schedules whose interval has elapsed since last run."""
+    last_runs: dict[str, float] = {}
+
+    def _tick() -> None:
+        while True:
+            try:
+                schedules = _load_schedules()
+                now = time.time()
+                for s in schedules:
+                    if not s.get("enabled"):
+                        continue
+                    workflow_name = s.get("workflow")
+                    interval_min = int(s.get("interval_minutes", 0))
+                    if not workflow_name or interval_min < 1:
+                        continue
+                    key = f"{workflow_name}::{interval_min}"
+                    last = last_runs.get(key, 0)
+                    if now - last < interval_min * 60:
+                        continue
+                    # Time to fire
+                    path = WORKFLOWS_DIR / f"{_safe_workflow_name(workflow_name)}.json"
+                    if not path.exists():
+                        continue
+                    try:
+                        data = json.loads(path.read_text(encoding="utf-8"))
+                        spec = data.get("spec") or []
+                        if not spec:
+                            continue
+                        title = f"scheduled: {data.get('title', workflow_name)}"
+                        variables = dict(data.get("variables", {}) or {})
+                        variables.update(s.get("variables", {}) or {})
+                        manager.start_run(title, spec, variables=variables)
+                        last_runs[key] = now
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(30)
+
+    threading.Thread(target=_tick, daemon=True).start()
+
+
 # Backward-compatible aliases for old presets / clients ("claude" → default
 # Sonnet, "gemini" → default Pro)
 AGENT_ALIASES = {
@@ -347,6 +455,10 @@ class RunState:
     spec: list[dict[str, Any]]
     agents: dict[str, AgentRunState] = field(default_factory=dict)
     finished: bool = False
+    # Per-run env overrides (e.g. API keys forwarded from browser
+    # Settings) and ${VAR} substitutions for prompts.
+    secrets: dict[str, str] = field(default_factory=dict)
+    variables: dict[str, str] = field(default_factory=dict)
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -395,13 +507,17 @@ class RunManager:
             if q and self._loop:
                 asyncio.run_coroutine_threadsafe(q.put(event), self._loop)
 
-    def start_run(self, title: str, spec: list[dict[str, Any]]) -> RunState:
+    def start_run(self, title: str, spec: list[dict[str, Any]],
+                    secrets: dict[str, str] | None = None,
+                    variables: dict[str, str] | None = None) -> RunState:
         run_id = uuid.uuid4().hex[:12]
         run = RunState(
             id=run_id,
             title=title or f"run-{run_id}",
             created=time.time(),
             spec=spec,
+            secrets=secrets or {},
+            variables=variables or {},
         )
         # Validate first
         labels_in_spec: set[str] = set()
@@ -478,23 +594,21 @@ class RunManager:
 
     def _substitute_prompt(self, run: RunState, prompt: str,
                             depends_on: list[str]) -> str:
-        """Replace ``{{...}}`` placeholders in the prompt.
+        """Replace ``{{...}}`` and ``${VAR}`` placeholders.
 
-        Supports:
-          ``{{label}}``               — output of dependency *label*
-          ``{{file:path/to/file}}``   — repo file content (UTF-8 text)
-          ``{{git:diff}}``            — current git diff (working tree)
-          ``{{git:diff:HEAD~1}}``     — git diff against a ref
-          ``{{git:log:5}}``           — last N commits (oneline)
-          ``{{git:status}}``          — git status --short
-          ``{{shell:cmd ...}}``       — output of an arbitrary shell cmd
-                                        (allowed only if ALLOW_SHELL=1)
-        Unknown placeholders are left intact, so the agent can complain
-        instead of silently rendering empty.
+        Order:
+          1. ``${VAR}`` — run.variables (per-run user-supplied env)
+          2. ``{{label}}`` — dependency outputs
+          3. ``{{file:...}}`` / ``{{git:...}}`` / ``{{shell:...}}`` — context
         """
         result = prompt
 
-        # Dependency outputs first
+        # ${VAR} substitution from run.variables (n8n-style env vars)
+        if run.variables:
+            for k, v in run.variables.items():
+                result = result.replace("${" + k + "}", str(v))
+
+        # Dependency outputs
         for dep in depends_on or []:
             agent = run.agents.get(dep)
             if agent is None:
@@ -502,8 +616,19 @@ class RunManager:
             output = "\n".join(agent.log_lines)
             result = result.replace("{{" + dep + "}}", output)
 
-        # File / git / shell placeholders
-        result = _expand_context_placeholders(result)
+        # File / git / shell placeholders, with project root override
+        # available via run.secrets["CG_PROJECT_ROOT"] (forwarded from
+        # the browser Settings tab).
+        prev_root = os.environ.get("CG_PROJECT_ROOT")
+        if "CG_PROJECT_ROOT" in run.secrets:
+            os.environ["CG_PROJECT_ROOT"] = run.secrets["CG_PROJECT_ROOT"]
+        try:
+            result = _expand_context_placeholders(result)
+        finally:
+            if prev_root is None:
+                os.environ.pop("CG_PROJECT_ROOT", None)
+            else:
+                os.environ["CG_PROJECT_ROOT"] = prev_root
         return result
 
     def _run_one_with_deps(self, run: RunState, label: str, agent: str, prompt: str) -> None:
@@ -553,6 +678,9 @@ class RunManager:
 
         env = os.environ.copy()
         env.update(cfg.get("env", {}))
+        # Per-run secrets (forwarded from browser Settings tab) take
+        # precedence over shell env vars
+        env.update(run.secrets)
 
         try:
             proc = subprocess.Popen(
@@ -633,7 +761,9 @@ class RunManager:
 
         agent_state = run.agents[label]
         http_cfg = cfg["http"]
-        api_key = os.environ.get(http_cfg["api_key_env"])
+        # Per-run secrets (browser Settings) take precedence over env vars
+        api_key = run.secrets.get(http_cfg["api_key_env"]) \
+            or os.environ.get(http_cfg["api_key_env"])
         if not api_key:
             agent_state.status = "failed"
             agent_state.exit_code = 401
@@ -906,6 +1036,124 @@ PRESETS: list[dict[str, Any]] = [
                           "Markdown bullet list, terse.\n\n## Original\n"
                           "```python\n{{file:src/cg.py}}\n```\n\n## Refactor\n"
                           "{{draft}}"
+            },
+        ],
+    },
+    {
+        "id": "github-pr-review",
+        "title": "GitHub PR review (current diff → 3 models → save as note)",
+        "description": "Reviews the current working-tree diff with three models and "
+                        "saves the consolidated report as a CG note. Variables: "
+                        "${PR_NUMBER}, ${REPO_URL}. Set them in Settings or POST a "
+                        "trigger payload.",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "style",
+                "prompt": "Review the code style + readability + obvious bugs of "
+                          "this PR. Output a Markdown bullet list, max 10 items.\n\n"
+                          "## PR ${PR_NUMBER} on ${REPO_URL}\n\n"
+                          "```diff\n{{git:diff}}\n```"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "architecture",
+                "prompt": "Review architecture / design (coupling, abstractions, "
+                          "future maintainability) of this PR.\n\n"
+                          "## PR ${PR_NUMBER}\n\n```diff\n{{git:diff}}\n```"
+            },
+            {
+                "agent": "gemini-pro", "label": "edge-cases",
+                "prompt": "Adversarially review this PR. List 5+ edge cases the "
+                          "author probably did not test.\n\n```diff\n{{git:diff}}\n```"
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "summary",
+                "depends_on": ["style", "architecture", "edge-cases"],
+                "prompt": "Synthesize these three reviews into a single GitHub-PR "
+                          "comment. Markdown formatted, with collapsible "
+                          "<details> sections for each angle. Be terse.\n\n"
+                          "## Style\n{{style}}\n\n## Architecture\n{{architecture}}\n\n"
+                          "## Edge cases\n{{edge-cases}}"
+            },
+        ],
+    },
+    {
+        "id": "blog-draft",
+        "title": "Blog draft (research → outline → write → polish)",
+        "description": "End-to-end blog post drafting pipeline. Set ${TOPIC} in "
+                        "Settings, optionally ${AUDIENCE} (default: developers) and "
+                        "${WORD_COUNT} (default: 1200).",
+        "spec": [
+            {
+                "agent": "gemini-pro", "label": "research",
+                "prompt": "Research the topic '${TOPIC}'. Output a Markdown brief "
+                          "with: 5 specific angles, 3 contrarian takes, recent "
+                          "stats/examples worth citing, common reader misconceptions."
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "outline",
+                "depends_on": ["research"],
+                "prompt": "Build a blog outline (H2 headings + 1-line abstracts) "
+                          "for an audience of ${AUDIENCE} based on this research. "
+                          "Aim for ${WORD_COUNT} words total. Optimize for "
+                          "skimming.\n\n## Research\n{{research}}"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "draft",
+                "depends_on": ["outline"],
+                "prompt": "Write the full blog post per this outline. ${WORD_COUNT} "
+                          "words. Avoid AI-tells (em-dashes, 'delve', 'crucial'). "
+                          "Concrete examples only, no fluff.\n\n## Outline\n{{outline}}"
+            },
+            {
+                "agent": "gemini-pro", "label": "polish",
+                "depends_on": ["draft"],
+                "prompt": "Edit this blog draft. Cut 15%, sharpen leads, fix any "
+                          "weak sections. Output the final polished post in "
+                          "Markdown — no commentary, just the prose.\n\n{{draft}}"
+            },
+        ],
+    },
+    {
+        "id": "bug-investigation",
+        "title": "Bug investigation (file → 3 models → action plan)",
+        "description": "Three models analyze the same file looking for the bug "
+                        "described in ${BUG_DESCRIPTION}. Set ${TARGET_FILE} in "
+                        "Settings. Best for production incidents.",
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "deep-read",
+                "prompt": "Bug report: ${BUG_DESCRIPTION}\n\n"
+                          "Walk through this file line-by-line, name every "
+                          "potential cause that matches the symptom. Markdown "
+                          "numbered list, ranked by likelihood.\n\n"
+                          "```\n{{file:${TARGET_FILE}}}\n```"
+            },
+            {
+                "agent": "gemini-pro", "label": "lateral",
+                "prompt": "Bug: ${BUG_DESCRIPTION}\n\nThink laterally about this "
+                          "file — what's NOT in it that should be? Defensive "
+                          "checks, error handling, race conditions, config "
+                          "issues. Markdown bullets.\n\n"
+                          "```\n{{file:${TARGET_FILE}}}\n```"
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "git-context",
+                "prompt": "Bug: ${BUG_DESCRIPTION}\n\nWhich recent commits "
+                          "touched this file or related ones? Could any of them "
+                          "be the regression?\n\n## Recent commits\n"
+                          "{{git:log:20}}\n\n## Diff vs HEAD~5\n"
+                          "{{git:diff:HEAD~5}}"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "plan",
+                "depends_on": ["deep-read", "lateral", "git-context"],
+                "prompt": "Synthesize a concrete investigation plan from these "
+                          "three angles. Specific commands to run, files to "
+                          "check, hypotheses to verify. Order by fastest-to-"
+                          "rule-out first.\n\n"
+                          "## Deep read\n{{deep-read}}\n\n"
+                          "## Lateral\n{{lateral}}\n\n"
+                          "## Git context\n{{git-context}}"
             },
         ],
     },
@@ -1385,6 +1633,7 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         manager.bind_loop(asyncio.get_running_loop())
+        _start_scheduler(manager)
         yield
 
     app = FastAPI(title="CG Dashboard", version="0.1", lifespan=lifespan)
@@ -1414,17 +1663,89 @@ def create_app() -> FastAPI:
             ]
         }
 
+    @app.get("/api/custom-agents")
+    async def list_custom_agents() -> Any:
+        if not CUSTOM_AGENTS_PATH.exists():
+            return {"agents": []}
+        try:
+            return {"agents": json.loads(CUSTOM_AGENTS_PATH.read_text(encoding="utf-8"))}
+        except Exception:
+            return {"agents": []}
+
+    @app.put("/api/custom-agents")
+    async def save_custom_agents(body: dict[str, Any]) -> Any:
+        items = body.get("agents")
+        if not isinstance(items, list):
+            raise HTTPException(400, "body.agents must be an array")
+        # Light validation
+        normalized: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        for entry in items:
+            if not isinstance(entry, dict):
+                continue
+            kid = entry.get("id")
+            if not kid or not _re.match(r"^[a-zA-Z][a-zA-Z0-9._-]*$", kid):
+                raise HTTPException(400, f"agent id {kid!r} must be alnum/._-, start with letter")
+            if kid in AGENT_KINDS and kid not in _load_custom_agents():
+                raise HTTPException(409, f"id {kid!r} clashes with built-in agent")
+            if kid in seen_ids:
+                raise HTTPException(400, f"duplicate id {kid!r}")
+            seen_ids.add(kid)
+            http = entry.get("http") or {}
+            if not http.get("endpoint") or not http.get("model"):
+                raise HTTPException(400, f"agent {kid!r} needs http.endpoint and http.model")
+            normalized.append({
+                "id": kid,
+                "label": entry.get("label", kid),
+                "family": entry.get("family", "custom"),
+                "summary": entry.get("summary", ""),
+                "http": {
+                    "endpoint": http["endpoint"],
+                    "model": http["model"],
+                    "api_key_env": http.get("api_key_env", ""),
+                    "headers": http.get("headers", {}),
+                    "anthropic_native": bool(http.get("anthropic_native", False)),
+                    "google_native": bool(http.get("google_native", False)),
+                },
+            })
+        _save_custom_agents(normalized)
+        # Reload into AGENT_KINDS — first remove old custom entries
+        for old_id in list(AGENT_KINDS.keys()):
+            if AGENT_KINDS[old_id].get("family") == "custom":
+                del AGENT_KINDS[old_id]
+        AGENT_KINDS.update(_load_custom_agents())
+        return {"saved": len(normalized)}
+
     @app.get("/api/presets")
     async def get_presets() -> Any:
         return {"presets": PRESETS}
 
     @app.post("/api/runs")
-    async def post_run(body: dict[str, Any]) -> Any:
+    async def post_run(body: dict[str, Any], request: Request) -> Any:
         title = body.get("title") or "untitled"
         spec = body.get("spec") or []
         if not isinstance(spec, list) or not spec:
             raise HTTPException(400, "spec must be a non-empty array")
-        run = manager.start_run(title, spec)
+        # Browser-supplied secrets (Settings tab) come in via headers so
+        # they live only in localStorage + a single request body, never
+        # on disk. Each runner reads its key by env var name; we set
+        # those env vars on the run's session via a per-run "secrets"
+        # dict, applied only when the runner spawns its subprocess.
+        secrets: dict[str, str] = {}
+        header_to_env = {
+            "x-cg-openrouter-key": "OPENROUTER_API_KEY",
+            "x-cg-zhipu-key": "ZHIPU_API_KEY",
+            "x-cg-anthropic-key": "ANTHROPIC_API_KEY",
+            "x-cg-gemini-key": "GEMINI_API_KEY",
+            "x-cg-project-root": "CG_PROJECT_ROOT",
+        }
+        for header, env_name in header_to_env.items():
+            v = request.headers.get(header)
+            if v and v.strip():
+                secrets[env_name] = v.strip()
+        # Variables (`${VAR}` substitution in prompts) come in the body
+        variables = body.get("variables") or {}
+        run = manager.start_run(title, spec, secrets=secrets, variables=variables)
         return {"id": run.id, "title": run.title}
 
     @app.get("/api/runs")
@@ -1512,6 +1833,59 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "workflow not found")
         path.unlink()
         return {"name": name, "deleted": True}
+
+    # ---- schedules (cron-style periodic runs) -----------------------------
+
+    @app.get("/api/schedules")
+    async def list_schedules() -> Any:
+        return {"schedules": _load_schedules()}
+
+    @app.put("/api/schedules")
+    async def save_schedules(body: dict[str, Any]) -> Any:
+        items = body.get("schedules")
+        if not isinstance(items, list):
+            raise HTTPException(400, "body.schedules must be an array")
+        for s in items:
+            if not isinstance(s, dict):
+                raise HTTPException(400, "each schedule must be an object")
+            if not s.get("workflow"):
+                raise HTTPException(400, "schedule.workflow is required")
+            interval = s.get("interval_minutes")
+            if not isinstance(interval, int) or interval < 1:
+                raise HTTPException(400, "schedule.interval_minutes must be a positive integer")
+            s["enabled"] = bool(s.get("enabled", True))
+            s.setdefault("variables", {})
+        SCHEDULES_PATH.write_text(
+            json.dumps(items, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return {"saved": len(items)}
+
+    @app.post("/api/triggers/{workflow_name}")
+    async def trigger_workflow(workflow_name: str, body: dict[str, Any] | None = None) -> Any:
+        """Webhook trigger — POST here from any external service to
+        run a saved workflow. Optional body.variables overlay
+        per-trigger ${VAR} substitution; useful when GitHub etc.
+        forwards payload (issue title, sender, etc.) to be injected
+        into prompts."""
+        path = _workflow_path(workflow_name)
+        if not path.exists():
+            raise HTTPException(404, f"workflow {workflow_name!r} not found")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(500, f"workflow JSON broken: {exc}")
+        spec = data.get("spec") or []
+        if not spec:
+            raise HTTPException(500, "workflow has empty spec")
+        title = (body or {}).get("title") or f"trigger: {data.get('title', workflow_name)}"
+        # Merge variables: workflow defaults < body overlay
+        variables: dict[str, str] = {}
+        variables.update(data.get("variables", {}) or {})
+        variables.update((body or {}).get("variables", {}) or {})
+        run = manager.start_run(title, spec, variables=variables)
+        return {"id": run.id, "title": run.title, "workflow": workflow_name,
+                "triggered_at": _iso_now()}
 
     # ---- notes (Obsidian-inspired knowledge base in D:\CG\notes\) ---------
 

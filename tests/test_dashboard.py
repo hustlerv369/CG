@@ -55,7 +55,12 @@ def client(monkeypatch, tmp_path):
         monkeypatch.setitem(dash.AGENT_KINDS, kid, gemini_mock)
 
     app = dash.create_app()
-    return TestClient(app)
+    # Snapshot AGENT_KINDS so tests that mutate it (custom agents)
+    # don't leak state into later tests in the same pytest session.
+    snapshot = dict(dash.AGENT_KINDS)
+    yield TestClient(app)
+    dash.AGENT_KINDS.clear()
+    dash.AGENT_KINDS.update(snapshot)
 
 
 def test_get_agents(client):
@@ -389,6 +394,166 @@ def test_placeholder_multiple_in_one_prompt(tmp_path, monkeypatch):
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# G-phase: variables, secret forwarding, custom agents, webhooks, schedules
+# ---------------------------------------------------------------------------
+
+
+def test_variables_passed_to_run_via_post_body(client, monkeypatch):
+    """The `variables` field on POST /api/runs must reach run.variables."""
+    captured: list[dict] = []
+    real_start = dash.RunManager.start_run
+
+    def spy(self, title, spec, secrets=None, variables=None):
+        captured.append(variables or {})
+        return real_start(self, title, spec, secrets=secrets, variables=variables)
+
+    monkeypatch.setattr(dash.RunManager, "start_run", spy)
+    r = client.post("/api/runs", json={
+        "title": "vars",
+        "spec": [{"agent": "claude", "label": "x", "prompt": "y"}],
+        "variables": {"FOO": "bar", "BAZ": "qux"},
+    })
+    assert r.status_code == 200
+    assert captured[-1] == {"FOO": "bar", "BAZ": "qux"}
+
+
+def test_substitute_prompt_method_directly(monkeypatch, tmp_path):
+    """Direct unit test of RunManager._substitute_prompt with variables."""
+    mgr = dash.RunManager()
+    run = dash.RunState(
+        id="t", title="t", created=0,
+        spec=[],
+        variables={"FOO": "bar", "URL": "https://example.com"},
+    )
+    out = mgr._substitute_prompt(run,
+        "Visit ${URL} and look for ${FOO}", depends_on=[])
+    assert out == "Visit https://example.com and look for bar"
+
+
+def test_secrets_forwarded_via_headers(client, monkeypatch):
+    """X-CG-OpenRouter-Key header → run.secrets['OPENROUTER_API_KEY']."""
+    captured_secrets: list[dict] = []
+
+    real_start = dash.RunManager.start_run
+
+    def spy_start(self, title, spec, secrets=None, variables=None):
+        captured_secrets.append(dict(secrets or {}))
+        # Don't actually run anything — return a fake run
+        return real_start(self, title, spec, secrets=secrets, variables=variables)
+
+    monkeypatch.setattr(dash.RunManager, "start_run", spy_start)
+
+    r = client.post(
+        "/api/runs",
+        headers={
+            "Content-Type": "application/json",
+            "X-CG-OpenRouter-Key": "sk-or-supersecret",
+            "X-CG-Project-Root": "C:/some/path",
+        },
+        json={
+            "title": "secrets test",
+            "spec": [{"agent": "claude", "label": "x", "prompt": "y"}],
+        },
+    )
+    assert r.status_code == 200
+    assert captured_secrets[-1]["OPENROUTER_API_KEY"] == "sk-or-supersecret"
+    assert captured_secrets[-1]["CG_PROJECT_ROOT"] == "C:/some/path"
+
+
+def test_custom_agents_save_and_load(client, tmp_path, monkeypatch):
+    """PUT /api/custom-agents → file written → next GET reflects it."""
+    monkeypatch.setattr(dash, "CUSTOM_AGENTS_PATH", tmp_path / "custom_agents.json")
+    body = {"agents": [{
+        "id": "my-cohere",
+        "label": "Cohere Command R+",
+        "family": "custom",
+        "summary": "Cohere flagship",
+        "http": {
+            "endpoint": "https://api.cohere.com/v1/chat",
+            "model": "command-r-plus",
+            "api_key_env": "COHERE_API_KEY",
+            "headers": {"X-My-Header": "yes"},
+        },
+    }]}
+    r = client.put("/api/custom-agents", json=body)
+    assert r.status_code == 200
+    assert r.json()["saved"] == 1
+
+    r = client.get("/api/custom-agents")
+    saved = r.json()["agents"]
+    assert len(saved) == 1
+    assert saved[0]["id"] == "my-cohere"
+
+
+def test_custom_agents_rejects_invalid(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "CUSTOM_AGENTS_PATH", tmp_path / "ca.json")
+    # Missing http
+    r = client.put("/api/custom-agents", json={"agents": [{"id": "x"}]})
+    assert r.status_code == 400
+    # Bad id
+    r = client.put("/api/custom-agents", json={"agents": [{
+        "id": "../evil", "http": {"endpoint": "https://x", "model": "y"},
+    }]})
+    assert r.status_code == 400
+    # Clash with built-in
+    r = client.put("/api/custom-agents", json={"agents": [{
+        "id": "claude-sonnet-4-6", "http": {"endpoint": "https://x", "model": "y"},
+    }]})
+    assert r.status_code == 409
+
+
+def test_webhook_trigger_runs_workflow(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    # Save a workflow
+    client.put("/api/workflows/auto-flow", json={
+        "title": "Auto",
+        "spec": [{"agent": "claude", "label": "x", "prompt": "Hi ${WHO}"}],
+        "variables": {"WHO": "default"},
+    })
+    # Trigger it with overlay vars
+    r = client.post("/api/triggers/auto-flow",
+                     json={"variables": {"WHO": "TeamIDAS"}})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["workflow"] == "auto-flow"
+    assert body["id"]
+
+
+def test_webhook_trigger_404_for_missing(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    r = client.post("/api/triggers/nonexistent", json={})
+    assert r.status_code == 404
+
+
+def test_schedules_save_and_load(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "SCHEDULES_PATH", tmp_path / "schedules.json")
+    body = {"schedules": [{
+        "workflow": "morning-brief",
+        "interval_minutes": 60,
+        "enabled": True,
+        "variables": {"TOPIC": "today"},
+    }]}
+    r = client.put("/api/schedules", json=body)
+    assert r.status_code == 200
+    assert r.json()["saved"] == 1
+    r = client.get("/api/schedules")
+    items = r.json()["schedules"]
+    assert items[0]["workflow"] == "morning-brief"
+
+
+def test_schedules_rejects_invalid(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "SCHEDULES_PATH", tmp_path / "s.json")
+    # No interval
+    r = client.put("/api/schedules", json={"schedules": [{"workflow": "x"}]})
+    assert r.status_code == 400
+    # Negative interval
+    r = client.put("/api/schedules", json={"schedules": [{
+        "workflow": "x", "interval_minutes": 0,
+    }]})
+    assert r.status_code == 400
+
+
 def test_note_save_and_load(client, tmp_path, monkeypatch):
     monkeypatch.setattr(dash, "NOTES_DIR", tmp_path)
     r = client.put("/api/notes/hello", json={
@@ -661,11 +826,11 @@ def test_workflow_name_sanitization(client, tmp_path, monkeypatch):
     body = {"title": "x", "spec": [{"agent": "claude", "label": "a", "prompt": "y"}]}
     r = client.put("/api/workflows/has spaces & special!chars", json=body)
     assert r.status_code == 200
-    files = list(tmp_path.glob("*.json"))
-    assert len(files) == 1
-    # Should be sanitized — no spaces, no special chars
-    assert " " not in files[0].name
-    assert "&" not in files[0].name
+    # Ensure a sanitized file exists (one containing the slugged stem)
+    matching = [p for p in tmp_path.glob("*.json") if "spaces" in p.name and "&" not in p.name]
+    assert matching, f"no sanitized workflow file found; got {list(tmp_path.glob('*.json'))}"
+    assert " " not in matching[0].name
+    assert "&" not in matching[0].name
 
 
 def test_extract_openai_compatible_response():

@@ -1,21 +1,15 @@
 [
   {
-    "id": "4026fcaba9c2",
-    "title": "deps failure test",
-    "created": 1778044567.2795808,
-    "finished": true,
+    "id": "c29d4068fcbf",
+    "title": "trigger: Trigger demo",
+    "created": 1778078353.190259,
+    "finished": false,
     "agents": [
       {
-        "label": "first",
+        "label": "echo",
         "agent": "claude-sonnet-4-6",
-        "status": "failed",
-        "exit_code": 1
-      },
-      {
-        "label": "second",
-        "agent": "gemini-pro",
-        "status": "failed",
-        "exit_code": -1
+        "status": "queued",
+        "exit_code": null
       }
     ]
   }

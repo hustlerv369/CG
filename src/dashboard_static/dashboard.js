@@ -378,12 +378,24 @@ async function startRun() {
   btn.disabled = true;
   btn.textContent = "starting…";
 
+  // Forward Settings (browser-stored API keys, project root, custom
+  // variables) to the backend so the run actually uses them.
+  const settings = loadSettings();
+  const headers = { "Content-Type": "application/json" };
+  if (settings.openrouter) headers["X-CG-OpenRouter-Key"] = settings.openrouter;
+  if (settings.zhipu)      headers["X-CG-Zhipu-Key"] = settings.zhipu;
+  if (settings.anthropic)  headers["X-CG-Anthropic-Key"] = settings.anthropic;
+  if (settings.gemini)     headers["X-CG-Gemini-Key"] = settings.gemini;
+  if (settings.projectRoot) headers["X-CG-Project-Root"] = settings.projectRoot;
+
+  const variables = settings.variables || {};
+
   let runId;
   try {
     const r = await fetch("/api/runs", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title, spec }),
+      headers,
+      body: JSON.stringify({ title, spec, variables }),
     });
     if (!r.ok) {
       const err = await r.text();
@@ -1146,16 +1158,56 @@ function paintSettingsForm() {
   $("#setting-project-root").value = s.projectRoot || "";
   if ($("#setting-default-view")) $("#setting-default-view").value = s.defaultView || "raw";
 
+  // Variables list
+  const vars = s.variables || {};
+  const ul = $("#vars-list");
+  if (ul) {
+    const keys = Object.keys(vars);
+    if (!keys.length) {
+      ul.innerHTML = '<li style="color:var(--fg-tertiary); justify-content:center;"><em>(no variables yet)</em></li>';
+    } else {
+      ul.innerHTML = keys.sort().map(k =>
+        `<li><span class="vk">\${${escapeHtml(k)}}</span><span class="vv">${escapeHtml(vars[k])}</span><button class="vrm" data-k="${escapeHtml(k)}">remove</button></li>`
+      ).join("");
+      ul.querySelectorAll(".vrm").forEach(b => {
+        b.onclick = () => {
+          const cur = loadSettings();
+          delete (cur.variables || {})[b.dataset.k];
+          persistSettings(cur);
+          paintSettingsForm();
+        };
+      });
+    }
+  }
+
   const items = [
     ["OpenRouter", s.openrouter],
     ["Z.ai / Zhipu", s.zhipu],
     ["Anthropic API", s.anthropic],
     ["Gemini API", s.gemini],
     ["Project root", s.projectRoot],
+    ["Variables", Object.keys(vars).length ? `${Object.keys(vars).length} defined` : ""],
   ];
   $("#settings-active").innerHTML = items.map(([name, v]) =>
-    `<li class="${v ? 'ok' : 'off'}">${v ? '✓' : '○'} ${escapeHtml(name)}: ${v ? '<em>(set)</em>' : '<em>not set</em>'}</li>`
+    `<li class="${v ? 'ok' : 'off'}">${v ? '✓' : '○'} ${escapeHtml(name)}: ${v ? '<em>' + escapeHtml(v === true ? '(set)' : v) + '</em>' : '<em>not set</em>'}</li>`
   ).join("");
+}
+
+function addVariable() {
+  const k = ($("#var-key-input").value || "").trim().toUpperCase();
+  const v = ($("#var-value-input").value || "").trim();
+  if (!/^[A-Z][A-Z0-9_]*$/.test(k)) {
+    alert("Variable name must be UPPER_SNAKE_CASE starting with a letter.");
+    return;
+  }
+  if (!v) { alert("Variable value cannot be empty."); return; }
+  const s = loadSettings();
+  s.variables = s.variables || {};
+  s.variables[k] = v;
+  persistSettings(s);
+  $("#var-key-input").value = "";
+  $("#var-value-input").value = "";
+  paintSettingsForm();
 }
 function saveSettingsForm() {
   const s = {
@@ -1256,6 +1308,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Settings handlers
   if ($("#settings-save-btn")) $("#settings-save-btn").onclick = saveSettingsForm;
   if ($("#settings-clear-btn")) $("#settings-clear-btn").onclick = clearSettings;
+  if ($("#var-add-btn")) $("#var-add-btn").onclick = addVariable;
   $("#clear-btn").onclick = () => {
     $("#agent-rows").innerHTML = "";
     $("#run-title").value = "";

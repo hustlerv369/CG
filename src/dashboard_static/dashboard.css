@@ -598,6 +598,28 @@ main.settings-pane {
 .settings-active .ok { color: var(--success); }
 .settings-active .off { color: var(--fg-quaternary); }
 
+.vars-list {
+  list-style: none; padding: 0; margin: 8px 0;
+}
+.vars-list li {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 6px;
+  font: 12px var(--font-mono);
+}
+.vars-list .vk { color: var(--accent); font-weight: 600; }
+.vars-list .vv { color: var(--fg-secondary); flex: 1;
+                 white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vars-list .vrm {
+  background: none; border: 1px solid transparent;
+  color: var(--fg-tertiary); cursor: pointer; padding: 2px 8px;
+  font-size: 11px; border-radius: 4px;
+}
+.vars-list .vrm:hover { color: var(--error); background: var(--error-soft); }
+
 /* -------- left: designer panel -------- */
 .designer {
   border-right: 1px solid var(--border);
