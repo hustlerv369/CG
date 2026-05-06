@@ -63,6 +63,8 @@ STATIC_DIR = ROOT / "src" / "dashboard_static"
 RUNS_DIR = ROOT / "outputs" / "dashboard-runs"
 RUNS_DIR.mkdir(parents=True, exist_ok=True)
 INDEX_PATH = ROOT / "tasks" / "_dashboard_runs.json"
+WORKFLOWS_DIR = ROOT / "workflows"
+WORKFLOWS_DIR.mkdir(parents=True, exist_ok=True)
 
 
 # ---------------------------------------------------------------------------
@@ -329,17 +331,32 @@ class RunManager:
 
     def _substitute_prompt(self, run: RunState, prompt: str,
                             depends_on: list[str]) -> str:
-        """Replace ``{{label}}`` placeholders with that dependency's output."""
-        if not depends_on:
-            return prompt
+        """Replace ``{{...}}`` placeholders in the prompt.
+
+        Supports:
+          ``{{label}}``               — output of dependency *label*
+          ``{{file:path/to/file}}``   — repo file content (UTF-8 text)
+          ``{{git:diff}}``            — current git diff (working tree)
+          ``{{git:diff:HEAD~1}}``     — git diff against a ref
+          ``{{git:log:5}}``           — last N commits (oneline)
+          ``{{git:status}}``          — git status --short
+          ``{{shell:cmd ...}}``       — output of an arbitrary shell cmd
+                                        (allowed only if ALLOW_SHELL=1)
+        Unknown placeholders are left intact, so the agent can complain
+        instead of silently rendering empty.
+        """
         result = prompt
-        for dep in depends_on:
+
+        # Dependency outputs first
+        for dep in depends_on or []:
             agent = run.agents.get(dep)
             if agent is None:
                 continue
             output = "\n".join(agent.log_lines)
-            placeholder = "{{" + dep + "}}"
-            result = result.replace(placeholder, output)
+            result = result.replace("{{" + dep + "}}", output)
+
+        # File / git / shell placeholders
+        result = _expand_context_placeholders(result)
         return result
 
     def _run_one_with_deps(self, run: RunState, label: str, agent: str, prompt: str) -> None:
@@ -583,6 +600,62 @@ PRESETS: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "git-pr-review",
+        "title": "Git diff review (auto-fetched current diff)",
+        "description": "Reviews the CURRENT working-tree git diff with three "
+                        "models in parallel. Uses {{git:diff}} placeholder so "
+                        "you don't paste anything — just save your file and Run.",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "style",
+                "prompt": "Review this diff for style, readability, obvious "
+                          "bugs, and missing tests. Output a Markdown bullet "
+                          "list, max 10 items. If the diff is trivial say so "
+                          "in one line.\n\n```diff\n{{git:diff}}\n```"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "architecture",
+                "prompt": "Review this diff at the architecture / design level "
+                          "(coupling, abstractions, future maintainability). "
+                          "Concrete concerns + suggested fixes as a Markdown "
+                          "bullet list.\n\n```diff\n{{git:diff}}\n```"
+            },
+            {
+                "agent": "gemini-pro", "label": "edge-cases",
+                "prompt": "Adversarially review this diff. List 5+ specific "
+                          "edge cases the author probably did not test. Be "
+                          "concrete — exact inputs and likely-actual vs "
+                          "expected behavior.\n\n```diff\n{{git:diff}}\n```"
+            },
+        ],
+    },
+    {
+        "id": "file-refactor",
+        "title": "File refactor (Sonnet drafts → Opus 4.7 reviews)",
+        "description": "Sonnet 4.6 drafts a refactor of an explicit file path "
+                        "(edit src/xyz.py inline in the prompt before Run), "
+                        "then Opus 4.7 reviews the diff. Demonstrates {{file:}} "
+                        "placeholder + sequential pipeline.",
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "draft",
+                "prompt": "Refactor the following Python file. Make it cleaner "
+                          "and add type hints where missing. Output ONLY a "
+                          "fenced ```python code block with the FULL refactored "
+                          "file content.\n\n--- src/cg.py ---\n{{file:src/cg.py}}"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "review",
+                "depends_on": ["draft"],
+                "prompt": "Review this refactor against the original. Did it "
+                          "preserve behaviour? Did it introduce regressions? "
+                          "Markdown bullet list, terse.\n\n## Original\n"
+                          "```python\n{{file:src/cg.py}}\n```\n\n## Refactor\n"
+                          "{{draft}}"
+            },
+        ],
+    },
+    {
         "id": "code-review",
         "title": "Code review — 3 models cross-check",
         "description": "Three models review the same diff: Sonnet for style + bugs, "
@@ -618,6 +691,234 @@ PRESETS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Context placeholders for prompts: {{file:...}}, {{git:...}}, {{shell:...}}
+# ---------------------------------------------------------------------------
+
+import re as _re
+
+_PLACEHOLDER_RE = _re.compile(r"\{\{([a-zA-Z][a-zA-Z0-9_-]*):([^{}\n]+)\}\}")
+_ALLOW_SHELL = os.environ.get("CG_ALLOW_SHELL", "0") == "1"
+
+
+def ROOT_PROJECT_FOR_FILES() -> "Path":
+    """Project root used to resolve {{file:...}} placeholders.
+
+    Defaults to the CG repo root, but can be overridden by setting the
+    ``CG_PROJECT_ROOT`` env var so the same dashboard can pull files
+    from a sibling project (e.g. TeamIDAS).
+    """
+    override = os.environ.get("CG_PROJECT_ROOT")
+    if override:
+        return Path(override).resolve()
+    return ROOT
+
+
+def _git_placeholder(arg: str) -> str:
+    """Resolve ``{{git:...}}`` placeholders by shelling out to ``git``."""
+    parts = [p.strip() for p in arg.split(":") if p.strip() != ""] or ["status"]
+    op = parts[0].lower()
+    ref_or_n = parts[1] if len(parts) > 1 else None
+
+    project_root = ROOT_PROJECT_FOR_FILES()
+
+    cmd: list[str]
+    if op == "diff":
+        cmd = ["git", "diff"] + ([ref_or_n] if ref_or_n else [])
+    elif op == "log":
+        n = ref_or_n or "10"
+        cmd = ["git", "log", "--oneline", f"-n{n}"]
+    elif op == "status":
+        cmd = ["git", "status", "--short", "--branch"]
+    elif op == "show":
+        cmd = ["git", "show", ref_or_n or "HEAD", "--stat"]
+    elif op == "branch":
+        cmd = ["git", "branch", "--show-current"]
+    else:
+        return f"[git: unknown op {op!r}]"
+
+    try:
+        out = subprocess.run(
+            cmd, cwd=str(project_root), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=15,
+        )
+        return (
+            out.stdout
+            if out.returncode == 0
+            else f"[git error: {out.stderr.strip()[:200]}]"
+        )
+    except subprocess.TimeoutExpired:
+        return "[git: timeout]"
+    except FileNotFoundError:
+        return "[git: not installed or not on PATH]"
+
+
+def _shell_placeholder(cmd: str) -> str:
+    """Resolve ``{{shell:...}}`` — disabled by default, opt-in via env var."""
+    project_root = ROOT_PROJECT_FOR_FILES()
+    try:
+        out = subprocess.run(
+            cmd, shell=True, cwd=str(project_root),
+            capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=30,
+        )
+        return out.stdout + (
+            ("\n[stderr]\n" + out.stderr) if out.stderr.strip() else ""
+        )
+    except subprocess.TimeoutExpired:
+        return "[shell: timeout 30s]"
+
+
+def _expand_context_placeholders(text: str) -> str:
+    """Replace ``{{kind:arg}}`` patterns with their resolved values.
+
+    Supports:
+      ``{{file:path/to/file}}``   — repo-relative file content (UTF-8)
+      ``{{git:diff}}``            — current git diff (working tree)
+      ``{{git:diff:HEAD~1}}``     — git diff vs ref
+      ``{{git:log:5}}``           — last N commits oneline
+      ``{{git:status}}``          — git status --short --branch
+      ``{{git:show:HEAD}}``       — git show with --stat
+      ``{{git:branch}}``          — current branch name
+      ``{{shell:cmd ...}}``       — disabled unless CG_ALLOW_SHELL=1
+    Unknown ``kind`` is left as-is so the agent can complain.
+    """
+    def replace_one(match: "_re.Match[str]") -> str:
+        kind = match.group(1).lower()
+        arg = match.group(2).strip()
+        try:
+            if kind == "file":
+                p = (ROOT_PROJECT_FOR_FILES() / arg).resolve()
+                root = ROOT_PROJECT_FOR_FILES()
+                # safety: must stay under project root
+                try:
+                    p.relative_to(root)
+                except ValueError:
+                    return f"[file: refused — {arg} is outside the project root]"
+                if not p.exists():
+                    return f"[file: not found — {arg}]"
+                return p.read_text(encoding="utf-8", errors="replace")
+
+            if kind == "git":
+                return _git_placeholder(arg)
+
+            if kind == "shell":
+                if not _ALLOW_SHELL:
+                    return "[shell: disabled — set CG_ALLOW_SHELL=1 to enable]"
+                return _shell_placeholder(arg)
+        except Exception as exc:
+            return f"[{kind}: error — {exc}]"
+        return match.group(0)
+
+    return _PLACEHOLDER_RE.sub(replace_one, text)
+
+
+# ---------------------------------------------------------------------------
+# Workflow filesystem helpers
+# ---------------------------------------------------------------------------
+
+
+def _safe_workflow_name(raw: str) -> str:
+    """Sanitize a workflow name to a safe filesystem slug."""
+    safe = _re.sub(r"[^a-zA-Z0-9._-]+", "-", raw.strip()) or "workflow"
+    return safe[:80]
+
+
+def _workflow_path(name: str) -> Path:
+    return WORKFLOWS_DIR / f"{_safe_workflow_name(name)}.json"
+
+
+def _name_of(path: Path) -> str:
+    return path.stem
+
+
+def _list_workflow_files() -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for p in sorted(WORKFLOWS_DIR.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        out.append({
+            "name": _name_of(p),
+            "title": data.get("title") or _name_of(p),
+            "agentCount": len(data.get("spec", [])),
+            "savedAt": data.get("savedAt"),
+        })
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Run report renderer (single Markdown bundle)
+# ---------------------------------------------------------------------------
+
+
+def _render_run_report(run: "RunState") -> str:
+    """Format a run as one self-contained Markdown document."""
+    lines: list[str] = []
+    lines.append(f"# CG run report — {run.title}")
+    lines.append("")
+    lines.append(f"- **id**: `{run.id}`")
+    lines.append(f"- **created**: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(run.created))}")
+    lines.append(f"- **agents**: {len(run.agents)}")
+    if run.finished:
+        lines.append(f"- **status**: finished")
+    else:
+        lines.append(f"- **status**: in progress")
+    lines.append("")
+
+    spec_by_label = {item.get("label", f"agent-{i+1}"): item
+                      for i, item in enumerate(run.spec)}
+
+    for label, agent in run.agents.items():
+        lines.append("---")
+        lines.append("")
+        lines.append(f"## {label} — {agent.agent}")
+        lines.append("")
+        meta = []
+        if agent.depends_on:
+            meta.append(f"depends_on: `{', '.join(agent.depends_on)}`")
+        meta.append(f"status: **{agent.status}**")
+        if agent.exit_code is not None:
+            meta.append(f"exit: `{agent.exit_code}`")
+        if agent.started and agent.finished:
+            dur = agent.finished - agent.started
+            meta.append(f"duration: `{dur:.1f}s`")
+        lines.append(" · ".join(meta))
+        lines.append("")
+
+        # Prompt
+        prompt = (spec_by_label.get(label, {}) or {}).get("prompt", "")
+        if prompt:
+            lines.append("### Prompt")
+            lines.append("")
+            lines.append("```")
+            lines.append(prompt.rstrip())
+            lines.append("```")
+            lines.append("")
+
+        # Output
+        lines.append("### Output")
+        lines.append("")
+        output = "\n".join(agent.log_lines).rstrip()
+        if output:
+            lines.append(output)
+        else:
+            lines.append("_(empty)_")
+        lines.append("")
+
+        # Stderr (if any)
+        if agent.stderr_lines:
+            lines.append("### stderr")
+            lines.append("")
+            lines.append("```")
+            lines.append("\n".join(agent.stderr_lines).rstrip())
+            lines.append("```")
+            lines.append("")
+
+    return "\n".join(lines)
 
 
 def create_app() -> FastAPI:
@@ -701,6 +1002,60 @@ def create_app() -> FastAPI:
         if label not in run.agents:
             raise HTTPException(404, "label not found")
         return {"label": label, "log": "\n".join(run.agents[label].log_lines)}
+
+    @app.get("/api/runs/{run_id}/report")
+    async def get_run_report(run_id: str) -> Any:
+        """Render a single Markdown report bundling every agent's
+        prompt, output, and exit code — useful for archiving or
+        sharing the result of a multi-agent run."""
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        return {
+            "title": run.title,
+            "id": run.id,
+            "markdown": _render_run_report(run),
+        }
+
+    # ---- workflows on disk -------------------------------------------------
+
+    @app.get("/api/workflows")
+    async def list_workflows() -> Any:
+        return {"workflows": _list_workflow_files()}
+
+    @app.get("/api/workflows/{name}")
+    async def get_workflow(name: str) -> Any:
+        path = _workflow_path(name)
+        if not path.exists():
+            raise HTTPException(404, "workflow not found")
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(500, f"invalid workflow JSON: {exc}")
+        return data
+
+    @app.put("/api/workflows/{name}")
+    async def save_workflow(name: str, body: dict[str, Any]) -> Any:
+        path = _workflow_path(name)
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body must be a JSON object")
+        if "spec" not in body or not isinstance(body["spec"], list):
+            raise HTTPException(400, "body.spec is required and must be an array")
+        body.setdefault("title", name)
+        body.setdefault("savedAt", time.time())
+        path.write_text(
+            json.dumps(body, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return {"name": _name_of(path), "saved": True}
+
+    @app.delete("/api/workflows/{name}")
+    async def delete_workflow(name: str) -> Any:
+        path = _workflow_path(name)
+        if not path.exists():
+            raise HTTPException(404, "workflow not found")
+        path.unlink()
+        return {"name": name, "deleted": True}
 
     @app.get("/api/runs/{run_id}/stream")
     async def stream(run_id: str, request: Request) -> Any:

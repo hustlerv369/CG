@@ -5,6 +5,9 @@
   <title>CG Dashboard — multi-agent orchestrator</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="stylesheet" href="/static/dashboard.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css" />
+  <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js"></script>
 </head>
 <body>
   <header>
@@ -25,12 +28,13 @@
       </div>
 
       <div class="row">
-        <label>Saved workflows (this browser)</label>
+        <label>Saved workflows</label>
         <div class="workflows-row">
           <select id="workflow-select">
             <option value="">— load saved —</option>
           </select>
-          <button class="ghost" id="save-workflow-btn" title="Save current workflow">💾 save</button>
+          <button class="ghost" id="save-workflow-btn" title="Save current workflow (Ctrl+S)">💾</button>
+          <button class="ghost" id="save-disk-btn" title="Save to disk (D:\CG\workflows\)">📁</button>
           <button class="ghost" id="del-workflow-btn" title="Delete selected workflow">🗑</button>
         </div>
       </div>
@@ -60,6 +64,11 @@
       <div class="monitor-header">
         <h2 id="run-title-display">no run yet</h2>
         <div class="monitor-meta" id="run-meta"></div>
+        <div class="view-toggle" id="view-toggle">
+          <button class="seg active" data-view="raw" title="Raw plain-text output">raw</button>
+          <button class="seg" data-view="md" title="Render Markdown + code highlighting">markdown</button>
+          <button class="seg" data-view="diff" title="Side-by-side diff (best for compare preset)">diff</button>
+        </div>
       </div>
       <div id="agent-grid" class="agent-grid">
         <div class="empty-state">

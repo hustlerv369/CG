@@ -10,6 +10,7 @@ const state = {
   panels: {},          // label -> {root, log, badges...}
   evtSource: null,
   history: [],
+  viewMode: "raw",     // raw | md | diff
 };
 
 // ---------- bootstrap ----------
@@ -49,23 +50,95 @@ function saveWorkflows(list) {
   localStorage.setItem(WORKFLOW_KEY, JSON.stringify(list));
 }
 
-function populateWorkflows() {
+async function populateWorkflows() {
   const sel = $("#workflow-select");
   if (!sel) return;
-  const items = loadWorkflows();
+  const browser = loadWorkflows();
+  let disk = [];
+  try {
+    const r = await fetch("/api/workflows");
+    if (r.ok) disk = (await r.json()).workflows || [];
+  } catch { /* offline mode */ }
+
+  const browserOpts = browser.map((w, i) =>
+    `<option value="local:${i}">🌐 ${escapeHtml(w.title || "(untitled)")}</option>`
+  ).join("");
+  const diskOpts = disk.map(w =>
+    `<option value="disk:${escapeHtml(w.name)}">📁 ${escapeHtml(w.title)} (${w.agentCount})</option>`
+  ).join("");
+
   sel.innerHTML = '<option value="">— load saved —</option>' +
-    items.map((w, i) =>
-      `<option value="${i}">${escapeHtml(w.title || "(untitled)")}</option>`
-    ).join("");
-  sel.onchange = () => {
-    const i = parseInt(sel.value, 10);
-    if (isNaN(i)) return;
-    const w = loadWorkflows()[i];
-    if (!w) return;
-    $("#run-title").value = w.title || "";
-    $("#agent-rows").innerHTML = "";
-    (w.spec || []).forEach(addAgentRow);
+    (browserOpts ? `<optgroup label="Browser (this device)">${browserOpts}</optgroup>` : "") +
+    (diskOpts ? `<optgroup label="Disk (D:\\CG\\workflows\\)">${diskOpts}</optgroup>` : "");
+
+  sel.onchange = async () => {
+    const v = sel.value;
+    if (!v) return;
+    if (v.startsWith("local:")) {
+      const i = parseInt(v.slice(6), 10);
+      const w = loadWorkflows()[i];
+      if (!w) return;
+      loadSpecIntoDesigner(w);
+    } else if (v.startsWith("disk:")) {
+      const name = v.slice(5);
+      try {
+        const r = await fetch(`/api/workflows/${encodeURIComponent(name)}`);
+        if (!r.ok) { alert("Failed to load workflow"); return; }
+        loadSpecIntoDesigner(await r.json());
+      } catch (e) { alert("Network error: " + e); }
+    }
   };
+}
+
+function loadSpecIntoDesigner(w) {
+  $("#run-title").value = w.title || "";
+  $("#agent-rows").innerHTML = "";
+  (w.spec || []).forEach(addAgentRow);
+}
+
+async function saveWorkflowToDisk() {
+  const title = $("#run-title").value.trim();
+  if (!title) { alert("Give the workflow a Title before saving."); return; }
+  const spec = readSpec();
+  if (!spec.length) { alert("Add at least one agent before saving."); return; }
+  const safeName = title.toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 80) || "workflow";
+  try {
+    const r = await fetch(`/api/workflows/${encodeURIComponent(safeName)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title, spec }),
+    });
+    if (!r.ok) { alert("Save failed: " + (await r.text())); return; }
+    setStatus(`saved 📁 ${safeName}.json`, "ok");
+    setTimeout(() => setStatus("connected", "ok"), 2000);
+    await populateWorkflows();
+  } catch (e) {
+    alert("Network error: " + e);
+  }
+}
+
+async function deleteSelectedWorkflowEither() {
+  const sel = $("#workflow-select");
+  const v = sel.value;
+  if (!v) { alert("Pick a saved workflow first."); return; }
+  if (v.startsWith("local:")) {
+    deleteSelectedWorkflow();
+    return;
+  }
+  if (v.startsWith("disk:")) {
+    const name = v.slice(5);
+    if (!confirm(`Delete workflow "${name}" from disk?`)) return;
+    try {
+      const r = await fetch(`/api/workflows/${encodeURIComponent(name)}`, { method: "DELETE" });
+      if (!r.ok) { alert("Delete failed"); return; }
+      setStatus(`deleted 📁 ${name}`, "ok");
+      setTimeout(() => setStatus("connected", "ok"), 1500);
+      await populateWorkflows();
+    } catch (e) { alert("Network error: " + e); }
+  }
 }
 
 function saveCurrentWorkflow() {
@@ -274,11 +347,26 @@ async function openRun(runId) {
   }));
   tools.innerHTML = `
     <button class="ghost" id="cancel-btn">⨯ Cancel</button>
-    <button class="ghost" id="rerun-btn">↻ Reload into editor</button>
+    <button class="ghost" id="rerun-btn">↻ Reload</button>
+    <button class="ghost" id="export-btn">⬇ Export .md</button>
   `;
   tools.querySelector("#cancel-btn").onclick = async () => {
     if (!confirm("Cancel this run? Running agents will be killed.")) return;
     await fetch(`/api/runs/${meta.id}`, { method: "DELETE" });
+  };
+  tools.querySelector("#export-btn").onclick = async () => {
+    try {
+      const r = await fetch(`/api/runs/${meta.id}/report`);
+      if (!r.ok) { alert("Export failed"); return; }
+      const data = await r.json();
+      const blob = new Blob([data.markdown], { type: "text/markdown" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `cg-${data.id}-${(data.title || "run").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    } catch (e) { alert("Network error: " + e); }
   };
   tools.querySelector("#rerun-btn").onclick = () => {
     // Reload this run's spec into the designer (prompts intact for editing)
@@ -393,22 +481,98 @@ function handleStatus(d) {
 function handleSnapshot(d) {
   const p = state.panels[d.label];
   if (!p) return;
-  p.log.textContent = d.log;
-  p.bytesEl.textContent = `${d.log.length} chars`;
-  p.log.scrollTop = p.log.scrollHeight;
+  p.rawBuffer = d.log;
+  rerenderPanel(p);
 }
 
 function handleLog(d) {
   const p = state.panels[d.label];
   if (!p) return;
-  if (p.log.textContent && !p.log.textContent.endsWith("\n")) {
-    p.log.textContent += "\n";
-  }
-  p.log.textContent += d.line;
-  p.bytesEl.textContent = `${p.log.textContent.length} chars`;
-  // Auto-scroll if user is near bottom
+  // Append to the canonical raw buffer
+  p.rawBuffer = (p.rawBuffer || "") + (p.rawBuffer ? "\n" : "") + d.line;
+  rerenderPanel(p);
+}
+
+function rerenderPanel(p) {
+  const text = p.rawBuffer || "";
+  p.bytesEl.textContent = `${text.length} chars`;
   const nearBottom = (p.log.scrollHeight - p.log.scrollTop - p.log.clientHeight) < 40;
+  if (state.viewMode === "md" && window.marked) {
+    p.log.classList.add("md-rendered");
+    p.log.classList.remove("diff-rendered");
+    p.log.innerHTML = window.marked.parse(text);
+    if (window.hljs) p.log.querySelectorAll("pre code").forEach(b => window.hljs.highlightElement(b));
+  } else if (state.viewMode === "diff") {
+    p.log.classList.add("diff-rendered");
+    p.log.classList.remove("md-rendered");
+    p.log.innerHTML = renderDiffPlaceholder(p.label, text);
+  } else {
+    p.log.classList.remove("md-rendered", "diff-rendered");
+    p.log.textContent = text;
+  }
   if (nearBottom) p.log.scrollTop = p.log.scrollHeight;
+}
+
+function renderDiffPlaceholder(label, text) {
+  // Diff is meaningful only with 2 panels — actual diff is rendered
+  // in renderDiffMode() at the grid level. Per-panel just shows text.
+  return escapeHtml(text);
+}
+
+function setViewMode(mode) {
+  state.viewMode = mode;
+  document.querySelectorAll("#view-toggle .seg").forEach(b => {
+    b.classList.toggle("active", b.dataset.view === mode);
+  });
+  const grid = $("#agent-grid");
+  if (grid) grid.classList.toggle("diff-grid", mode === "diff" && Object.keys(state.panels).length === 2);
+
+  // Re-render every panel
+  Object.values(state.panels).forEach(rerenderPanel);
+
+  // For diff mode with exactly 2 panels, run the diff and inject into both panels
+  if (mode === "diff" && Object.keys(state.panels).length === 2) {
+    const labels = Object.keys(state.panels);
+    const a = state.panels[labels[0]].rawBuffer || "";
+    const b = state.panels[labels[1]].rawBuffer || "";
+    const diff = computeLineDiff(a, b);
+    state.panels[labels[0]].log.innerHTML = diff.left;
+    state.panels[labels[1]].log.innerHTML = diff.right;
+  }
+}
+
+// Tiny LCS-based line diff — enough for two short markdown outputs.
+function computeLineDiff(a, b) {
+  const A = a.split("\n");
+  const B = b.split("\n");
+  const m = A.length, n = B.length;
+  const dp = Array.from({ length: m + 1 }, () => new Int32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) {
+    for (let j = n - 1; j >= 0; j--) {
+      if (A[i] === B[j]) dp[i][j] = dp[i + 1][j + 1] + 1;
+      else dp[i][j] = Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const left = [], right = [];
+  let i = 0, j = 0;
+  while (i < m && j < n) {
+    if (A[i] === B[j]) {
+      left.push(`<span class="diff-eq">  ${escapeHtml(A[i])}</span>`);
+      right.push(`<span class="diff-eq">  ${escapeHtml(B[j])}</span>`);
+      i++; j++;
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      left.push(`<span class="diff-rem">- ${escapeHtml(A[i])}</span>`);
+      right.push(`<span class="diff-eq">  </span>`);
+      i++;
+    } else {
+      left.push(`<span class="diff-eq">  </span>`);
+      right.push(`<span class="diff-add">+ ${escapeHtml(B[j])}</span>`);
+      j++;
+    }
+  }
+  while (i < m) { left.push(`<span class="diff-rem">- ${escapeHtml(A[i++])}</span>`); right.push(`<span class="diff-eq">  </span>`); }
+  while (j < n) { left.push(`<span class="diff-eq">  </span>`); right.push(`<span class="diff-add">+ ${escapeHtml(B[j++])}</span>`); }
+  return { left: left.join(""), right: right.join("") };
 }
 
 // ---------- history sidebar ----------
@@ -463,8 +627,15 @@ document.addEventListener("DOMContentLoaded", () => {
     $("#save-workflow-btn").onclick = saveCurrentWorkflow;
   }
   if ($("#del-workflow-btn")) {
-    $("#del-workflow-btn").onclick = deleteSelectedWorkflow;
+    $("#del-workflow-btn").onclick = deleteSelectedWorkflowEither;
   }
+  if ($("#save-disk-btn")) {
+    $("#save-disk-btn").onclick = saveWorkflowToDisk;
+  }
+  // View mode segmented control
+  document.querySelectorAll("#view-toggle .seg").forEach(b => {
+    b.addEventListener("click", () => setViewMode(b.dataset.view));
+  });
 
   // Keyboard shortcuts
   document.addEventListener("keydown", (e) => {

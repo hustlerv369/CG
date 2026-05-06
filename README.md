@@ -187,7 +187,15 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ Doctor passes
 - ✅ Task store + run history
 - ✅ Web dashboard with live SSE streaming
-- ✅ 24 pytest tests passing (15 cg + 9 dashboard)
+- ✅ 6 model selector (Sonnet 4.6 / Opus 4.7 / Opus 4.6 / Flash / Pro / 3 Pro)
+- ✅ Apple + Revolut dark redesign (glassmorphism, purple accent)
+- ✅ Sequential pipelines (`depends_on` + `{{label}}` substitution)
+- ✅ Context placeholders (`{{file:path}}`, `{{git:diff}}`, `{{git:log:5}}`, etc.)
+- ✅ Workflow files on disk (`D:\CG\workflows\*.json`) — share via git
+- ✅ Markdown / diff render view-toggle (raw / md / diff segmented control)
+- ✅ Run report export (single Markdown bundle of any run)
+- ✅ Cancel / save / browser notifications / keyboard shortcuts
+- ✅ 44 pytest tests passing (15 cg + 29 dashboard)
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 
 ## Migrating from CLAUDEGRAVITY

@@ -107,12 +107,84 @@ Click **Clear**, then build from scratch:
 
 1. Set a title (e.g. *"Exporters for the invoicing module"*)
 2. Add 3 agent rows:
-   - `design` (Gemini) → *"Design the public API for export_invoices_csv"*
-   - `impl` (Claude) → *"Implement export_invoices_csv per the spec…"*
-   - `tests` (Claude) → *"Write pytest tests covering empty / 100-row / weird-encoding inputs"*
-3. Click **Run**
+   - `design` (Gemini Pro) → *"Design the public API for export_invoices_csv"*
+   - `impl` (Claude Opus 4.7) → *"Implement per spec: {{design}}"* — note the `{{design}}` placeholder + `depends_on: design`
+   - `tests` (Claude Sonnet 4.6) → *"Write pytest tests for: {{impl}}"* — `depends_on: impl`
+3. Click **Run** (or Ctrl+Enter)
 4. Watch each panel as it streams output
-5. Pick / merge / commit
+
+## Model selection
+
+Each agent row has a model dropdown grouped by family. As of v3:
+
+| Model | When to use |
+|---|---|
+| **Claude Sonnet 4.6** | Daily driver — fast, balanced, cheap on quota |
+| **Claude Opus 4.7** | 1M context — big refactors, multi-file analysis |
+| **Claude Opus 4.6** | Previous-gen Opus, still strong |
+| **Gemini Flash** | Fastest — quick checks, drafts |
+| **Gemini Pro** | Default Gemini — balanced quality |
+| **Gemini 3 Pro** | Latest preview — slowest, strongest |
+
+Note: Gemini "High / Low" reasoning levels exist only in the Antigravity
+UI; `gemini-cli` does not expose them.
+
+## Context placeholders
+
+Beyond `{{label}}` (which substitutes a dependency's full output),
+prompts can pull live project context:
+
+| Placeholder | Resolves to |
+|---|---|
+| `{{file:src/foo.py}}` | UTF-8 contents of that file (project-rooted) |
+| `{{git:diff}}` | `git diff` of the working tree |
+| `{{git:diff:HEAD~1}}` | `git diff HEAD~1` (against ref) |
+| `{{git:log:5}}` | last 5 commits (oneline) |
+| `{{git:status}}` | `git status --short --branch` |
+| `{{git:show:HEAD}}` | `git show --stat HEAD` |
+| `{{git:branch}}` | current branch name |
+| `{{shell:cmd ...}}` | output of any shell command (DISABLED unless `CG_ALLOW_SHELL=1`) |
+
+Project root is the CG repo by default. Override with `CG_PROJECT_ROOT`
+env var so the dashboard pulls files from a sibling project (e.g. set
+`CG_PROJECT_ROOT=D:\CLAUDE\TEAMIDAS` and `{{file:src/auth.ts}}` reads
+from there).
+
+Path traversal is blocked: `{{file:../etc/passwd}}` returns a "refused"
+marker, never the file.
+
+## View modes
+
+The monitor toolbar has a segmented control: **raw / markdown / diff**.
+
+- **raw** — agent stdout as-is, monospace
+- **markdown** — `marked.js` + `highlight.js` render the output as
+  formatted Markdown with syntax-highlighted code blocks
+- **diff** — when exactly two agents are present (compare preset),
+  shows their outputs side-by-side with line-level LCS diff
+  (additions green, removals red strikethrough)
+
+Switch modes any time during or after a run.
+
+## Workflow persistence
+
+Two layers:
+
+1. **Browser localStorage** (per device) — quick save with Ctrl+S.
+   Listed in the dropdown with a 🌐 prefix.
+2. **Disk** (`D:\CG\workflows\*.json`) — click 📁 to save. Shows up
+   with a 📁 prefix in the dropdown. These are version-controllable
+   (commit the `workflows/` folder) and shareable.
+
+The disk format is a plain JSON object: `{ title, spec: [...] }`. Edit
+in your IDE if you prefer.
+
+## Export run as Markdown
+
+Click **⬇ Export .md** in the monitor toolbar to download a single
+Markdown file containing every agent's prompt, output, status, and
+duration. Useful for archiving a session, sharing in Slack, attaching
+to a PR description.
 
 ## Output files
 

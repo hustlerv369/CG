@@ -335,3 +335,158 @@ def test_cancel_endpoint(client):
 def test_cancel_unknown_run_404(client):
     r = client.delete("/api/runs/does-not-exist")
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Context placeholders ({{file:...}}, {{git:...}}, {{shell:...}})
+# ---------------------------------------------------------------------------
+
+
+def test_placeholder_unknown_kind_left_intact(monkeypatch):
+    out = dash._expand_context_placeholders("hello {{foo:bar}} world")
+    assert out == "hello {{foo:bar}} world"
+
+
+def test_placeholder_file_reads_existing_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "spec.md").write_text("# spec\nhello", encoding="utf-8")
+    out = dash._expand_context_placeholders("read: {{file:spec.md}}")
+    assert "# spec" in out and "hello" in out
+
+
+def test_placeholder_file_missing_renders_marker(tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    out = dash._expand_context_placeholders("{{file:does-not-exist.txt}}")
+    assert "[file: not found" in out
+
+
+def test_placeholder_file_path_traversal_refused(tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    out = dash._expand_context_placeholders("{{file:../etc/passwd}}")
+    # Must NOT contain typical /etc/passwd content; refusal marker present
+    assert "refused" in out or "not found" in out
+
+
+def test_placeholder_shell_disabled_by_default(monkeypatch):
+    monkeypatch.setattr(dash, "_ALLOW_SHELL", False)
+    out = dash._expand_context_placeholders("{{shell:echo hi}}")
+    assert "disabled" in out
+
+
+def test_placeholder_multiple_in_one_prompt(tmp_path, monkeypatch):
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "a.txt").write_text("AAA", encoding="utf-8")
+    (tmp_path / "b.txt").write_text("BBB", encoding="utf-8")
+    out = dash._expand_context_placeholders(
+        "first: {{file:a.txt}} -- second: {{file:b.txt}}"
+    )
+    assert "AAA" in out and "BBB" in out
+
+
+def test_workflow_save_load_delete_cycle(client, tmp_path, monkeypatch):
+    """End-to-end: PUT a workflow, GET it back, list it, DELETE it."""
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+
+    body = {"title": "smoke flow", "spec": [
+        {"agent": "claude", "label": "a", "prompt": "x"}
+    ]}
+    r = client.put("/api/workflows/smoke-flow", json=body)
+    assert r.status_code == 200
+    assert r.json()["saved"] is True
+
+    r = client.get("/api/workflows")
+    assert r.status_code == 200
+    listing = r.json()["workflows"]
+    assert any(w["name"] == "smoke-flow" for w in listing)
+
+    r = client.get("/api/workflows/smoke-flow")
+    assert r.status_code == 200
+    fetched = r.json()
+    assert fetched["title"] == "smoke flow"
+    assert fetched["spec"][0]["agent"] == "claude"
+
+    r = client.delete("/api/workflows/smoke-flow")
+    assert r.status_code == 200
+    assert r.json()["deleted"] is True
+
+    r = client.get("/api/workflows/smoke-flow")
+    assert r.status_code == 404
+
+
+def test_workflow_put_rejects_bad_body(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    r = client.put("/api/workflows/bad", json={"title": "x"})
+    assert r.status_code == 400
+    r = client.put("/api/workflows/bad", json={"spec": "not-an-array"})
+    assert r.status_code == 400
+
+
+def test_workflow_name_sanitization(client, tmp_path, monkeypatch):
+    """Slashes, spaces, etc. in the name must not escape WORKFLOWS_DIR."""
+    monkeypatch.setattr(dash, "WORKFLOWS_DIR", tmp_path)
+    body = {"title": "x", "spec": [{"agent": "claude", "label": "a", "prompt": "y"}]}
+    r = client.put("/api/workflows/has spaces & special!chars", json=body)
+    assert r.status_code == 200
+    files = list(tmp_path.glob("*.json"))
+    assert len(files) == 1
+    # Should be sanitized — no spaces, no special chars
+    assert " " not in files[0].name
+    assert "&" not in files[0].name
+
+
+def test_run_report_renders_markdown(client):
+    """Run a 2-agent workflow then GET /report — must include both labels."""
+    r = client.post("/api/runs", json={
+        "title": "report test",
+        "spec": [
+            {"agent": "claude", "label": "alpha", "prompt": "p1"},
+            {"agent": "gemini", "label": "beta",  "prompt": "p2"},
+        ],
+    })
+    run_id = r.json()["id"]
+    import time
+    for _ in range(40):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+
+    r = client.get(f"/api/runs/{run_id}/report")
+    assert r.status_code == 200
+    md = r.json()["markdown"]
+    assert "# CG run report" in md
+    assert "## alpha" in md
+    assert "## beta" in md
+    assert "p1" in md  # prompt embedded
+    assert "p2" in md
+    assert "CLAUDE-MOCK p1" in md  # output embedded
+    assert "GEMINI-MOCK p2" in md
+
+
+def test_dependency_substitution_combined_with_file_placeholder(client, tmp_path, monkeypatch):
+    """A pipeline can mix {{depLabel}} substitution with {{file:...}}."""
+    monkeypatch.setenv("CG_PROJECT_ROOT", str(tmp_path))
+    (tmp_path / "ctx.md").write_text("EXTERNAL_CONTEXT", encoding="utf-8")
+    payload = {
+        "title": "combined",
+        "spec": [
+            {"agent": "claude", "label": "first", "prompt": "step-A"},
+            {"agent": "gemini", "label": "second",
+             "depends_on": ["first"],
+             "prompt": "dep={{first}} ctx={{file:ctx.md}}"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+
+    import time
+    for _ in range(60):
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed"} for a in body["agents"]):
+            break
+        time.sleep(0.1)
+
+    log = client.get(f"/api/runs/{run_id}/output/second").json()["log"]
+    assert "CLAUDE-MOCK step-A" in log  # dep label substituted
+    assert "EXTERNAL_CONTEXT" in log    # file placeholder expanded
