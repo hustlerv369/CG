@@ -30,12 +30,165 @@ async function init() {
   populatePresets();
   await populateWorkflows();
   await refreshHistory();
+  // K5 — load active workspace's draft (replaces ensureOneAgentRow path
+  // unless this is a brand-new browser, in which case the default
+  // workspace's empty spec triggers the safety fallback inside applyDraft)
+  initWorkspaces();
   ensureOneAgentRow();
   requestNotificationPermission();
   // CLI auto-load: cg dashboard --workflow <name>
   await autoLoadFromUrl();
 
   setInterval(refreshHistory, 5000);
+}
+
+// ---------- K5: workspaces (parallel orchestrator drafts) ---------------
+//
+// A workspace is one independent draft of the workflow designer (title
+// + agent rows). Saved to localStorage so each browser keeps its own
+// set of parallel drafts. Switching a workspace captures the current
+// draft into the previously-active one before loading the target.
+
+const WS_KEY = "cg.workspaces";
+const WS_ACTIVE_KEY = "cg.workspaces.active";
+
+function loadWorkspaces() {
+  try {
+    const v = JSON.parse(localStorage.getItem(WS_KEY) || "null");
+    if (Array.isArray(v) && v.length) return v;
+  } catch { /* fall through */ }
+  return [{ id: "ws-1", name: "Draft 1", draft: { title: "", spec: [] } }];
+}
+function saveWorkspaces(list) {
+  localStorage.setItem(WS_KEY, JSON.stringify(list));
+}
+function getActiveWsId() {
+  return localStorage.getItem(WS_ACTIVE_KEY) || "ws-1";
+}
+function setActiveWsId(id) {
+  localStorage.setItem(WS_ACTIVE_KEY, id);
+}
+
+function captureCurrentDraft() {
+  return {
+    title: ($("#run-title")?.value || "").trim(),
+    spec: readSpec(),
+  };
+}
+
+function applyDraft(draft) {
+  if (!draft) draft = { title: "", spec: [] };
+  if ($("#run-title")) $("#run-title").value = draft.title || "";
+  $("#agent-rows").innerHTML = "";
+  (draft.spec || []).forEach(s => addAgentRow(s));
+  if (($$(".agent-row") || []).length === 0) addAgentRow();
+}
+
+function persistActiveDraft() {
+  const list = loadWorkspaces();
+  const id = getActiveWsId();
+  const idx = list.findIndex(w => w.id === id);
+  if (idx === -1) return;
+  list[idx].draft = captureCurrentDraft();
+  saveWorkspaces(list);
+}
+
+function switchWorkspace(id) {
+  persistActiveDraft();
+  setActiveWsId(id);
+  const list = loadWorkspaces();
+  const target = list.find(w => w.id === id) || list[0];
+  applyDraft(target.draft);
+  renderWorkspaceList();
+}
+
+function addWorkspace() {
+  persistActiveDraft();
+  const list = loadWorkspaces();
+  const n = list.length + 1;
+  const newWs = { id: `ws-${Date.now().toString(36)}`,
+                   name: `Draft ${n}`,
+                   draft: { title: "", spec: [] } };
+  list.push(newWs);
+  saveWorkspaces(list);
+  setActiveWsId(newWs.id);
+  applyDraft(newWs.draft);
+  renderWorkspaceList();
+}
+
+function removeWorkspace(id) {
+  let list = loadWorkspaces();
+  if (list.length <= 1) {
+    alert("Can't remove the last workspace.");
+    return;
+  }
+  const ws = list.find(w => w.id === id);
+  if (!ws) return;
+  if (!confirm(`Delete workspace "${ws.name}"? Its draft will be lost.`)) return;
+  list = list.filter(w => w.id !== id);
+  saveWorkspaces(list);
+  if (getActiveWsId() === id) {
+    setActiveWsId(list[0].id);
+    applyDraft(list[0].draft);
+  }
+  renderWorkspaceList();
+}
+
+function renameWorkspace(id) {
+  const list = loadWorkspaces();
+  const ws = list.find(w => w.id === id);
+  if (!ws) return;
+  const next = prompt("Rename workspace:", ws.name);
+  if (next === null) return;
+  ws.name = next.trim() || ws.name;
+  saveWorkspaces(list);
+  renderWorkspaceList();
+}
+
+function renderWorkspaceList() {
+  const host = $("#ws-list");
+  if (!host) return;
+  const list = loadWorkspaces();
+  const active = getActiveWsId();
+  host.innerHTML = "";
+  list.forEach(ws => {
+    const card = document.createElement("div");
+    card.className = "ws-card" + (ws.id === active ? " active" : "");
+    card.title = ws.name + " — click to switch, double-click to rename";
+    card.innerHTML = `
+      <button class="ws-close" title="Delete">×</button>
+      <span class="ws-name"></span>
+    `;
+    card.querySelector(".ws-name").textContent =
+      ws.name.length > 8 ? ws.name.slice(0, 8) + "…" : ws.name;
+    card.addEventListener("click", e => {
+      if (e.target.classList.contains("ws-close")) return;
+      if (ws.id !== active) switchWorkspace(ws.id);
+    });
+    card.addEventListener("dblclick", e => {
+      e.preventDefault();
+      renameWorkspace(ws.id);
+    });
+    card.querySelector(".ws-close").addEventListener("click", e => {
+      e.stopPropagation();
+      removeWorkspace(ws.id);
+    });
+    host.appendChild(card);
+  });
+}
+
+function initWorkspaces() {
+  // Ensure persistence on page-leave so a refresh keeps the active draft.
+  window.addEventListener("beforeunload", persistActiveDraft);
+  $("#ws-add-btn")?.addEventListener("click", addWorkspace);
+  // Load active workspace's draft as the initial UI state. We do this
+  // BEFORE ensureOneAgentRow() so the saved spec is honored.
+  const list = loadWorkspaces();
+  saveWorkspaces(list);  // self-heal default
+  const active = list.find(w => w.id === getActiveWsId()) || list[0];
+  if (!list.find(w => w.id === getActiveWsId())) setActiveWsId(active.id);
+  applyDraft(active.draft);
+  renderWorkspaceList();
 }
 
 // ---------- saved workflows in localStorage ----------
