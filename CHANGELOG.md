@@ -6,6 +6,93 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
+## v17 — 2026-05-07 — Autonomous browser pilot (`c04f991`)
+
+### Added
+- **`browser-pilot` agent type.** A goal-driven loop closing the gap
+  between a Playwright session and an LLM. One natural-language goal
+  drives a real browser through up to N steps without further human
+  input.
+- **Per-iteration snapshot.** `_pilot_capture_state()` captures URL,
+  title, ~6 KB of body text, the first 60 visible interactive elements
+  with synthesized stable selectors, and a viewport screenshot saved
+  under `outputs/screenshots/`.
+- **LLM in the loop.** Snapshot + last 6 actions + goal are rendered
+  into a compact prompt with a JSON-only response contract and piped
+  through any subprocess-based AGENT_KINDS entry (defaults to
+  `claude-sonnet-4-6`, so the Pro subscription drives it).
+- **Tolerant parser.** `_pilot_ask_llm()` recovers the action JSON
+  from ```json fences and surrounding prose by extracting the first
+  balanced `{...}` block.
+- **Unified action set.** Actions dispatch through the existing
+  `_run_browser_step` so everything in v9's browser agent is reusable
+  (goto / click / fill / extract / scroll / wait), plus a `done`
+  action that ends the loop with a final answer.
+- **Bindings.** `run.bindings[label] = {steps, answer, error?}` so a
+  follow-up agent can post-process the trace.
+
+### Frontend
+- Agent dropdown gains explicit family labels and ordering (Claude,
+  Gemini, DeepSeek, Moonshot, GLM, Qwen, Llama, Mistral, OpenCode,
+  Browser, Sub-workflow, Custom).
+- Two new presets ship: **🤖 Browser Pilot — autonomous web search**
+  and **🤖 Browser Pilot → Claude summary**.
+
+### Tests
+- +4 (parser happy path, fenced JSON, garbage output, registration).
+- 122 → 126 passing.
+
+## v16 — 2026-05-07 — Visual workflow canvas (`14f3827`)
+
+### Added
+- **Toggle Classic ↔ Visual** at the top of the workflow designer.
+  Classic remains the source of truth — visual mode reads via
+  `readSpec()` and writes back via inline edit / palette / row patches.
+- **SVG node graph.** Auto-laid-out by topological depth; Bezier
+  connection lines with arrow markers; grid background; auto-resizing
+  viewBox.
+- **Drag-to-reposition.** Pointer-based dragging on each node with
+  positions persisted per workspace in `draft.positions`.
+- **Inline node edit.** Click a node body to toggle an edit panel
+  (model dropdown / label / depends_on / prompt). Saving patches the
+  matching classic row.
+- **Add / remove.** `+ node` opens a palette modal listing every
+  agent kind with family emoji + summary. `×` on a node removes it.
+- **Connection editing.** Click a Bezier path to remove that
+  `depends_on`.
+- **Live status overlays.** SSE handlers also call
+  `visualUpdateAgentStatus()` so during a run each node shows the
+  status pill, color border (queued / running / done / failed), pulse
+  glow when running, and the latest log line in muted accent.
+  Connections feeding a running node mark themselves "flowing".
+- **`auto-layout` button** forgets saved positions and re-runs
+  topological layout.
+
+### Bug fix found during testing
+- `_list_workflow_files()` no longer crashes when a workflow file on
+  disk is corrupt / non-dict (defensive `isinstance` + `spec=[]`
+  fallback).
+
+### Tests
+- 121 → 122 (front-end change; coverage unchanged for the new code).
+
+## v15 — 2026-05-07 — More models (`ba93b1a`)
+
+### Added
+- **OpenRouter (`OPENROUTER_API_KEY`):** `or-deepseek-r1`,
+  `or-kimi-k2`, `or-llama-3.3`, `or-mistral-large`.
+- **DeepSeek API direct (`DEEPSEEK_API_KEY`):** `deepseek-chat`,
+  `deepseek-reasoner` (R1-class).
+- **Moonshot direct (`MOONSHOT_API_KEY`):** `kimi-k2-direct`.
+- **OpenCode CLI** (sst/opencode) — subscription-style entry running
+  `opencode run` headless. Bring your own provider config; no API key
+  charged by CG.
+
+### Tests
+- +3 (each new key surfaces its model ids; family allowlist extended
+  for new families: deepseek / moonshot / llama / mistral / qwen /
+  glm / opencode). 120 → 122 passing.
+
 ## v14 — 2026-05-07 — Workspace tabs (`e7ef570`)
 
 ### Added

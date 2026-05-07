@@ -101,6 +101,59 @@ Pick the *4-agent fan-out* preset. Same prompt, 4 agents (2× Claude,
 2× Gemini) — each returns a different answer. You pick the best one.
 Surprisingly effective for short creative outputs.
 
+## Visual workflow canvas (v16)
+
+A toggle at the top of the designer flips between **📋 Classic** (the
+linear list of agent rows) and **🌐 Visual** (an n8n / make.com-style
+node graph) for the same underlying workflow. Classic is always the
+source of truth — visual mode reads from it and writes back, so save /
+load / run / SSE all keep working unchanged.
+
+In Visual mode:
+
+| Action | How |
+|---|---|
+| **Reposition** a node | Drag it (positions saved per workspace) |
+| **Edit** a node inline | Click its body — model / label / depends_on / prompt |
+| **Remove** a node | `×` in the node header |
+| **Remove** a dependency | Click the Bezier connection line |
+| **Add** a node | `+ node` opens the model palette modal |
+| **Re-layout** everything | `⚡ auto-layout` (topological by depth) |
+
+During a run, each node mirrors the SSE feed: the status pill changes,
+the border turns cyan and pulses while running, green/red on
+done/failed, the latest log line shows at the bottom in accent color,
+and incoming connections highlight when their target is running.
+
+## Autonomous browser pilot (v17)
+
+Pick **🤖 Browser Pilot (autonomous)** as an agent and the prompt can be
+either a plain English goal or a JSON config:
+
+```json
+{
+  "goal": "Open DuckDuckGo, search 'site:python.org pep 723', return the title of the first result.",
+  "model": "claude-sonnet-4-6",
+  "max_steps": 8,
+  "start_url": "https://duckduckgo.com",
+  "headless": true
+}
+```
+
+Each iteration the pilot snapshots the current page (URL, title,
+visible interactive elements with selectors, viewport screenshot under
+`outputs/screenshots/`), sends that plus the goal and the last six
+actions to the chosen LLM, parses the model's JSON response, and
+dispatches it through the same browser action set as the regular
+`browser` agent (`goto`, `click`, `fill`, `extract`, `scroll`, `wait`).
+A `done` action stops the loop with a final answer. Two presets ship
+out of the box.
+
+The bindings published downstream (`{{pilot}}` / `{{pilot.answer}}` /
+`{{pilot.steps}}`) make it easy to chain a regular Claude agent that
+formats the trace as a clean Markdown report — see the
+**🤖 Browser Pilot → Claude summary** preset.
+
 ## Workspace tabs (v14)
 
 The 56px rail on the far-left of the Orchestrator tab holds parallel

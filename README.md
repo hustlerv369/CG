@@ -213,9 +213,12 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ **Token-by-token streaming** — per-step opt-in `stream` checkbox; claude/gemini run with `--output-format stream-json` and assistant text deltas land in the live log as they arrive
 - ✅ **Browser step builder** — drag-free visual editor for `browser` agents (16 actions, dynamic per-action fields, optional `bind_as`); plain JSON escape hatch always one click away
 - ✅ **Workspace tabs** — CMUX-style parallel orchestrator drafts; 56px rail with `+`, click-to-switch, dblclick-rename, hover-× delete; state in localStorage so refresh keeps everything
+- ✅ **Cheap-model expansion** — DeepSeek R1 / Kimi K2 / Llama 3.3 / Mistral via OpenRouter, direct DeepSeek + Moonshot APIs, OpenCode CLI as a subscription-style entry
+- ✅ **Visual workflow canvas (v16)** — toggle Classic ↔ Visual; n8n / make.com-style SVG node graph with auto-layout, drag-to-reposition (saved per workspace), bezier connections, click-to-edit, palette `+ node`, live status overlays during runs
+- ✅ **Autonomous browser pilot (v17)** — `browser-pilot` agent type. One natural-language goal drives a real Playwright session through up to N steps: page snapshot → LLM picks next action → execute → repeat. Uses subscription Claude/Gemini for the brain. Stops on `done` / `max_steps` / cancel. Two presets ship out of the box.
 - ✅ Save run as note (one click → run report → searchable note)
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 120 pytest tests passing
+- ✅ 126 pytest tests passing
 - ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 
