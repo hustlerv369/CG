@@ -817,7 +817,52 @@ function populatePresets() {
     $("#run-title").value = preset.title;
     $("#agent-rows").innerHTML = "";
     preset.spec.forEach(addAgentRow);
+    // If preset ships default variables (e.g. ${TASK} pipeline), merge
+    // them into Settings → Variables so the user can edit in one place
+    // and any ${VAR} substitution in prompts resolves.
+    if (preset.variables && typeof preset.variables === "object") {
+      const settings = loadSettings();
+      settings.variables = settings.variables || {};
+      let added = 0;
+      for (const [k, v] of Object.entries(preset.variables)) {
+        if (!(k in settings.variables)) {
+          settings.variables[k] = v;
+          added++;
+        }
+      }
+      if (added > 0) {
+        saveSettings(settings);
+        if (typeof renderVariables === "function") renderVariables();
+        // Friendly nudge in the run title hint
+        const ks = Object.keys(preset.variables).join(", ");
+        toast(`Preset added ${added} variable(s): ${ks}. Edit them in Settings → Variables before Run.`);
+      }
+    }
+    // Repaint visual canvas if active
+    if (typeof renderVisualCanvas === "function" &&
+        $("#visual-pane")?.style.display !== "none") {
+      renderVisualCanvas();
+    }
   };
+}
+
+// Tiny non-blocking toast (used by preset variable nudge)
+function toast(msg, ms = 4500) {
+  let el = document.getElementById("cg-toast");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "cg-toast";
+    el.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2000;" +
+      "background:rgba(20,20,24,0.95);color:#fff;padding:10px 14px;" +
+      "border-radius:8px;border:1px solid #a78bfa;font-size:12px;" +
+      "max-width:380px;box-shadow:0 8px 24px rgba(0,0,0,0.5);" +
+      "transition:opacity 0.25s;";
+    document.body.appendChild(el);
+  }
+  el.textContent = msg;
+  el.style.opacity = "1";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = "0"; }, ms);
 }
 
 // ---------- agent row designer ----------

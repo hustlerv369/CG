@@ -2040,23 +2040,30 @@ PRESETS: list[dict[str, Any]] = [
     {
         "id": "pipeline",
         "title": "Design → Implement → Critique (Gemini Pro → Opus 4.7 → Gemini Pro)",
-        "description": "Real sequential pipeline. Gemini Pro writes the spec, "
-                        "Opus 4.7 implements it (1M context — handles big specs), "
-                        "Gemini Pro reviews both. Uses depends_on + {{label}} substitution.",
+        "description": "Real sequential pipeline. Edit the 'design' agent's "
+                        "prompt — replace the [PASTE YOUR TASK HERE] block with "
+                        "your brief (one paragraph or a bullet list). The other "
+                        "two agents auto-pick it up via {{design}} / {{implement}}.",
         "spec": [
             {
                 "agent": "gemini-pro", "label": "design",
-                "prompt": "DO NOT ask questions. DO NOT propose a plan. Output a precise Markdown "
-                          "spec for a Python function `fizzbuzz(n: int) -> list[str]` that returns "
-                          "the first n FizzBuzz values. Cover sections: Signature, Inputs, "
-                          "Outputs, Edge cases (n<=0), Three concrete example outputs. Output "
-                          "Markdown only."
+                "prompt": "DO NOT ask questions. DO NOT propose a plan. Write a precise "
+                          "Markdown spec for the task below. Cover: Signature / API, "
+                          "Inputs, Outputs, Edge cases, and 2-3 concrete example "
+                          "inputs+expected outputs. Output Markdown only.\n\n"
+                          "## Task\n\n"
+                          "[PASTE YOUR TASK HERE — e.g. \"Build a Python function "
+                          "`is_prime(n: int) -> bool` that handles n<2.\" or "
+                          "\"Design a React component for a sortable, filterable "
+                          "data table with pagination.\" Replace this whole "
+                          "bracketed block.]"
             },
             {
                 "agent": "claude-opus-4-7", "label": "implement",
                 "depends_on": ["design"],
                 "prompt": "Implement the following spec exactly. Output ONLY a fenced "
-                          "```python code block, nothing before or after.\n\n"
+                          "code block in the appropriate language, nothing before "
+                          "or after.\n\n"
                           "# Spec\n\n{{design}}"
             },
             {
@@ -2066,6 +2073,45 @@ PRESETS: list[dict[str, Any]] = [
                           "missing edge cases, and concrete improvements as a Markdown bullet "
                           "list. Be terse. If the implementation is correct, say so in one line.\n\n"
                           "## Spec\n{{design}}\n\n## Implementation\n{{implement}}"
+            },
+        ],
+    },
+    {
+        "id": "pipeline-var",
+        "title": "Design → Implement → Critique (uses ${TASK} variable)",
+        "description": "Same pipeline as 'Design → Implement → Critique', but "
+                        "the brief lives in a single ${TASK} variable. Set it in "
+                        "Settings → Variables (or workflow variables) once and "
+                        "all 3 agents read it — no prompt editing needed.",
+        "variables": {
+            "TASK": "Build a Python function `is_prime(n: int) -> bool` that "
+                    "handles n<2 correctly. Include an explanation in comments."
+        },
+        "spec": [
+            {
+                "agent": "gemini-pro", "label": "design",
+                "prompt": "DO NOT ask questions. DO NOT propose a plan. Write a precise "
+                          "Markdown spec for the task below. Cover: Signature / API, "
+                          "Inputs, Outputs, Edge cases, and 2-3 concrete example "
+                          "inputs+expected outputs. Output Markdown only.\n\n"
+                          "## Task\n\n${TASK}"
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "implement",
+                "depends_on": ["design"],
+                "prompt": "Implement this spec exactly. Output ONLY a fenced code "
+                          "block in the appropriate language, nothing else.\n\n"
+                          "# Original task\n\n${TASK}\n\n# Spec\n\n{{design}}"
+            },
+            {
+                "agent": "gemini-pro", "label": "critique",
+                "depends_on": ["design", "implement"],
+                "prompt": "Critically review this implementation. List bugs, missing "
+                          "edge cases, and concrete improvements as a Markdown "
+                          "bullet list. Be terse.\n\n"
+                          "## Original task\n${TASK}\n\n"
+                          "## Spec\n{{design}}\n\n"
+                          "## Implementation\n{{implement}}"
             },
         ],
     },
