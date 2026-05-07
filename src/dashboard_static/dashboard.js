@@ -832,9 +832,21 @@ function buildAgentSelectOptions() {
   const familyLabels = {
     claude: "Claude (Pro)",
     gemini: "Gemini (Google)",
+    deepseek: "DeepSeek (cheap & strong)",
+    moonshot: "Moonshot (Kimi)",
+    glm: "GLM (Z.ai)",
+    qwen: "Qwen",
+    llama: "Llama (Meta)",
+    mistral: "Mistral",
+    opencode: "OpenCode (open-source CLI)",
+    browser: "Browser / Pilot (Playwright)",
+    subworkflow: "Sub-workflow",
+    custom: "Custom (your own HTTP)",
     other: "Other",
   };
-  const order = ["claude", "gemini", "other"];
+  const order = ["claude", "gemini", "deepseek", "moonshot", "glm",
+                  "qwen", "llama", "mistral", "opencode",
+                  "browser", "subworkflow", "custom", "other"];
   return order
     .filter(f => groups[f])
     .map(f => `

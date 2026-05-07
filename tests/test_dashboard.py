@@ -71,7 +71,7 @@ def test_get_agents(client):
     # New specific model ids must all be present
     for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
                  "gemini-flash", "gemini-pro", "gemini-3-pro",
-                 "browser", "subworkflow", "opencode"):
+                 "browser", "subworkflow", "opencode", "browser-pilot"):
         assert kid in ids, f"missing model id {kid!r} in {ids}"
     # Each entry has family + summary
     for a in body["agents"]:
@@ -1633,3 +1633,70 @@ def test_streaming_assistant_deltas_emitted_as_text(client, monkeypatch, tmp_pat
     # System & result events filtered
     assert '"type":"system"' not in log
     assert '"type":"result"' not in log
+
+
+# ---------- v17: browser-pilot LLM output parsing -----------------------
+
+
+def _make_pilot_manager(monkeypatch, tmp_path):
+    """Fresh RunManager + tmp dirs so the pilot helpers can be exercised
+    without touching the real outputs directory."""
+    monkeypatch.setattr(dash, "RUNS_DIR", tmp_path / "runs")
+    dash.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    return dash.RunManager()
+
+
+def test_v17_pilot_parses_clean_json(monkeypatch, tmp_path):
+    """Model returning a pristine JSON object → action dict comes through."""
+    rm = _make_pilot_manager(monkeypatch, tmp_path)
+    fake_model = {
+        "label": "fake", "family": "claude", "summary": "fake",
+        "command": [sys.executable, "-c",
+                     "import sys; sys.stdout.write("
+                     "'{\"action\":\"goto\",\"url\":\"https://example.com\","
+                     "\"reasoning\":\"start\"}')"],
+        "stdin_prompt": True, "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "fake-pilot-model", fake_model)
+    out = rm._pilot_ask_llm("fake-pilot-model", "any prompt", "lab", 1)
+    assert out is not None
+    assert out["action"] == "goto"
+    assert out["url"] == "https://example.com"
+
+
+def test_v17_pilot_parses_fenced_json(monkeypatch, tmp_path):
+    """Model wraps response in ```json fences — parser still recovers."""
+    rm = _make_pilot_manager(monkeypatch, tmp_path)
+    payload = "```json\n{\"action\":\"done\",\"answer\":\"42\"}\n```"
+    fake_model = {
+        "label": "fake", "family": "claude", "summary": "fake",
+        "command": [sys.executable, "-c",
+                     f"import sys; sys.stdout.write({payload!r})"],
+        "stdin_prompt": True, "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "fake-pilot-model", fake_model)
+    out = rm._pilot_ask_llm("fake-pilot-model", "any prompt", "lab", 1)
+    assert out is not None
+    assert out["action"] == "done"
+    assert out["answer"] == "42"
+
+
+def test_v17_pilot_handles_garbage_output(monkeypatch, tmp_path):
+    """Model returns prose with no JSON — parser returns None."""
+    rm = _make_pilot_manager(monkeypatch, tmp_path)
+    fake_model = {
+        "label": "fake", "family": "claude", "summary": "fake",
+        "command": [sys.executable, "-c",
+                     "import sys; sys.stdout.write('I cannot help with that.')"],
+        "stdin_prompt": True, "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "fake-pilot-model", fake_model)
+    out = rm._pilot_ask_llm("fake-pilot-model", "any prompt", "lab", 1)
+    assert out is None
+
+
+def test_v17_browser_pilot_kind_registered():
+    """Smoke: browser-pilot is registered with runner='browser_pilot'."""
+    assert "browser-pilot" in dash.AGENT_KINDS
+    assert dash.AGENT_KINDS["browser-pilot"]["runner"] == "browser_pilot"
+    assert dash.AGENT_KINDS["browser-pilot"]["family"] == "browser"

@@ -243,6 +243,13 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "summary": "Run a saved workflow as a step. Prompt is JSON {workflow, variables?}",
         "runner": "subworkflow",
     },
+    # ---- browser pilot (v17 — autonomous Perplexity-Computer-style loop)
+    "browser-pilot": {
+        "label": "🤖 Browser Pilot (autonomous)",
+        "family": "browser",
+        "summary": "Goal-driven loop: page → LLM → next action → repeat. Prompt is plain English or JSON {goal, model?, max_steps?, start_url?}",
+        "runner": "browser_pilot",
+    },
 }
 
 
@@ -1095,6 +1102,16 @@ class RunManager:
             out_fp.close()
             return
 
+        # v17 — Browser Pilot: autonomous goal-driven loop.
+        # Each iteration: snapshot the page (text + visible elements) →
+        # ask an LLM for the next action → execute via _run_browser_step
+        # → repeat until the model emits {"action": "done", ...} or we
+        # hit max_steps / timeout.
+        if cfg.get("runner") == "browser_pilot":
+            self._run_one_browser_pilot(run, label, agent, prompt, cfg, out_fp)
+            out_fp.close()
+            return
+
         cmd = list(cfg["command"])
         # K3: opt-in token-by-token streaming. We append the CLI's
         # stream-json output flag and parse each line as JSON in the
@@ -1602,6 +1619,333 @@ class RunManager:
             emit_line(f"[browser] error: {exc}")
             self._emit(run.id, label, {"event": "status",
                 "data": {"label": label, "status": "failed", "exit_code": 1}})
+
+    def _run_one_browser_pilot(self, run: "RunState", label: str, agent: str,
+                                  prompt: str, cfg: dict[str, Any], out_fp: Any) -> None:
+        """v17 — Autonomous Perplexity-Computer-style loop.
+
+        Each iteration:
+          1. Capture page state (visible text + interactive elements
+             with stable selectors + screenshot path).
+          2. Render history + current state + goal into a compact
+             prompt and pipe it through the chosen LLM (default
+             ``claude-sonnet-4-6``) with a JSON-only response contract.
+          3. Parse the action and execute via _run_browser_step.
+          4. Stop on ``done`` action, max_steps, or timeout.
+
+        Prompt accepted formats:
+          * Plain English string  → goal, defaults applied
+          * JSON dict             → ``{goal, model?, max_steps?,
+                                        start_url?, headless?}``
+        """
+        agent_state = run.agents[label]
+        run_dir = RUNS_DIR / run.id
+        bindings: dict[str, Any] = {"steps": [], "answer": None}
+
+        def emit_line(s: str) -> None:
+            agent_state.log_lines.append(s)
+            out_fp.write(s + "\n"); out_fp.flush()
+            self._emit(run.id, label, {"event": "log",
+                "data": {"label": label, "line": s}})
+
+        # Parse prompt — accept plain string OR dict
+        cfg_obj: dict[str, Any] = {}
+        prompt_stripped = (prompt or "").strip()
+        if prompt_stripped.startswith("{"):
+            try:
+                cfg_obj = json.loads(prompt_stripped)
+            except Exception as exc:
+                emit_line(f"[pilot] failed to parse JSON config — {exc}; "
+                          f"treating as plain goal")
+        if not cfg_obj:
+            cfg_obj = {"goal": prompt_stripped}
+
+        goal = (cfg_obj.get("goal") or "").strip()
+        if not goal:
+            agent_state.status = "failed"; agent_state.exit_code = 2
+            agent_state.finished = time.time()
+            emit_line("[pilot] empty goal")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 2}})
+            return
+
+        model_id = cfg_obj.get("model", "claude-sonnet-4-6")
+        max_steps = int(cfg_obj.get("max_steps", 12))
+        start_url = cfg_obj.get("start_url") or "about:blank"
+        headless = bool(cfg_obj.get("headless", True))
+
+        emit_line(f"[pilot] goal: {goal}")
+        emit_line(f"[pilot] model={model_id} max_steps={max_steps} "
+                  f"start_url={start_url} headless={headless}")
+
+        if model_id not in AGENT_KINDS:
+            agent_state.status = "failed"; agent_state.exit_code = 2
+            agent_state.finished = time.time()
+            emit_line(f"[pilot] unknown model {model_id!r}")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 2}})
+            return
+
+        try:
+            from playwright.sync_api import sync_playwright
+        except ImportError:
+            agent_state.status = "failed"; agent_state.exit_code = 1
+            agent_state.finished = time.time()
+            emit_line("[pilot] playwright not installed — pip install playwright "
+                      "&& playwright install chromium")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
+            return
+
+        SCREENSHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+        # System prompt for the LLM. We constrain the response to a
+        # single JSON object so parsing is deterministic.
+        system = (
+            "You are a browser-pilot agent. Your job is to reach the user's "
+            "GOAL by emitting one browser action per turn.\n\n"
+            "Allowed actions:\n"
+            "  goto      {url}\n"
+            "  click     {selector}\n"
+            "  fill      {selector, value}\n"
+            "  scroll    {to: 'top'|'bottom'|<int px>}\n"
+            "  wait      {time_ms}\n"
+            "  extract   {selector, attr?}   — returns text and shows it to you next turn\n"
+            "  done      {answer}            — finishes the task with the final answer\n\n"
+            "Respond with EXACTLY one JSON object: {\"reasoning\": \"...\", "
+            "\"action\": \"<name>\", ...args}. Nothing else, no markdown fences. "
+            "Prefer stable CSS selectors. If you cannot make progress, "
+            "emit done with answer explaining why."
+        )
+
+        history: list[dict[str, Any]] = []
+
+        try:
+            with sync_playwright() as p:
+                browser = p.chromium.launch(headless=headless)
+                ctx_kwargs: dict[str, Any] = {
+                    "viewport": {"width": 1280, "height": 800},
+                }
+                ctx = browser.new_context(**ctx_kwargs)
+                page = ctx.new_page()
+                if start_url and start_url != "about:blank":
+                    try:
+                        page.goto(start_url, wait_until="domcontentloaded", timeout=30000)
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=5000)
+                        except Exception:
+                            pass
+                    except Exception as exc:
+                        emit_line(f"[pilot] start_url failed: {exc}")
+
+                for step_idx in range(1, max_steps + 1):
+                    if agent_state.status == "cancelled":
+                        emit_line("[pilot] cancelled by user")
+                        break
+
+                    # 1) Snapshot current page state
+                    snapshot = self._pilot_capture_state(page, label, step_idx)
+                    snap_path = run_dir / f"{label}.step-{step_idx}.snap.json"
+                    snap_path.write_text(json.dumps(snapshot, indent=2,
+                                                     ensure_ascii=False, default=str),
+                                          encoding="utf-8")
+                    emit_line(f"[pilot] step {step_idx}: at {snapshot['url']!r} "
+                              f"(title={snapshot['title']!r}, screenshot={snapshot['screenshot']})")
+
+                    # 2) Build LLM prompt
+                    history_text = "\n".join(
+                        f"  {i+1}. {h['action']}({json.dumps({k:v for k,v in h.items() if k not in ('action','reasoning','result')}, ensure_ascii=False)}) "
+                        f"→ {str(h.get('result',''))[:120]}"
+                        for i, h in enumerate(history[-6:])  # last 6 to keep ctx small
+                    ) or "  (none)"
+                    elements_text = "\n".join(
+                        f"  - {e['tag']} {e['selector']}: {e['text'][:60]!r}"
+                        for e in snapshot["elements"][:30]
+                    )
+                    page_text_excerpt = snapshot["page_text"][:1500]
+                    user_msg = (
+                        f"GOAL: {goal}\n\n"
+                        f"STEP {step_idx}/{max_steps}\n"
+                        f"URL: {snapshot['url']}\n"
+                        f"TITLE: {snapshot['title']}\n\n"
+                        f"VISIBLE INTERACTIVE ELEMENTS (top 30):\n{elements_text}\n\n"
+                        f"PAGE TEXT (first 1500 chars):\n{page_text_excerpt}\n\n"
+                        f"PREVIOUS ACTIONS (last 6):\n{history_text}\n\n"
+                        f"What is your next action? Respond with EXACTLY one JSON object."
+                    )
+                    full_prompt = f"{system}\n\n---\n\n{user_msg}"
+
+                    # 3) Call the LLM via subprocess
+                    action = self._pilot_ask_llm(model_id, full_prompt, label, step_idx)
+                    if action is None:
+                        emit_line(f"[pilot] step {step_idx}: model returned no parseable JSON, stopping")
+                        bindings["error"] = "model returned non-JSON"
+                        break
+                    emit_line(f"[pilot] step {step_idx}: → {action.get('action')} "
+                              f"({(action.get('reasoning') or '')[:120]})")
+
+                    # 4) Execute
+                    if action.get("action") == "done":
+                        bindings["answer"] = action.get("answer")
+                        bindings["steps"].append({**action, "step": step_idx})
+                        emit_line(f"[pilot] DONE — answer: {action.get('answer')}")
+                        break
+                    try:
+                        result = _run_browser_step(page, ctx, browser,
+                                                    action, run, label, {})
+                        history.append({**action, "result": result})
+                        bindings["steps"].append({**action, "step": step_idx,
+                                                    "result": str(result)[:200]})
+                    except Exception as exc:
+                        history.append({**action, "result": f"ERROR: {exc}"})
+                        bindings["steps"].append({**action, "step": step_idx,
+                                                    "error": str(exc)})
+                        emit_line(f"[pilot] step {step_idx}: action raised — {exc}")
+
+                else:
+                    emit_line(f"[pilot] hit max_steps={max_steps} without 'done'")
+                    bindings["error"] = "max_steps reached"
+
+                browser.close()
+
+            run.bindings = getattr(run, "bindings", {})
+            run.bindings[label] = bindings
+            agent_state.exit_code = 0
+            agent_state.status = "done"
+            agent_state.finished = time.time()
+            emit_line("\n=== bindings ===")
+            emit_line(json.dumps(bindings, indent=2, ensure_ascii=False, default=str))
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "done", "exit_code": 0}})
+        except Exception as exc:
+            agent_state.exit_code = 1
+            agent_state.status = "failed"
+            agent_state.finished = time.time()
+            emit_line(f"[pilot] error: {exc}")
+            self._emit(run.id, label, {"event": "status",
+                "data": {"label": label, "status": "failed", "exit_code": 1}})
+
+    def _pilot_capture_state(self, page: Any, label: str,
+                                step_idx: int) -> dict[str, Any]:
+        """Snapshot the page: text, interactive elements, screenshot path."""
+        import hashlib
+        try:
+            url = page.url or ""
+        except Exception:
+            url = ""
+        try:
+            title = page.title()
+        except Exception:
+            title = ""
+        try:
+            page_text = (page.inner_text("body") or "")[:6000]
+        except Exception:
+            page_text = ""
+
+        # Visible interactive elements with selectors. We pick a small,
+        # stable subset and synthesize a CSS selector for each.
+        try:
+            elements = page.evaluate(r"""() => {
+              const out = [];
+              const candidates = document.querySelectorAll(
+                'a[href], button, input, textarea, select, [role="button"], [role="link"]');
+              for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                if (r.width === 0 || r.height === 0) continue;
+                if (r.bottom < 0 || r.top > window.innerHeight + 200) continue;
+                let sel = el.tagName.toLowerCase();
+                if (el.id) { sel = '#' + CSS.escape(el.id); }
+                else if (el.getAttribute('name')) {
+                  sel += `[name="${el.getAttribute('name')}"]`;
+                }
+                else if (el.getAttribute('aria-label')) {
+                  sel += `[aria-label="${el.getAttribute('aria-label')}"]`;
+                }
+                else if (el.className && typeof el.className === 'string') {
+                  const cls = el.className.split(/\s+/).filter(c =>
+                    c && !/[\:\\\\\\/]/.test(c)).slice(0, 2);
+                  if (cls.length) sel += '.' + cls.join('.');
+                }
+                let text = (el.innerText || el.value || el.placeholder ||
+                              el.getAttribute('aria-label') || '').trim();
+                out.push({ tag: el.tagName.toLowerCase(), selector: sel, text });
+                if (out.length >= 60) break;
+              }
+              return out;
+            }""")
+        except Exception:
+            elements = []
+
+        # Screenshot
+        digest = hashlib.sha1((url + str(step_idx)).encode("utf-8")).hexdigest()[:10]
+        ss_path = SCREENSHOTS_DIR / f"pilot-{label}-step-{step_idx}-{digest}.png"
+        try:
+            page.screenshot(path=str(ss_path), full_page=False)
+            ss_rel = f"outputs/screenshots/{ss_path.name}"
+        except Exception:
+            ss_rel = ""
+
+        return {
+            "url": url, "title": title,
+            "page_text": page_text,
+            "elements": elements or [],
+            "screenshot": ss_rel,
+        }
+
+    def _pilot_ask_llm(self, model_id: str, full_prompt: str,
+                         label: str, step_idx: int) -> dict[str, Any] | None:
+        """Pipe a prompt through an AGENT_KINDS subprocess command and
+        parse its stdout as JSON. Returns None on parse failure."""
+        cfg = AGENT_KINDS.get(model_id)
+        if not cfg or "command" not in cfg:
+            return None
+        cmd = list(cfg["command"])
+        if cfg.get("stdin_prompt"):
+            stdin_input: str | None = full_prompt
+        else:
+            cmd = cmd + [full_prompt]
+            stdin_input = None
+        env = os.environ.copy()
+        env.update(cfg.get("env", {}))
+        try:
+            proc = subprocess.run(
+                cmd,
+                input=stdin_input,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env=env,
+                timeout=180,
+            )
+        except (subprocess.TimeoutExpired, FileNotFoundError) as exc:
+            return {"action": "done", "answer": f"LLM call failed: {exc}",
+                     "reasoning": "subprocess error"}
+        raw = (proc.stdout or "").strip()
+        # Best-effort JSON extraction — model may wrap it in fences
+        if "```" in raw:
+            # Strip code fence
+            try:
+                inner = raw.split("```", 2)[1]
+                if inner.startswith(("json", "JSON")):
+                    inner = inner.split("\n", 1)[1] if "\n" in inner else inner[4:]
+                raw = inner.strip()
+            except Exception:
+                pass
+        # Find first { and matching } for safety
+        try:
+            start = raw.index("{")
+            depth = 0; end = -1
+            for i in range(start, len(raw)):
+                if raw[i] == "{": depth += 1
+                elif raw[i] == "}":
+                    depth -= 1
+                    if depth == 0: end = i + 1; break
+            if end > start:
+                return json.loads(raw[start:end])
+        except Exception:
+            pass
+        return None
 
     def cancel_run(self, run_id: str) -> bool:
         """Kill any in-flight subprocesses for this run."""
@@ -2136,6 +2480,49 @@ PRESETS: list[dict[str, Any]] = [
                           "edge cases the author probably did not test. Be concrete: "
                           "exact inputs, expected vs likely actual behavior.\n\n"
                           "[paste diff here]"
+            },
+        ],
+    },
+    {
+        "id": "browser-pilot-search",
+        "title": "🤖 Browser Pilot — autonomous web search",
+        "description": "Goal-driven Playwright loop. Pilot decides every "
+                        "next action from a screenshot + page text + element list. "
+                        "Single agent, prompt is JSON {goal, model?, max_steps?, start_url?}.",
+        "spec": [
+            {
+                "agent": "browser-pilot", "label": "pilot",
+                "prompt": json.dumps({
+                    "goal": "Open DuckDuckGo, search for 'site:python.org pep 723' and tell me the title of the first result.",
+                    "model": "claude-sonnet-4-6",
+                    "max_steps": 8,
+                    "start_url": "https://duckduckgo.com",
+                    "headless": True,
+                }, indent=2),
+            },
+        ],
+    },
+    {
+        "id": "browser-pilot-summarize",
+        "title": "🤖 Browser Pilot → Claude summary",
+        "description": "Pilot navigates to a target URL and extracts the answer; "
+                        "Claude turns the trace into a clean Markdown summary.",
+        "spec": [
+            {
+                "agent": "browser-pilot", "label": "pilot",
+                "prompt": json.dumps({
+                    "goal": "Visit https://news.ycombinator.com and tell me the top 3 story titles with their points and comments count.",
+                    "model": "claude-sonnet-4-6",
+                    "max_steps": 6,
+                    "start_url": "https://news.ycombinator.com",
+                }, indent=2),
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "summary",
+                "depends_on": ["pilot"],
+                "prompt": "Format this browser-pilot trace as a clean Markdown "
+                          "report with the final answer at the top and a short "
+                          "step-by-step trace below.\n\n{{pilot}}",
             },
         ],
     },
