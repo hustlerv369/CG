@@ -35,6 +35,11 @@ node_modules/
 # OS launcher artifacts
 *.lnk
 
+# Local deploy staging directories (rsynced into the gh-pages branch
+# manually; the orphan branch lives separately and we don't want
+# its contents shadowed in master)
+deploy/
+
 # Cloudflare Tunnel binary + log (downloaded on first launch, not source)
 tunnel/cloudflared.exe
 tunnel/cloudflared.log
