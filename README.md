@@ -210,9 +210,12 @@ Full guide: [docs/dashboard-guide.md](docs/dashboard-guide.md).
 - ✅ **Cloudflare Tunnel** auto-launch — public URL for phone dispatch (auto-downloads cloudflared)
 - ✅ **`POST /api/phone-dispatch`** — mobile-friendly entry point (iOS Shortcuts ready)
 - ✅ **Run-finished webhooks** — ntfy.sh / Discord / Slack / generic JSON POST
+- ✅ **Token-by-token streaming** — per-step opt-in `stream` checkbox; claude/gemini run with `--output-format stream-json` and assistant text deltas land in the live log as they arrive
+- ✅ **Browser step builder** — drag-free visual editor for `browser` agents (16 actions, dynamic per-action fields, optional `bind_as`); plain JSON escape hatch always one click away
+- ✅ **Workspace tabs** — CMUX-style parallel orchestrator drafts; 56px rail with `+`, click-to-switch, dblclick-rename, hover-× delete; state in localStorage so refresh keeps everything
 - ✅ Save run as note (one click → run report → searchable note)
 - ✅ Cancel / save / browser notifications / keyboard shortcuts
-- ✅ 113 pytest tests passing
+- ✅ 120 pytest tests passing
 - ✅ ToS-compliant ([docs/providers-pricing-tos.md](docs/providers-pricing-tos.md))
 - ✅ Git remote (https://github.com/hustlerv369/CG)
 

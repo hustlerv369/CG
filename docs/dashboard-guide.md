@@ -101,6 +101,59 @@ Pick the *4-agent fan-out* preset. Same prompt, 4 agents (2× Claude,
 2× Gemini) — each returns a different answer. You pick the best one.
 Surprisingly effective for short creative outputs.
 
+## Workspace tabs (v14)
+
+The 56px rail on the far-left of the Orchestrator tab holds parallel
+drafts of the workflow designer. Each workspace stores its own title +
+agent rows in `localStorage` so you can keep several lines of work in
+flight without losing state.
+
+| Action | How |
+|---|---|
+| **New workspace** | Click `+` at the top of the rail |
+| **Switch** | Click any card — the current draft is auto-saved into the previously active workspace before the target loads |
+| **Rename** | Double-click a card |
+| **Delete** | Hover a card, then click `×` (the last workspace can't be removed) |
+
+A `beforeunload` listener persists the active draft on every page
+unload, so a refresh keeps your edits. Workspaces are per-browser — they
+don't sync across machines (that's what saved workflows on disk are for).
+
+## Browser step builder (v13)
+
+When you pick `🌐 Browser` from an agent row's model dropdown, the plain
+prompt textarea is replaced by a sortable list of step cards. Each card
+maps to one Playwright action and exposes only the parameters that
+action expects.
+
+- **Add a step** with `+ add step`. The action dropdown lets you choose
+  from the 16 supported actions (`goto`, `click`, `fill`, `extract`,
+  `screenshot`, `evaluate`, …).
+- **Reorder** with the ↑ / ↓ buttons on each card. **Remove** with `×`.
+- **`bind_as`** on a card publishes its result as `{{label.bind_as}}`
+  for downstream agents. Optional.
+- **Escape hatch.** Click `{ } JSON` on the builder header to flip the
+  row into raw-JSON mode — useful when you want a Playwright pattern
+  the form fields don't expose.
+
+The serialized payload is identical to what the `browser` agent has
+always accepted, so existing JSON presets and saved workflows still work
+and seed back into cards on load.
+
+## Token-by-token streaming (v12)
+
+Each agent row has a `stream` checkbox. When checked **and** the model
+is a `claude` or `gemini` family member, the underlying CLI runs with
+`--output-format stream-json` and the dashboard parses each NDJSON line
+in the stdout loop. Assistant text deltas land in the live SSE log as
+they arrive instead of waiting for the whole response.
+
+System / init / result / tool_use events are filtered out of the visible
+log, so the panel shows only the model's actual output.
+
+If a streamed line isn't valid JSON the dashboard falls back to the
+plain raw-emit path — streaming never silently swallows output.
+
 ## Custom workflows
 
 Click **Clear**, then build from scratch:
