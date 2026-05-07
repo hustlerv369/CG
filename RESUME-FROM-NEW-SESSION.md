@@ -4,10 +4,10 @@
 
 ---
 
-## Stav projektu (k commitu `9cb0e99`, slugify proof + critique fixed)
+## Stav projektu (k commitu `0b18c94`, dva pipeline ground-truth runy)
 
-- **28 commitů** na https://github.com/hustlerv369/CG (origin master synced)
-- **146 / 146 testů** passing (`python -m pytest tests/ -q`)
+- **30 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **164 / 164 testů** passing (`python -m pytest tests/ -q`)
 - **10 built-in agent kinds + opt-in HTTP providers + custom HTTP agents**
 - **18 bundled presetů** (vč. "Design → Implement → Critique (uses ${TASK} variable)" + Sonnet default critique)
 - **Live-tested pipeline** — `examples/slugify.py` + `tests/test_slugify.py` (20 cases) prokazují že Sonnet critique našel reálný bug v Opus implementaci a fix funguje
@@ -40,7 +40,9 @@
 | chore | `c1d5ff1` | gitignore tunnel binary + local config (cleanup) |
 | docs | `13e9e2a` | RESUME bump |
 | fix | `51814ae` | Pipeline preset critique → Claude Sonnet 4.6 (Gemini Pro 429 capacity issue) |
-| test | `9cb0e99` | examples/slugify.py + tests/test_slugify.py — proves critique found a real Opus bug |
+| test | `9cb0e99` | examples/slugify.py + tests/test_slugify.py — proves Pipeline-1 critique found a real Opus bug |
+| docs | `f7c12f7` | RESUME bump |
+| test | `0b18c94` | examples/retry_decorator.py + tests/test_retry_decorator.py — Pipeline-2 critique "impl is correct" verdict survived 18 adversarial tests |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -157,5 +159,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `9cb0e99`)
+**Aktualizováno:** 2026-05-07 (po commitu `0b18c94`)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
