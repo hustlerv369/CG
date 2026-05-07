@@ -187,6 +187,22 @@ main {
 main#tab-orchestrator.tab-pane.active {
   grid-template-columns: 56px 380px 1fr;
 }
+/* v16/visual: when Visual mode is active, expand the designer column
+ * to share the page 50/50 with the monitor (instead of being capped
+ * at 380px). Without this, a 5-agent pipeline (5 cols × 280px =
+ * 1400px wide canvas) clips inside the 380px designer panel and only
+ * the first node is visible.
+ *
+ * Layout: rail (56px) | canvas (1fr) | monitor (1fr) */
+body.visual-mode-active main#tab-orchestrator.tab-pane.active {
+  grid-template-columns: 56px 1fr 1fr;
+}
+body.visual-mode-active #classic-pane {
+  display: none !important;
+}
+body.visual-mode-active .visual-canvas-wrap {
+  height: calc(100vh - 200px);
+}
 .workspaces-rail {
   border-right: 1px solid var(--border);
   background: rgba(8, 8, 10, 0.55);

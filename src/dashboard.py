@@ -3504,6 +3504,37 @@ def create_app() -> FastAPI:
             "markdown": _render_run_report(run),
         }
 
+    @app.get("/api/runs/{run_id}/preview")
+    async def preview_run_first_renderable(run_id: str) -> Any:
+        """Find the first agent in this run whose output contains a
+        renderable HTML/SVG fence and serve it. Useful when a 5-agent
+        pipeline is open and the renderable artifact is buried in (e.g.)
+        the `polish` agent at the end — the UI doesn't have to know
+        which one, the backend picks the LAST agent with a hit so the
+        most-refined version wins.
+        """
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+
+        import re as _re
+        # Iterate in reverse — the last agent with a renderable artifact
+        # is typically the polish/final step, which is what we want to
+        # show.
+        labels = list(run.agents.keys())
+        for label in reversed(labels):
+            agent_state = run.agents.get(label)
+            if not agent_state:
+                continue
+            text = "\n".join(agent_state.log_lines)
+            if (_re.search(r"```\s*html?\s*\n", text, _re.IGNORECASE)
+                or _re.search(r"```\s*svg\s*\n", text, _re.IGNORECASE)
+                or _re.search(r"<html[\s\S]*?</html>", text, _re.IGNORECASE)
+                or _re.search(r"<svg[\s\S]*?</svg>", text, _re.IGNORECASE)):
+                return await preview_run_artifact(run_id, label)
+        raise HTTPException(404,
+            "no renderable HTML/SVG found in any agent of this run")
+
     @app.get("/api/runs/{run_id}/preview/{label}")
     async def preview_run_artifact(run_id: str, label: str) -> Any:
         """Serve the first renderable HTML/SVG fence from an agent's

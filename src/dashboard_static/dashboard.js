@@ -270,7 +270,26 @@ function renderVisualCanvas() {
   nodesLayer.innerHTML = "";
   connsLayer.innerHTML = "";
 
-  const spec = readSpec();
+  // Source of truth — when a run is open in the monitor, mirror ITS
+  // spec (so all 5 agents from a multi-agent pipeline show up); else
+  // fall back to the classic agent-rows draft. Without this, opening
+  // a 5-agent run from history was leaving Visual showing the 1-row
+  // draft on the left and confusing the user about what was running.
+  let spec;
+  if (state.currentRun && Array.isArray(state.currentRun.spec)
+      && state.currentRun.spec.length) {
+    // Reuse spec items but normalise to the shape readSpec() returns
+    spec = state.currentRun.spec.map((s, i) => ({
+      agent: s.agent,
+      label: s.label || `agent-${i + 1}`,
+      depends_on: Array.isArray(s.depends_on) ? s.depends_on : [],
+      streaming: !!s.streaming,
+      prompt: s.prompt || "",
+    }));
+  } else {
+    spec = readSpec();
+  }
+
   document.getElementById("visual-empty").style.display =
     spec.length === 0 ? "flex" : "none";
   if (spec.length === 0) return;
@@ -547,6 +566,10 @@ function applyViewMode(mode) {
     b.classList.toggle("active", b.dataset.vm === mode));
   $("#classic-pane").style.display = mode === "classic" ? "" : "none";
   $("#visual-pane").style.display = mode === "visual" ? "flex" : "none";
+  // v16/visual: a body-class lets the orchestrator main grid widen
+  // its first content column to 1fr so the canvas isn't trapped in
+  // the 380px designer slot. CSS handles the rest.
+  document.body.classList.toggle("visual-mode-active", mode === "visual");
   if (mode === "visual") renderVisualCanvas();
 }
 
@@ -1236,6 +1259,14 @@ async function openRun(runId) {
   const meta = await fetch(`/api/runs/${runId}`).then(r => r.json());
   state.currentRun = meta;
 
+  // Repaint Visual canvas with the active run's spec — so a 5-agent
+  // pipeline opened from history shows all 5 nodes, not just the
+  // leftover draft from agent-rows.
+  if (typeof renderVisualCanvas === "function" &&
+      $("#visual-pane")?.style.display !== "none") {
+    renderVisualCanvas();
+  }
+
   $("#run-title-display").textContent = meta.title;
   $("#run-meta").textContent = `id ${meta.id} · ${meta.agents.length} agents · started ${formatTime(meta.created)}`;
   // Toolbar: cancel + re-run buttons
@@ -1251,36 +1282,34 @@ async function openRun(runId) {
     depends_on: a.depends_on || [],
     prompt: "" /* original prompt not exposed by API; rerun uses spec from storage */
   }));
-  // Find the first agent label whose output looks like it has a
-  // renderable HTML / SVG fence — that's what the "open full page"
-  // button targets. Recomputed each time the toolbar renders.
-  const renderableLabel = (() => {
-    const m = meta.agents.find(a => {
-      const buf = (state.panels[a.label]?.rawBuffer || "") + "";
-      return /```\s*html?/i.test(buf) || /```\s*svg/i.test(buf) ||
-             /<html[\s\S]*?<\/html>/i.test(buf) ||
-             /<svg[\s\S]*?<\/svg>/i.test(buf);
-    });
-    return m ? m.label : null;
-  })();
-  const fullPageBtn = renderableLabel
-    ? `<button class="ghost" id="full-page-btn"
-         title="Open the rendered HTML/SVG in a new tab (full window, scroll, hover, scroll-snap all work)"
-         data-label="${renderableLabel}">↗ Open full page</button>`
-    : "";
+  // "Open full page" button is ALWAYS shown when a run exists. The
+  // backend (/api/runs/<id>/preview) picks the LAST agent with a
+  // renderable artifact — perfect for multi-agent pipelines where
+  // the polished output lives in the final agent and the UI doesn't
+  // know which one upfront. Returns 404 with a friendly message if
+  // nothing renderable was produced.
   tools.innerHTML = `
     <button class="ghost" id="cancel-btn">⨯ Cancel</button>
     <button class="ghost" id="rerun-btn">↻ Reload</button>
     <button class="ghost" id="export-btn">⬇ Export .md</button>
-    ${fullPageBtn}
+    <button class="ghost" id="full-page-btn"
+       title="Open the rendered HTML/SVG in a new tab (full window — scroll, hover, scroll-snap all work). Picks the LAST agent with a renderable artifact (polish wins over implement).">↗ Open full page</button>
     <button class="ghost" id="open-design-btn" title="Drop this run's report into Open Design's imports/ folder">🎨 Open in OD</button>
   `;
-  if (renderableLabel) {
-    tools.querySelector("#full-page-btn").onclick = () => {
-      window.open(`/api/runs/${meta.id}/preview/${renderableLabel}`,
-                    "_blank", "noopener");
-    };
-  }
+  tools.querySelector("#full-page-btn").onclick = async () => {
+    // Sniff the endpoint with a small Range GET so we can show a
+    // friendly toast when nothing renderable was produced, rather
+    // than dropping the user on a JSON 404 in a fresh tab.
+    try {
+      const r = await fetch(`/api/runs/${meta.id}/preview`,
+                              { headers: { Range: "bytes=0-4" } });
+      if (r.status === 404) {
+        toast("No renderable HTML/SVG in this run yet — agents probably finished with Markdown only. Try the 'preview' tab.", 6000);
+        return;
+      }
+    } catch (e) { /* fall through, let the browser show the error */ }
+    window.open(`/api/runs/${meta.id}/preview`, "_blank", "noopener");
+  };
   tools.querySelector("#cancel-btn").onclick = async () => {
     if (!confirm("Cancel this run? Running agents will be killed.")) return;
     await fetch(`/api/runs/${meta.id}`, { method: "DELETE" });
