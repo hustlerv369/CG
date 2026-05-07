@@ -4,10 +4,11 @@
 
 ---
 
-## Stav projektu (k commitu `ebe7250`, mojibake fix + design test pass)
+## Stav projektu (k commitu `ba9c5c8`, 5-agent pipeline live-verified)
 
-- **35 commitů** na https://github.com/hustlerv369/CG (origin master synced)
-- **167 / 167 testů** passing (`python -m pytest tests/ -q`)
+- **38 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **167 / 167 testů** passing
+- ✅ Skutečný multi-agent collaboration prokázaný end-to-end (5 agentů, 4 dependency edges, 61KB total output, 6+ minut wall time)
 - ✅ Gemini model resolution opravený (canonical `gemini-2.5-pro` / `gemini-2.5-flash` místo shorthand routovaných na vadný `gemini-3.1-pro-preview`)
 - ✅ Streaming default ON pro nové claude/gemini rows
 - ✅ Artifact-style preview tab (sandboxed iframe pro HTML/SVG/JSX, img pro data:URLs)
@@ -55,6 +56,9 @@
 | docs | `c6af8cd` | RESUME bump |
 | feat | `55926a4` | full-page preview endpoint + "↗ Open full page" button + Tailscale roadmap |
 | fix | `ebe7250` | Windows-CLI emoji mojibake recovery via ftfy (🧠 was arriving as đź§) |
+| docs | `28d98f4` | RESUME bump |
+| fix | `90e447c` | Gemini CLI: pass prompt via stdin not argv (`-p ""` placeholder + stdin) |
+| demo | `ba9c5c8` | 5-agent pipeline (strategy → visual → impl → critique → polish) on HustlerV — Gemini fix verified live |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -171,5 +175,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `ebe7250` — HustlerV design end-to-end fungoval, emoji recovered)
+**Aktualizováno:** 2026-05-07 (po commitu `ba9c5c8` — 5-agent pipeline ověřen live, multi-agent automation hotová)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
