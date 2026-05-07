@@ -1138,7 +1138,14 @@ function addAgentRow(spec = {}) {
   tpl.querySelector(".label").value = spec.label || "";
   tpl.querySelector(".prompt").value = spec.prompt || "";
   tpl.querySelector(".depends_on").value = (spec.depends_on || []).join(",");
-  tpl.querySelector(".streaming").checked = !!spec.streaming;
+  // Default streaming ON for claude/gemini so the user sees token-by-token
+  // output in the live monitor instead of a long "running" stall.
+  const agentValue = tpl.querySelector(".agent-select").value;
+  const family = (state.agents.find(a => a.id === agentValue) || {}).family;
+  const streamDefault = (family === "claude" || family === "gemini");
+  tpl.querySelector(".streaming").checked = (spec.streaming !== undefined)
+    ? !!spec.streaming
+    : streamDefault;
   tpl.querySelector(".remove").onclick = () => tpl.remove();
   $("#agent-rows").appendChild(tpl);
 
@@ -1248,6 +1255,7 @@ async function openRun(runId) {
     <button class="ghost" id="cancel-btn">⨯ Cancel</button>
     <button class="ghost" id="rerun-btn">↻ Reload</button>
     <button class="ghost" id="export-btn">⬇ Export .md</button>
+    <button class="ghost" id="open-design-btn" title="Drop this run's report into Open Design's imports/ folder">🎨 Open in OD</button>
   `;
   tools.querySelector("#cancel-btn").onclick = async () => {
     if (!confirm("Cancel this run? Running agents will be killed.")) return;
@@ -1265,6 +1273,19 @@ async function openRun(runId) {
       a.download = `cg-${data.id}-${(data.title || "run").replace(/[^a-z0-9]+/gi, "-").toLowerCase()}.md`;
       document.body.appendChild(a); a.click();
       setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 100);
+    } catch (e) { alert("Network error: " + e); }
+  };
+  tools.querySelector("#open-design-btn").onclick = async () => {
+    try {
+      const r = await fetch(`/api/runs/${meta.id}/export-to-open-design`,
+                              { method: "POST" });
+      if (!r.ok) {
+        const err = await r.text();
+        alert("Open Design export failed:\n" + err);
+        return;
+      }
+      const data = await r.json();
+      toast(`Exported to Open Design: ${data.path}\n${data.hint}`, 9000);
     } catch (e) { alert("Network error: " + e); }
   };
   tools.querySelector("#rerun-btn").onclick = () => {
@@ -1407,18 +1428,113 @@ function rerenderPanel(p) {
   const nearBottom = (p.log.scrollHeight - p.log.scrollTop - p.log.clientHeight) < 40;
   if (state.viewMode === "md" && window.marked) {
     p.log.classList.add("md-rendered");
-    p.log.classList.remove("diff-rendered");
+    p.log.classList.remove("diff-rendered", "preview-rendered");
     p.log.innerHTML = window.marked.parse(text);
     if (window.hljs) p.log.querySelectorAll("pre code").forEach(b => window.hljs.highlightElement(b));
   } else if (state.viewMode === "diff") {
     p.log.classList.add("diff-rendered");
-    p.log.classList.remove("md-rendered");
+    p.log.classList.remove("md-rendered", "preview-rendered");
     p.log.innerHTML = renderDiffPlaceholder(p.label, text);
-  } else {
+  } else if (state.viewMode === "preview") {
+    p.log.classList.add("preview-rendered");
     p.log.classList.remove("md-rendered", "diff-rendered");
+    p.log.innerHTML = "";
+    p.log.appendChild(renderArtifactPreview(text));
+  } else {
+    p.log.classList.remove("md-rendered", "diff-rendered", "preview-rendered");
     p.log.textContent = text;
   }
   if (nearBottom) p.log.scrollTop = p.log.scrollHeight;
+}
+
+// Artifact-style preview — pulls the most useful renderable chunk from
+// the agent's output and shows it in a sandboxed iframe (HTML / SVG /
+// React-via-Babel) or img tag (data:image, png/jpg URL).
+//
+// Detection priority:
+//   1. ```html ... ```  fenced block
+//   2. ```svg  ... ```
+//   3. ```jsx | tsx | react``` (wrapped in a Babel-standalone shell)
+//   4. raw <html>/<svg> in the buffer
+//   5. data:image/... or image-URL hits
+// Otherwise → friendly empty-state hint.
+function renderArtifactPreview(text) {
+  const wrap = document.createElement("div");
+  wrap.className = "artifact-host";
+
+  function fenced(lang) {
+    // Match ```<lang> ... ``` with a forgiving lang matcher
+    const re = new RegExp("```\\s*(" + lang + ")\\s*\\n([\\s\\S]*?)```", "i");
+    const m = text.match(re);
+    return m ? m[2] : null;
+  }
+
+  let html = fenced("html|htm");
+  let svg = fenced("svg");
+  let jsx = fenced("jsx|tsx|react");
+
+  if (!html) {
+    const m = text.match(/<html[\s\S]*?<\/html>/i);
+    if (m) html = m[0];
+  }
+  if (!svg) {
+    const m = text.match(/<svg[\s\S]*?<\/svg>/i);
+    if (m) svg = m[0];
+  }
+
+  if (html || svg || jsx) {
+    const iframe = document.createElement("iframe");
+    iframe.className = "artifact-iframe";
+    iframe.setAttribute("sandbox", "allow-scripts");
+    iframe.setAttribute("title", "preview");
+    let doc;
+    if (html) {
+      doc = html;
+    } else if (svg) {
+      doc = `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:#fff;display:flex;align-items:center;justify-content:center;min-height:100vh;font-family:system-ui}svg{max-width:100%;max-height:100vh}</style>${svg}`;
+    } else {
+      // jsx/tsx — wrap in a Babel-standalone host.
+      // (text/babel script runs inside the sandbox; React UMD is loaded
+      // from a CDN.)
+      const safeJsx = jsx.replace(/<\/script/g, "<\\/script");
+      doc =
+        `<!doctype html><meta charset="utf-8">` +
+        `<style>body{margin:0;font-family:system-ui;background:#fff}#root{padding:16px}</style>` +
+        `<script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>` +
+        `<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>` +
+        `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>` +
+        `<div id="root"></div>` +
+        `<script type="text/babel" data-presets="env,react,typescript">` +
+        safeJsx +
+        `\n;(function(){const e=window.App||window.Default||(typeof App!=='undefined'?App:null)||(typeof Component!=='undefined'?Component:null);` +
+        `if(e){ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(e));}else{document.getElementById('root').textContent='No component named App / Component / Default exported from the snippet.';}` +
+        `})();</script>`;
+    }
+    iframe.srcdoc = doc;
+    wrap.appendChild(iframe);
+    return wrap;
+  }
+
+  // Image fallback
+  const imgUrl = text.match(/(https?:\/\/\S+\.(?:png|jpe?g|gif|webp|svg))/i)
+    || text.match(/(data:image\/[a-zA-Z+.-]+;base64,[A-Za-z0-9+/=]+)/);
+  if (imgUrl) {
+    const img = document.createElement("img");
+    img.src = imgUrl[1];
+    img.alt = "preview";
+    img.className = "artifact-img";
+    wrap.appendChild(img);
+    return wrap;
+  }
+
+  const empty = document.createElement("div");
+  empty.className = "artifact-empty";
+  empty.innerHTML = "Preview shows when the output contains a renderable chunk: " +
+    "<code>```html</code>, <code>```svg</code>, <code>```jsx</code>, raw " +
+    "<code>&lt;html&gt;</code> / <code>&lt;svg&gt;</code>, or an image URL. " +
+    "Use <strong>raw</strong> / <strong>markdown</strong> to inspect the full output.";
+  wrap.appendChild(empty);
+  return wrap;
 }
 
 function renderDiffPlaceholder(label, text) {

@@ -189,30 +189,26 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "env": {},
     },
     # ---- Gemini (Google account via OAuth, GOOGLE_GENAI_USE_GCA=true) -----
+    #
+    # Model strings MUST match what the gemini-cli (@google/gemini-cli) accepts.
+    # Discovered the hard way: shorthand "flash" / "pro" passed via -m get
+    # routed by Google's gateway to gemini-3.1-pro-preview which has flaky
+    # capacity (429 MODEL_CAPACITY_EXHAUSTED). Use explicit canonical names.
     "gemini-flash": {
-        "label": "Gemini Flash",
+        "label": "Gemini 2.5 Flash",
         "family": "gemini",
         "summary": "fastest Gemini — quick checks, drafts",
         "command": [_resolve_executable("gemini"), "--skip-trust",
-                     "-m", "flash", "-p"],
+                     "-m", "gemini-2.5-flash", "-p"],
         "stdin_prompt": False,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
     "gemini-pro": {
-        "label": "Gemini Pro",
+        "label": "Gemini 2.5 Pro",
         "family": "gemini",
         "summary": "default Gemini — balanced quality",
         "command": [_resolve_executable("gemini"), "--skip-trust",
-                     "-m", "pro", "-p"],
-        "stdin_prompt": False,
-        "env": {"GOOGLE_GENAI_USE_GCA": "true"},
-    },
-    "gemini-3-pro": {
-        "label": "Gemini 3 Pro (preview)",
-        "family": "gemini",
-        "summary": "latest Gemini 3 Pro — slow but strongest",
-        "command": [_resolve_executable("gemini"), "--skip-trust",
-                     "-m", "gemini-3-pro-preview", "-p"],
+                     "-m", "gemini-2.5-pro", "-p"],
         "stdin_prompt": False,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
@@ -3458,6 +3454,55 @@ def create_app() -> FastAPI:
             "title": run.title,
             "id": run.id,
             "markdown": _render_run_report(run),
+        }
+
+    @app.post("/api/runs/{run_id}/export-to-open-design")
+    async def export_to_open_design(run_id: str) -> Any:
+        """Drop a Markdown bundle of this run into Open Design's
+        ``imports/`` folder so the user can pick it up there.
+        Best-effort handoff — no daemon API call, just a shared file
+        location both apps can see. Returns the absolute path so the
+        UI can show it (and a hint to launch OD if it's not already
+        running).
+
+        OD path resolution order:
+          1. ``CG_OPEN_DESIGN_DIR`` env override
+          2. ``D:\\CLAUDE\\OPEN DESIGN\\open-design`` (the install path
+             we know about from this user's machine)
+          3. ``~/Open Design`` and ``~/open-design`` fallbacks
+        """
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+
+        candidates: list[Path] = []
+        env_dir = os.environ.get("CG_OPEN_DESIGN_DIR")
+        if env_dir:
+            candidates.append(Path(env_dir))
+        candidates.extend([
+            Path(r"D:\CLAUDE\OPEN DESIGN\open-design"),
+            Path.home() / "Open Design",
+            Path.home() / "open-design",
+        ])
+        od_dir: Path | None = next(
+            (c for c in candidates if c.exists() and c.is_dir()), None)
+        if od_dir is None:
+            raise HTTPException(404,
+                "Open Design install not found. Set CG_OPEN_DESIGN_DIR "
+                "env var or install OD at D:\\CLAUDE\\OPEN DESIGN\\open-design.")
+
+        imports_dir = od_dir / "imports"
+        imports_dir.mkdir(parents=True, exist_ok=True)
+        safe_title = "".join(c if c.isalnum() or c in "-_" else "-"
+                              for c in (run.title or "run").lower())[:60]
+        out_path = imports_dir / f"cg-{run.id}-{safe_title}.md"
+        out_path.write_text(_render_run_report(run), encoding="utf-8")
+        return {
+            "saved": True,
+            "path": str(out_path),
+            "open_design_dir": str(od_dir),
+            "hint": ("Run launch.cmd in the Open Design folder (or click "
+                      "the desktop shortcut) to see this file under imports/."),
         }
 
     # ---- workflows on disk -------------------------------------------------

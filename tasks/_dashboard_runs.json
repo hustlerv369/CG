@@ -1,19 +1,13 @@
 [
   {
-    "id": "bd144d11e039",
-    "title": "combined",
-    "created": 1778175450.4165025,
+    "id": "305cc985108b",
+    "title": "stream-out",
+    "created": 1778176296.3967614,
     "finished": true,
     "agents": [
       {
-        "label": "first",
+        "label": "c",
         "agent": "claude-sonnet-4-6",
-        "status": "done",
-        "exit_code": 0
-      },
-      {
-        "label": "second",
-        "agent": "gemini-pro",
         "status": "done",
         "exit_code": 0
       }

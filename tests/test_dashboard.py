@@ -51,7 +51,7 @@ def client(monkeypatch, tmp_path):
     # Mock both legacy aliases AND the new specific model ids
     for kid in ("claude", "claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6"):
         monkeypatch.setitem(dash.AGENT_KINDS, kid, claude_mock)
-    for kid in ("gemini", "gemini-flash", "gemini-pro", "gemini-3-pro"):
+    for kid in ("gemini", "gemini-flash", "gemini-pro"):
         monkeypatch.setitem(dash.AGENT_KINDS, kid, gemini_mock)
 
     app = dash.create_app()
@@ -70,7 +70,7 @@ def test_get_agents(client):
     ids = [a["id"] for a in body["agents"]]
     # New specific model ids must all be present
     for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
-                 "gemini-flash", "gemini-pro", "gemini-3-pro",
+                 "gemini-flash", "gemini-pro",
                  "browser", "subworkflow", "opencode", "browser-pilot"):
         assert kid in ids, f"missing model id {kid!r} in {ids}"
     # Each entry has family + summary
@@ -108,7 +108,7 @@ def test_specific_model_ids_dispatch(client):
             {"agent": "claude-sonnet-4-6", "label": "s46", "prompt": "x"},
             {"agent": "claude-opus-4-7",   "label": "o47", "prompt": "y"},
             {"agent": "gemini-flash",      "label": "gf",  "prompt": "z"},
-            {"agent": "gemini-3-pro",      "label": "g3",  "prompt": "w"},
+            {"agent": "gemini-flash",      "label": "gf2", "prompt": "w"},
         ],
     }
     r = client.post("/api/runs", json=payload)
