@@ -220,13 +220,19 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
     # Discovered the hard way: shorthand "flash" / "pro" passed via -m get
     # routed by Google's gateway to gemini-3.1-pro-preview which has flaky
     # capacity (429 MODEL_CAPACITY_EXHAUSTED). Use explicit canonical names.
+    # Gemini CLI quirk: -p needs a value; passing the whole prompt as
+    # a single argv element fails on Windows for long prompts (escape /
+    # length issues). Pattern that works: -p "" placeholder + stdin
+    # carrying the actual text. The CLI's own help confirms this:
+    # "Use -p/--prompt for non-interactive (headless) mode. Appended
+    #  to input on stdin (if any)."
     "gemini-flash": {
         "label": "Gemini 2.5 Flash",
         "family": "gemini",
         "summary": "fastest Gemini — quick checks, drafts",
         "command": [_resolve_executable("gemini"), "--skip-trust",
-                     "-m", "gemini-2.5-flash", "-p"],
-        "stdin_prompt": False,
+                     "-m", "gemini-2.5-flash", "-p", ""],
+        "stdin_prompt": True,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
     "gemini-pro": {
@@ -234,8 +240,8 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "family": "gemini",
         "summary": "default Gemini — balanced quality",
         "command": [_resolve_executable("gemini"), "--skip-trust",
-                     "-m", "gemini-2.5-pro", "-p"],
-        "stdin_prompt": False,
+                     "-m", "gemini-2.5-pro", "-p", ""],
+        "stdin_prompt": True,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
     # ---- OpenCode (sst/opencode CLI — open-source local agent) -----------
