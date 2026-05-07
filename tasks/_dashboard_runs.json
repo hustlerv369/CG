@@ -1,12 +1,12 @@
 [
   {
-    "id": "305cc985108b",
-    "title": "stream-out",
-    "created": 1778176296.3967614,
+    "id": "937c2ba88852",
+    "title": "HTML preview demo",
+    "created": 1778176958.3796926,
     "finished": true,
     "agents": [
       {
-        "label": "c",
+        "label": "hero",
         "agent": "claude-sonnet-4-6",
         "status": "done",
         "exit_code": 0

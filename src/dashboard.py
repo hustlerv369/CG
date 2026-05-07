@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -3306,7 +3306,18 @@ def create_app() -> FastAPI:
         if not index.exists():
             return JSONResponse({"error": "frontend not built", "looked_for": str(index)},
                                 status_code=500)
-        return FileResponse(index)
+        # Render with cache-busting build stamp so browsers always
+        # re-fetch dashboard.js / dashboard.css after a deploy. We use
+        # the script's mtime so it only changes when the file changes.
+        try:
+            html = index.read_text(encoding="utf-8")
+            js_mtime = int((STATIC_DIR / "dashboard.js").stat().st_mtime)
+            css_mtime = int((STATIC_DIR / "dashboard.css").stat().st_mtime)
+            stamp = f"{js_mtime}-{css_mtime}"
+            html = html.replace("{{CG_BUILD}}", stamp)
+            return HTMLResponse(html)
+        except Exception:
+            return FileResponse(index)
 
     if STATIC_DIR.exists():
         app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
