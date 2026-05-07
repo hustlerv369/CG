@@ -2039,11 +2039,13 @@ PRESETS: list[dict[str, Any]] = [
     },
     {
         "id": "pipeline",
-        "title": "Design → Implement → Critique (Gemini Pro → Opus 4.7 → Gemini Pro)",
+        "title": "Design → Implement → Critique (Gemini Pro → Opus 4.7 → Sonnet 4.6)",
         "description": "Real sequential pipeline. Edit the 'design' agent's "
                         "prompt — replace the [PASTE YOUR TASK HERE] block with "
                         "your brief (one paragraph or a bullet list). The other "
-                        "two agents auto-pick it up via {{design}} / {{implement}}.",
+                        "two agents auto-pick it up via {{design}} / {{implement}}. "
+                        "Critique uses Sonnet (Pro subscription) to avoid Gemini "
+                        "preview-model 429 capacity errors.",
         "spec": [
             {
                 "agent": "gemini-pro", "label": "design",
@@ -2067,7 +2069,7 @@ PRESETS: list[dict[str, Any]] = [
                           "# Spec\n\n{{design}}"
             },
             {
-                "agent": "gemini-pro", "label": "critique",
+                "agent": "claude-sonnet-4-6", "label": "critique",
                 "depends_on": ["design", "implement"],
                 "prompt": "Critically review this implementation against its spec. List bugs, "
                           "missing edge cases, and concrete improvements as a Markdown bullet "
@@ -2104,7 +2106,7 @@ PRESETS: list[dict[str, Any]] = [
                           "# Original task\n\n${TASK}\n\n# Spec\n\n{{design}}"
             },
             {
-                "agent": "gemini-pro", "label": "critique",
+                "agent": "claude-sonnet-4-6", "label": "critique",
                 "depends_on": ["design", "implement"],
                 "prompt": "Critically review this implementation. List bugs, missing "
                           "edge cases, and concrete improvements as a Markdown "

@@ -1,18 +1,18 @@
 [
   {
-    "id": "f335724ef9c7",
-    "title": "combined",
-    "created": 1778173601.8526182,
+    "id": "b51447a9854e",
+    "title": "stream-flag",
+    "created": 1778174656.2875109,
     "finished": true,
     "agents": [
       {
-        "label": "first",
+        "label": "a",
         "agent": "claude-sonnet-4-6",
         "status": "done",
         "exit_code": 0
       },
       {
-        "label": "second",
+        "label": "b",
         "agent": "gemini-pro",
         "status": "done",
         "exit_code": 0
