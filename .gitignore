@@ -34,3 +34,16 @@ node_modules/
 
 # OS launcher artifacts
 *.lnk
+
+# Cloudflare Tunnel binary + log (downloaded on first launch, not source)
+tunnel/cloudflared.exe
+tunnel/cloudflared.log
+tunnel/*.log
+
+# Browser auth state (secrets)
+browser_auth/
+
+# Schedules / notifications / custom_agents — local config
+schedules.json
+notifications.json
+custom_agents.json
