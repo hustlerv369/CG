@@ -4,12 +4,12 @@
 
 ---
 
-## Stav projektu (k commitu `5dcb16b`, v17 + docs polish)
+## Stav projektu (k commitu `c1d5ff1`, v18 + housekeeping)
 
-- **22 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **25 commitů** na https://github.com/hustlerv369/CG (origin master synced)
 - **126 / 126 testů** passing (`python -m pytest tests/ -q`)
 - **10 built-in agent kinds + opt-in HTTP providers + custom HTTP agents**
-- **17 bundled presetů** (vč. 2 Browser Pilot presetů)
+- **18 bundled presetů** (vč. nového "Design → Implement → Critique (uses ${TASK} variable)")
 - **Dual UI:** 📋 Classic ↔ 🌐 Visual canvas
 - **Phone Dispatch** funguje přes Cloudflare Tunnel + `POST /api/phone-dispatch`
 
@@ -34,6 +34,9 @@
 | v16 | `14f3827` | **Visual workflow canvas** — n8n/make-style toggle Classic↔Visual, drag-edit, live status overlays during runs |
 | v17 | `c04f991` | **Autonomous browser pilot** — vlastní Perplexity Computer MVP (LLM-in-loop Playwright). Default: Claude Sonnet 4.6 driver. |
 | docs | `5dcb16b` | README + CHANGELOG + dashboard-guide refresh |
+| docs | `ef72e0a` | In-repo handoff (CLAUDE.md refresh + RESUME-FROM-NEW-SESSION.md) |
+| v18 | `a0ab42a` | Clearer Design→Implement→Critique preset + ${TASK} variable variant + toast() helper |
+| chore | `c1d5ff1` | gitignore tunnel binary + local config (cleanup) |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -150,5 +153,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `5dcb16b`)
+**Aktualizováno:** 2026-05-07 (po commitu `c1d5ff1`)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
