@@ -1700,3 +1700,39 @@ def test_v17_browser_pilot_kind_registered():
     assert "browser-pilot" in dash.AGENT_KINDS
     assert dash.AGENT_KINDS["browser-pilot"]["runner"] == "browser_pilot"
     assert dash.AGENT_KINDS["browser-pilot"]["family"] == "browser"
+
+
+# ---- mojibake recovery (Windows CLI double-encoded UTF-8) -----------
+
+
+def test_mojibake_recovery_pure_ascii_noop():
+    """Plain ASCII passes through unchanged regardless of ftfy availability."""
+    assert dash._recover_mojibake("hello world") == "hello world"
+    assert dash._recover_mojibake("") == ""
+
+
+def test_mojibake_recovery_clean_utf8_noop():
+    """Already-correct UTF-8 (real emoji, accents) stays unchanged."""
+    samples = ["Příliš žluťoučký kůň", "Hello — world", "🚀 launch"]
+    for s in samples:
+        assert dash._recover_mojibake(s) == s, s
+
+
+
+def test_mojibake_recovery_recovers_in_realistic_doc():
+    """ftfy needs context to identify mojibake. Realistic case: a
+    landing page with multiple corrupted emoji card icons."""
+    if dash._ftfy is None:
+        pytest.skip('ftfy not installed - recovery falls back to no-op')
+    doc = (
+        "<div class='card'><span class='icon'>âš¡</span>"
+        "<h3>Vibe-Coding 101</h3></div>\n"
+        "<div class='card'><span class='icon'>đź§ </span>"
+        "<h3>Claude Code Mastery</h3></div>\n"
+        "<div class='card'><span class='icon'>đźš€</span>"
+        "<h3>Ship in 7 Days</h3></div>"
+    )
+    fixed = dash._recover_mojibake(doc)
+    has_recovered = any(c in fixed for c in ('⚡', '🧠', '🚀'))
+    assert has_recovered, f'No emoji recovered. Got: {fixed!r}'
+    assert len(fixed) < len(doc)

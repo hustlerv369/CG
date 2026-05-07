@@ -86,6 +86,32 @@ def _resolve_executable(name: str) -> str:
     return name
 
 
+try:  # Optional — only used when present
+    import ftfy as _ftfy  # type: ignore
+except ImportError:
+    _ftfy = None  # type: ignore
+
+
+def _recover_mojibake(text: str) -> str:
+    """Best-effort fix for double-encoded UTF-8 strings that come out of
+    some CLIs on Windows when their stdout is piped through a non-UTF-8
+    code page. The classic symptom: an emoji like 🧠 (UTF-8 bytes
+    f0 9f a7 a0) arrives as the four chars `đź§ ` after a
+    Windows-1250 → UTF-8 round-trip and ruins downstream HTML.
+
+    Uses ``ftfy.fix_text`` when installed (handles a wide matrix of
+    legacy code pages and is well-tested). Falls back to a no-op
+    when ftfy isn't available — the raw mojibake survives but nothing
+    else breaks.
+    """
+    if not text or _ftfy is None or all(ord(c) < 128 for c in text):
+        return text
+    try:
+        return _ftfy.fix_text(text)
+    except Exception:
+        return text
+
+
 def _parse_stream_json_line(family: str, line: str) -> list[str] | None:
     """K3 — extract assistant text deltas from a stream-json output line.
 
@@ -1178,6 +1204,10 @@ class RunManager:
 
         assert proc.stdout is not None
         for line in proc.stdout:
+            # _recover_mojibake fixes the Windows-CLI double-encode case
+            # (emoji like 🧠 arriving as đź§  through Windows-1250→UTF-8
+            # round trips). It's a no-op on clean ASCII so it's free.
+            line = _recover_mojibake(line)
             line_clean = line.rstrip("\n")
             if use_streaming:
                 deltas = _parse_stream_json_line(family, line_clean)
@@ -1190,6 +1220,7 @@ class RunManager:
                 else:
                     # Filter ran — only assistant text deltas reach here
                     for delta in deltas:
+                        delta = _recover_mojibake(delta)
                         agent_state.log_lines.append(delta)
                         out_fp.write(delta + "\n")
                         self._emit(run.id, label, {"event": "log", "data": {

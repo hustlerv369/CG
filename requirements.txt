@@ -9,3 +9,9 @@ httpx>=0.27           # required by FastAPI TestClient
 # without it but web placeholders return an install-instructions error.
 # After install, also run: playwright install chromium
 playwright>=1.45
+
+# Optional — fixes Windows-CLI mojibake (e.g. emoji that arrive as đź§
+# because a CLI emitted UTF-8 through a Windows-1250 console).
+# dashboard.py uses it when present; falls back to a regex heuristic
+# if the import fails.
+ftfy>=6.2
