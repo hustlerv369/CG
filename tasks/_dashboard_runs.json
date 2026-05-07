@@ -3,37 +3,37 @@
     "id": "6052aaccce5f",
     "title": "HustlerV — TRUE multi-agent (strategy → visual → impl → critique → polish)",
     "created": 1778179809.9477491,
-    "finished": false,
+    "finished": true,
     "agents": [
       {
         "label": "strategy",
         "agent": "claude-sonnet-4-6",
-        "status": "queued",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       },
       {
         "label": "visual",
         "agent": "gemini-pro",
-        "status": "waiting",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       },
       {
         "label": "implement",
         "agent": "claude-opus-4-7",
-        "status": "waiting",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       },
       {
         "label": "critique",
         "agent": "claude-sonnet-4-6",
-        "status": "waiting",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       },
       {
         "label": "polish",
         "agent": "claude-opus-4-7",
-        "status": "waiting",
-        "exit_code": null
+        "status": "done",
+        "exit_code": 0
       }
     ]
   }

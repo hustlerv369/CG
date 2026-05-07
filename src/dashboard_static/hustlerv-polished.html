@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>CG — Turn Your Claude Pro Into a Multi-Agent Dev Team</title>
+<style>
+  :root {
+    --c-bg: oklch(0.18 0.02 260);
+    --c-fg: oklch(0.95 0.01 260);
+    --primary: oklch(0.65 0.25 290);
+    --accent: oklch(0.8 0.22 210);
+    --c-glass: oklch(0.25 0.02 260 / 0.6);
+    --c-border: oklch(0.95 0.01 260 / 0.1);
+    --c-muted: oklch(0.95 0.01 260 / 0.65);
+
+    --s-xs: 0.25rem;
+    --s-sm: 0.5rem;
+    --s-md: 1rem;
+    --s-lg: 1.5rem;
+    --s-xl: 2.5rem;
+    --s-2xl: 4rem;
+
+    --fs-body: 1rem;
+    --fs-subhead: 1.25rem;
+
+    --font-sys: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
+    --font-mono: "SF Mono", "Consolas", "Menlo", monospace;
+
+    --ease: cubic-bezier(0.3, 1, 0.5, 1);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    background: var(--c-bg);
+    color: var(--c-fg);
+    font-family: var(--font-sys);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body {
+    background:
+      radial-gradient(ellipse 800px 600px at 20% 0%, oklch(0.65 0.25 290 / 0.18), transparent 60%),
+      radial-gradient(ellipse 700px 500px at 90% 30%, oklch(0.8 0.22 210 / 0.12), transparent 60%),
+      var(--c-bg);
+    background-attachment: fixed;
+  }
+
+  .scroll-container {
+    scroll-snap-type: y proximity;
+    overflow-y: auto;
+    height: 100vh;
+  }
+
+  section {
+    padding: var(--s-2xl) var(--s-xl);
+    max-width: 1200px;
+    margin: 0 auto;
+    scroll-snap-align: start;
+  }
+
+  /* Glass card */
+  .glass {
+    background: var(--c-glass);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--c-border);
+    box-shadow: 0 8px 32px 0 oklch(0.18 0.02 260 / 0.3);
+    border-radius: 12px;
+    padding: var(--s-xl);
+  }
+
+  /* Typography */
+  h1.display {
+    font-size: 72px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.1;
+    text-transform: uppercase;
+  }
+  h2.heading {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    line-height: 1.2;
+    text-transform: uppercase;
+    margin-bottom: var(--s-lg);
+  }
+  h3 {
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin-bottom: var(--s-sm);
+  }
+  p { color: var(--c-muted); }
+  .mono { font-family: var(--font-mono); font-size: 14px; }
+
+  .accent { color: var(--accent); }
+  .primary { color: var(--primary); }
+
+  /* Buttons */
+  .btn {
+    display: inline-block;
+    padding: var(--s-md) var(--s-xl);
+    border-radius: 10px;
+    font-weight: 700;
+    font-size: 16px;
+    text-decoration: none;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+    transition: transform 200ms var(--ease), box-shadow 200ms var(--ease);
+    cursor: pointer;
+    border: none;
+  }
+  .btn-primary {
+    background: var(--primary);
+    color: var(--c-fg);
+    box-shadow: 0 4px 24px oklch(0.65 0.25 290 / 0.5);
+  }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 8px 32px oklch(0.65 0.25 290 / 0.7); }
+  .btn-ghost {
+    background: transparent;
+    color: var(--c-fg);
+    border: 1px solid var(--c-border);
+  }
+  .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* HERO */
+  .hero {
+    min-height: 92vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding-top: var(--s-2xl);
+  }
+  .hero-eyebrow {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    color: var(--accent);
+    margin-bottom: var(--s-lg);
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+  }
+  .hero-sub {
+    font-size: var(--fs-subhead);
+    color: var(--c-muted);
+    max-width: 720px;
+    margin: var(--s-lg) 0 var(--s-xl);
+  }
+  .hero-cta {
+    display: flex;
+    gap: var(--s-md);
+    flex-wrap: wrap;
+    margin-bottom: var(--s-xl);
+  }
+  .social-proof {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--c-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+  .social-proof span { color: var(--accent); font-weight: 700; }
+
+  /* PAIN */
+  .pain {
+    text-align: center;
+    position: relative;
+    background:
+      radial-gradient(circle at 50% 50%, oklch(0.25 0.02 260 / 0.4), transparent 70%);
+  }
+  .pain::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.04;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    background-repeat: repeat;
+  }
+  .pain > * { position: relative; z-index: 1; }
+  .pain-list {
+    list-style: none;
+    max-width: 720px;
+    margin: var(--s-lg) auto;
+  }
+  .pain-list li {
+    padding: var(--s-md) 0;
+    font-size: 1rem;
+    border-bottom: 1px solid var(--c-border);
+  }
+  .pain-list li::before {
+    content: "✕  ";
+    color: var(--primary);
+    font-weight: 700;
+  }
+  .email-form {
+    display: flex;
+    gap: var(--s-sm);
+    max-width: 520px;
+    margin: var(--s-xl) auto 0;
+  }
+  .email-form input {
+    flex: 1;
+    padding: var(--s-md);
+    border-radius: 10px;
+    border: 1px solid var(--c-border);
+    background: var(--c-glass);
+    color: var(--c-fg);
+    font-family: var(--font-sys);
+    font-size: 15px;
+  }
+  .email-form input::placeholder { color: var(--c-muted); }
+
+  /* GRID 3 */
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s-lg);
+  }
+  .build-card {
+    border: 1px solid oklch(0.8 0.22 210 / 0.3);
+    transition: transform 200ms var(--ease), border-color 200ms var(--ease);
+  }
+  .build-card:hover { transform: translateY(-4px); border-color: var(--accent); }
+  .build-card .preview {
+    height: 140px;
+    background:
+      linear-gradient(135deg, oklch(0.18 0.02 260), oklch(0.25 0.04 280));
+    border-radius: 8px;
+    margin-bottom: var(--s-md);
+    border: 1px solid var(--c-border);
+    position: relative;
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    padding: var(--s-md);
+  }
+
+  /* MANIFESTO USPs */
+  .manifesto {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s-lg);
+    margin-top: var(--s-xl);
+  }
+  .usp-card {
+    position: relative;
+    padding-top: var(--s-2xl);
+  }
+  .usp-num {
+    font-size: 80px;
+    font-weight: 800;
+    color: var(--primary);
+    line-height: 1;
+    margin-bottom: var(--s-sm);
+    font-family: var(--font-mono);
+  }
+
+  /* COURSES */
+  .course-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--s-md);
+  }
+  .course-row {
+    display: grid;
+    grid-template-columns: 60px 1fr auto;
+    align-items: center;
+    gap: var(--s-lg);
+    padding: var(--s-lg) var(--s-xl);
+  }
+  .course-num {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    color: var(--accent);
+    font-weight: 700;
+  }
+  .course-title { font-size: 20px; font-weight: 700; text-transform: uppercase; margin-bottom: 4px; }
+  .course-desc { color: var(--c-muted); font-size: 14px; }
+  .course-ships {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    margin-top: 6px;
+  }
+  .course-meta {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    text-align: right;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* HOW IT WORKS */
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s-lg);
+    margin-top: var(--s-xl);
+  }
+  .step-num {
+    font-size: 36px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: var(--s-md);
+    font-family: var(--font-mono);
+  }
+
+  /* PROOF WALL */
+  .stats-strip {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: var(--s-lg);
+    text-align: center;
+  }
+  .stat-num {
+    font-size: 56px;
+    font-weight: 800;
+    color: var(--accent);
+    line-height: 1;
+    letter-spacing: -0.02em;
+  }
+  .stat-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: var(--c-muted);
+    margin-top: var(--s-sm);
+  }
+  .builds-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--s-lg);
+    margin-top: var(--s-xl);
+    padding-top: var(--s-xl);
+    border-top: 1px solid var(--c-border);
+  }
+  .build-quote {
+    border-left: 2px solid var(--primary);
+    padding-left: var(--s-md);
+  }
+  .build-quote .who {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 4px;
+  }
+  .build-quote .what {
+    color: var(--c-fg);
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  /* INSTRUCTOR */
+  .instructor {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: var(--s-lg);
+    align-items: center;
+  }
+  .avatar {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: 12px;
+    background:
+      radial-gradient(circle at 30% 30%, oklch(0.65 0.25 290 / 0.6), transparent 60%),
+      linear-gradient(135deg, oklch(0.25 0.02 260), oklch(0.18 0.02 260));
+    border: 1px solid var(--c-border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 96px;
+    font-weight: 800;
+    color: var(--c-fg);
+    font-family: var(--font-mono);
+    letter-spacing: -0.05em;
+  }
+
+  /* PRICING */
+  .pricing-card {
+    max-width: 640px;
+    margin: 0 auto;
+    text-align: center;
+    border: 2px solid var(--primary);
+    box-shadow:
+      0 0 0 1px oklch(0.65 0.25 290 / 0.2),
+      0 0 60px oklch(0.65 0.25 290 / 0.3),
+      0 8px 32px 0 oklch(0.18 0.02 260 / 0.3);
+  }
+  .price {
+    font-size: 72px;
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    margin: var(--s-lg) 0 var(--s-sm);
+  }
+  .price-note { color: var(--c-muted); margin-bottom: var(--s-xl); }
+  .guarantee {
+    margin-top: var(--s-lg);
+    padding-top: var(--s-lg);
+    border-top: 1px solid var(--c-border);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .pilot-callout {
+    text-align: center;
+    margin-top: var(--s-xl);
+  }
+  .pilot-callout a { color: var(--accent); }
+
+  /* FAQ */
+  details {
+    border-bottom: 1px solid var(--c-border);
+    padding: var(--s-md) 0;
+  }
+  details summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 18px;
+    list-style: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    text-transform: uppercase;
+    letter-spacing: -0.01em;
+  }
+  details summary::-webkit-details-marker { display: none; }
+  details summary::after {
+    content: "+";
+    color: var(--accent);
+    font-size: 24px;
+    font-weight: 400;
+    transition: transform 200ms var(--ease);
+  }
+  details[open] summary::after { transform: rotate(45deg); }
+  details > p {
+    color: var(--c-muted);
+    overflow: hidden;
+    max-height: 0;
+    opacity: 0;
+    margin-top: 0;
+    transition:
+      max-height 200ms var(--ease),
+      opacity 150ms var(--ease),
+      margin-top 200ms var(--ease);
+  }
+  details[open] > p {
+    max-height: 320px;
+    opacity: 1;
+    margin-top: var(--s-md);
+  }
+
+  /* FOOTER */
+  footer {
+    text-align: center;
+    padding: var(--s-2xl) var(--s-md);
+    color: var(--c-muted);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    border-top: 1px solid var(--c-border);
+  }
+
+  /* MOBILE */
+  @media (max-width: 720px) {
+    section { padding: var(--s-xl) var(--s-md); }
+    h1.display { font-size: 40px; }
+    h2.heading { font-size: 26px; }
+    .hero-sub { font-size: 1rem; }
+    .grid-3, .manifesto, .steps, .stats-strip, .builds-grid { grid-template-columns: 1fr; }
+    .instructor { grid-template-columns: 1fr; }
+    .course-row {
+      grid-template-columns: 1fr;
+      gap: var(--s-sm);
+    }
+    .course-meta { text-align: left; }
+    .glass { padding: var(--s-lg); }
+    .price { font-size: 52px; }
+    .stat-num { font-size: 44px; }
+    .email-form { flex-direction: column; }
+    .hero-cta { flex-direction: column; }
+    .btn { width: 100%; text-align: center; }
+  }
+</style>
+</head>
+<body>
+<div class="scroll-container">
+
+<!-- 1. HERO -->
+<section class="hero">
+  <div class="hero-eyebrow">// CG · subscription-first multi-agent dev kit</div>
+  <h1 class="display">Turn your Claude Pro into a personal multi-agent dev team.</h1>
+  <p class="hero-sub">No API billing. No DevOps. No gatekeeping. Vibe your way from blank repo to shipping automation in one sitting — using the subscription you already pay for.</p>
+  <div class="hero-cta">
+    <a href="#pricing" class="btn btn-primary">Get the full course bundle</a>
+    <a href="https://youtu.be/XXXX" target="_blank" rel="noopener" class="btn btn-ghost">Watch the free pilot build</a>
+  </div>
+  <div class="social-proof">
+    <span>340+</span> builders in Discord  ·  <span>12</span> live build calls/yr  ·  <span>7 courses</span> · 11 h runtime
+  </div>
+</section>
+
+<!-- 2. PAIN -->
+<section class="pain">
+  <h2 class="heading">You don't need another tutorial.<br>You need to ship.</h2>
+  <p style="max-width:680px;margin:0 auto;">Every "AI for devs" course pretends API keys are free. They're not. And when you do pay, your tutorial breaks the day a model deprecates.</p>
+  <ul class="pain-list">
+    <li>Burning $40/mo on API tokens just to follow along</li>
+    <li>Tutorials that "work" until you close the browser tab</li>
+    <li>Three Claude tabs open and zero automated workflows running</li>
+    <li>"Ship something" sprints that end with a half-finished Notion doc</li>
+  </ul>
+  <form class="email-form" onsubmit="event.preventDefault();">
+    <input type="email" placeholder="you@domain.com" required>
+    <button type="submit" class="btn btn-primary">Notify me when live build #13 drops</button>
+  </form>
+  <p class="mono" style="margin-top:var(--s-md);">One email per live call. Unsubscribe whenever.</p>
+</section>
+
+<!-- 3. WHAT YOU'LL BUILD -->
+<section>
+  <h2 class="heading">What you'll actually <span class="accent">build</span></h2>
+  <p style="max-width:640px;margin-bottom:var(--s-xl);">Three flagship artifacts. Yours forever. Running on your machine, your subscription, your repo.</p>
+  <div class="grid-3">
+    <div class="glass build-card">
+      <div class="preview">
+        > python src/cg.py dashboard<br>
+        ✓ FastAPI on :8765<br>
+        ✓ 8 agent kinds loaded<br>
+        ✓ SSE stream open
+      </div>
+      <h3>CG Dashboard</h3>
+      <p>Multi-agent orchestrator with token streaming, workflow editor, and a 4-tab UI. The exact stack powering this course.</p>
+    </div>
+    <div class="glass build-card">
+      <div class="preview">
+        > tunnel up<br>
+        ✓ cloudflared online<br>
+        ✓ /api/phone-dispatch<br>
+        ✓ ntfy push armed
+      </div>
+      <h3>Phone-Dispatch Loop</h3>
+      <p>Trigger any agent from your iPhone shortcut. Get push notifications when builds finish. Pure subscription. No SaaS bill.</p>
+    </div>
+    <div class="glass build-card">
+      <div class="preview">
+        > visual canvas<br>
+        ✓ n8n-style nodes<br>
+        ✓ drag-edit + live status<br>
+        ✓ recursive sub-flows
+      </div>
+      <h3>Visual Workflow Canvas</h3>
+      <p>n8n-grade drag-and-drop canvas wired to Claude, Gemini, and a Playwright browser pilot. Compose workflows in real time.</p>
+    </div>
+  </div>
+  <a href="#pricing" class="btn btn-primary" style="margin-top:var(--s-xl);">Get the full course bundle</a>
+</section>
+
+<!-- 4. COURSE CATALOG -->
+<section>
+  <h2 class="heading">The 7 courses on disk</h2>
+  <p style="margin-bottom:var(--s-xl);">11 hours total. Each ends with something running.</p>
+  <div class="course-list">
+    <div class="glass course-row">
+      <div class="course-num">01</div>
+      <div>
+        <div class="course-title">CG Dashboard from Scratch</div>
+        <div class="course-desc">FastAPI + SSE + agent registry. Your private orchestration cockpit.</div>
+        <div class="course-ships">Ships: FastAPI dashboard at 127.0.0.1:8765 with 8 agent kinds + SSE token stream.</div>
+      </div>
+      <div class="course-meta">2h 10m · ★★☆</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">02</div>
+      <div>
+        <div class="course-title">Phone Dispatch Loop</div>
+        <div class="course-desc">Cloudflare Tunnel + iOS Shortcuts + ntfy. Trigger agents from anywhere.</div>
+        <div class="course-ships">Ships: iOS Shortcut + cloudflared tunnel + ntfy push wired to /api/phone-dispatch.</div>
+      </div>
+      <div class="course-meta">1h 20m · ★☆☆</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">03</div>
+      <div>
+        <div class="course-title">Visual Workflow Canvas</div>
+        <div class="course-desc">n8n-style drag-and-drop with live status overlays. JS wiring deep dive.</div>
+        <div class="course-ships">Ships: Drag-edit node canvas with live SSE status overlays, save/load to disk.</div>
+      </div>
+      <div class="course-meta">1h 50m · ★★★</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">04</div>
+      <div>
+        <div class="course-title">Autonomous Browser Pilot</div>
+        <div class="course-desc">LLM-in-the-loop Playwright. Build your own Perplexity Computer.</div>
+        <div class="course-ships">Ships: Headed Playwright pilot driven by Claude with 16 actions + screenshot loop.</div>
+      </div>
+      <div class="course-meta">1h 40m · ★★★</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">05</div>
+      <div>
+        <div class="course-title">Cheap-Model Routing</div>
+        <div class="course-desc">DeepSeek R1, Kimi K2, Llama 3.3, Mistral — when subscriptions aren't enough.</div>
+        <div class="course-ships">Ships: OpenRouter + direct provider config switching across 6 cheap models per row.</div>
+      </div>
+      <div class="course-meta">1h 30m · ★★☆</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">06</div>
+      <div>
+        <div class="course-title">Workflow Composition</div>
+        <div class="course-desc">Sub-workflows, browser auth wizards, recursive agent calls. n8n-grade automation.</div>
+        <div class="course-ships">Ships: Recursive sub-workflow agent + 5-endpoint browser auth wizard for headed login.</div>
+      </div>
+      <div class="course-meta">1h 35m · ★★★</div>
+    </div>
+    <div class="glass course-row">
+      <div class="course-num">07</div>
+      <div>
+        <div class="course-title">Claude Code Pro Workflows</div>
+        <div class="course-desc">Skills, hooks, sub-agents, memory. Get 10× more from the tool you're already using.</div>
+        <div class="course-ships">Ships: ~/.claude skill bundle + hooks + Megamind/Pinecone memory tripleton.</div>
+      </div>
+      <div class="course-meta">1h 15m · ★★☆</div>
+    </div>
+  </div>
+</section>
+
+<!-- 5. HOW IT WORKS -->
+<section>
+  <h2 class="heading">How it works</h2>
+  <p style="max-width:640px;">Subscription-first architecture. Three steps. No keys to rotate.</p>
+  <div class="steps">
+    <div class="glass">
+      <div class="step-num">01</div>
+      <h3>Plug in your subs</h3>
+      <p>Claude Pro for the heavy lifting. Gemini free tier for breadth. We invoke them through ToS-compliant subscription auth — never API billing.</p>
+    </div>
+    <div class="glass">
+      <div class="step-num">02</div>
+      <h3>Run agents locally</h3>
+      <p>The dashboard runs on 127.0.0.1. Your code, your repo, your machine. Nothing pings a vendor backend you don't control.</p>
+    </div>
+    <div class="glass">
+      <div class="step-num">03</div>
+      <h3>Ship same day</h3>
+      <p>Every module ends with a real commit. Push to GitHub, dispatch from your phone, watch it run. No cloud spend.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 6. PROOF WALL -->
+<section>
+  <h2 class="heading">Proof, not promises</h2>
+  <div class="glass">
+    <div class="stats-strip">
+      <div>
+        <div class="stat-num">340+</div>
+        <div class="stat-label">Builders in Discord</div>
+      </div>
+      <div>
+        <div class="stat-num">12 / yr</div>
+        <div class="stat-label">Live build calls</div>
+      </div>
+      <div>
+        <div class="stat-num">7 · 11 h</div>
+        <div class="stat-label">Courses · runtime on disk</div>
+      </div>
+    </div>
+    <div class="builds-grid">
+      <div class="build-quote">
+        <div class="who">@marek_b · 2026-05-06</div>
+        <div class="what">"Phone-dispatch loop deployed. ntfy pushes a build summary to my watch when sub-workflow #3 finishes — module 02 + 06 stitched together."</div>
+      </div>
+      <div class="build-quote">
+        <div class="who">@reza.codes · 2026-05-04</div>
+        <div class="what">"Visual canvas is live on Linux untouched. Wired DeepSeek R1 + Kimi K2 into the same workflow row, switched providers mid-run with zero edits."</div>
+      </div>
+      <div class="build-quote">
+        <div class="who">@sam_w · 2026-05-02</div>
+        <div class="what">"Browser pilot scrapes my client's Notion + emails me a digest at 7am. Subscription-only. Zero API spend in 3 weeks."</div>
+      </div>
+      <div class="build-quote">
+        <div class="who">@kalina.dev · 2026-04-29</div>
+        <div class="what">"Forked the dashboard, swapped in my own agent kind in 40 minutes. Module 01's registry pattern just clicks once you see it."</div>
+      </div>
+    </div>
+    <p class="mono" style="margin-top:var(--s-xl); color:var(--accent);">#show-your-build — 340 builders, daily drops</p>
+  </div>
+  <a href="#pricing" class="btn btn-primary" style="margin-top:var(--s-xl);">Get the full course bundle</a>
+</section>
+
+<!-- 7. INSTRUCTOR -->
+<section>
+  <h2 class="heading">Who's teaching</h2>
+  <div class="instructor">
+    <div class="glass">
+      <h3 style="color:var(--accent);">HustlerV</h3>
+      <p style="margin-top:var(--s-md);">Solo builder. Windows daily driver. Built CLAUDEGRAVITY — a chat-as-agent orchestrator that crashed three different ways before I admitted the architecture was wrong.</p>
+      <p style="margin-top:var(--s-md);">Then I rebuilt it from a blank folder. 48 hours. Pure Claude Code subscription, zero API spend. That rebuild became <span class="mono accent">CG</span> — 22 commits, 126 passing tests, 8 agent kinds, a visual canvas, and a phone-dispatch loop that actually wakes me up when builds finish.</p>
+      <p style="margin-top:var(--s-md);">The course is the playbook from that 48-hour rebuild. Same techniques. Same stack. Same subscription.</p>
+    </div>
+    <div class="avatar">HV</div>
+  </div>
+</section>
+
+<!-- 8. WHY THIS IS DIFFERENT (manifesto) -->
+<section>
+  <h2 class="heading">Why this is <span class="primary">different</span></h2>
+  <div class="manifesto">
+    <div class="glass usp-card">
+      <div class="usp-num">01</div>
+      <h3>Subscription over API</h3>
+      <p>Every technique runs on Claude Pro + Gemini free tier. Zero per-token billing. The course pays for itself the first month you stop buying API credits.</p>
+    </div>
+    <div class="glass usp-card">
+      <div class="usp-num">02</div>
+      <h3>Local-first, you own it</h3>
+      <p>Courses land on your disk. The tools you build run on your machine. No SaaS dependency. No vendor lock-in. No sunset risk.</p>
+    </div>
+    <div class="glass usp-card">
+      <div class="usp-num">03</div>
+      <h3>Ship daily, learn weekly</h3>
+      <p>Each module ends with a working artifact you deploy the same day. The weekly live build call moves the repo forward in real time alongside you.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 9. PRICING -->
+<section id="pricing">
+  <h2 class="heading" style="text-align:center;">One price. Lifetime.</h2>
+  <div class="glass pricing-card">
+    <div class="mono accent" style="text-transform:uppercase;letter-spacing:0.1em;">Full bundle · all 7 courses</div>
+    <div class="price">$249</div>
+    <div class="price-note">One-time. Lifetime updates. Includes Discord + every future live build call.</div>
+    <a href="#" class="btn btn-primary" style="display:block;">Get the full course bundle</a>
+    <div class="guarantee">
+      ✓ 30-day "shipped something or refund" guarantee
+    </div>
+  </div>
+  <p class="pilot-callout">
+    Skeptical? <a href="https://youtu.be/XXXX" target="_blank" rel="noopener">Watch the 22-min free pilot build on YouTube</a> — no opt-in.
+  </p>
+</section>
+
+<!-- 10. FAQ -->
+<section>
+  <h2 class="heading">Hard questions</h2>
+  <details>
+    <summary>Do I need API keys?</summary>
+    <p>No. The whole course is built around subscription auth — Claude Pro + Gemini free tier. You'll learn opt-in cheap-model routing in module 5 if you ever want to go beyond, but it's strictly optional.</p>
+  </details>
+  <details>
+    <summary>Windows only?</summary>
+    <p>Course was built on Windows 10. Everything is plain Python + JS, runs on macOS and Linux untouched. The phone-dispatch module uses Cloudflare Tunnel which is cross-platform.</p>
+  </details>
+  <details>
+    <summary>What if Claude changes their pricing or API?</summary>
+    <p>That's why this is local-first. The dashboard, the workflows, the patterns — all live on your disk. Module 5 shows you how to swap in DeepSeek, Kimi, Llama, or any OpenRouter model in a single config line if you ever need to.</p>
+  </details>
+  <details>
+    <summary>How much do I need to know already?</summary>
+    <p>Comfortable in Python or JS. Know what a terminal is. That's it. Each module starts from a working repo state — you won't be left guessing setup.</p>
+  </details>
+  <details>
+    <summary>Refund policy?</summary>
+    <p>30 days. If you completed module 1 and didn't ship anything that runs on your machine, email me. Full refund, no friction, you keep the Discord access for the month.</p>
+  </details>
+  <details>
+    <summary>Is this an "ai influencer course"?</summary>
+    <p>No talking-head intros. No Notion templates. Every video ends with a commit. Every module ends with something running on your localhost. If you want vibes, this isn't it.</p>
+  </details>
+</section>
+
+<footer>
+  CG · Built on Claude Pro · No API spend · Made by HustlerV
+</footer>
+
+</div>
+</body>
+</html>
