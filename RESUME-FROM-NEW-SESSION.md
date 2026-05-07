@@ -4,10 +4,15 @@
 
 ---
 
-## Stav projektu (k commitu `0b18c94`, dva pipeline ground-truth runy)
+## Stav projektu (k commitu `0c50493`, artifact preview + OD + Gemini fix)
 
-- **30 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **32 commitů** na https://github.com/hustlerv369/CG (origin master synced)
 - **164 / 164 testů** passing (`python -m pytest tests/ -q`)
+- ✅ Gemini model resolution opravený (canonical `gemini-2.5-pro` / `gemini-2.5-flash` místo shorthand routovaných na vadný `gemini-3.1-pro-preview`)
+- ✅ Streaming default ON pro nové claude/gemini rows
+- ✅ Artifact-style preview tab (sandboxed iframe pro HTML/SVG/JSX, img pro data:URLs)
+- ✅ Open Design export — `POST /api/runs/<id>/export-to-open-design` + "🎨 Open in OD" button
+- ✅ ROADMAP.md s návrhy (CMUX/wmux multi-terminal, pilot vision, drag-to-connect, …)
 - **10 built-in agent kinds + opt-in HTTP providers + custom HTTP agents**
 - **18 bundled presetů** (vč. "Design → Implement → Critique (uses ${TASK} variable)" + Sonnet default critique)
 - **Live-tested pipeline** — `examples/slugify.py` + `tests/test_slugify.py` (20 cases) prokazují že Sonnet critique našel reálný bug v Opus implementaci a fix funguje
@@ -43,6 +48,8 @@
 | test | `9cb0e99` | examples/slugify.py + tests/test_slugify.py — proves Pipeline-1 critique found a real Opus bug |
 | docs | `f7c12f7` | RESUME bump |
 | test | `0b18c94` | examples/retry_decorator.py + tests/test_retry_decorator.py — Pipeline-2 critique "impl is correct" verdict survived 18 adversarial tests |
+| docs | `d340dc6` | RESUME bump |
+| feat | `0c50493` | artifact preview + OD export + Gemini canonical model strings + streaming default |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -159,5 +166,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `0b18c94`)
+**Aktualizováno:** 2026-05-07 (po commitu `0c50493`)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
