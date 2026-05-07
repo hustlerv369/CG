@@ -3467,6 +3467,67 @@ def create_app() -> FastAPI:
             "markdown": _render_run_report(run),
         }
 
+    @app.get("/api/runs/{run_id}/preview/{label}")
+    async def preview_run_artifact(run_id: str, label: str) -> Any:
+        """Serve the first renderable HTML/SVG fence from an agent's
+        output as a real top-level page. Used by the dashboard's
+        "open in new tab" button so the design renders in a full
+        browser window (with working scroll, scroll-snap, hover, etc.)
+        instead of a sandboxed iframe inside the monitor panel.
+
+        Detection priority mirrors the in-panel preview:
+          1. `````html`` fenced block
+          2. `````svg`` fenced block (wrapped in a centering page)
+          3. raw ``<html>...</html>`` chunk in the buffer
+          4. raw ``<svg>...</svg>`` chunk
+        Returns 404 if nothing renderable is found, so the UI can show
+        a clear message instead of a blank page.
+        """
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        agent_state = run.agents.get(label)
+        if not agent_state:
+            raise HTTPException(404, f"agent {label!r} not found in run")
+        text = "\n".join(agent_state.log_lines)
+
+        import re as _re
+        html_match = _re.search(r"```\s*html?\s*\n([\s\S]*?)```",
+                                  text, _re.IGNORECASE)
+        svg_match = _re.search(r"```\s*svg\s*\n([\s\S]*?)```",
+                                 text, _re.IGNORECASE)
+
+        if html_match:
+            return HTMLResponse(html_match.group(1))
+        if svg_match:
+            page = (
+                "<!doctype html><meta charset='utf-8'>"
+                "<title>SVG preview</title>"
+                "<style>html,body{margin:0;background:#fff;display:flex;"
+                "align-items:center;justify-content:center;min-height:100vh;"
+                "font-family:system-ui}svg{max-width:100%;max-height:100vh}"
+                "</style>" + svg_match.group(1)
+            )
+            return HTMLResponse(page)
+
+        raw_html = _re.search(r"<html[\s\S]*?</html>", text, _re.IGNORECASE)
+        if raw_html:
+            return HTMLResponse(raw_html.group(0))
+        raw_svg = _re.search(r"<svg[\s\S]*?</svg>", text, _re.IGNORECASE)
+        if raw_svg:
+            page = (
+                "<!doctype html><meta charset='utf-8'>"
+                "<title>SVG preview</title>"
+                "<style>html,body{margin:0;background:#fff;display:flex;"
+                "align-items:center;justify-content:center;min-height:100vh;"
+                "font-family:system-ui}svg{max-width:100%;max-height:100vh}"
+                "</style>" + raw_svg.group(0)
+            )
+            return HTMLResponse(page)
+
+        raise HTTPException(404,
+            "no renderable HTML/SVG found in this agent's output")
+
     @app.post("/api/runs/{run_id}/export-to-open-design")
     async def export_to_open_design(run_id: str) -> Any:
         """Drop a Markdown bundle of this run into Open Design's

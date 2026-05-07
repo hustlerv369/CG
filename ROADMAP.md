@@ -49,6 +49,37 @@
 
 ## Big rocks (návrhy s odhadem rozsahu)
 
+### 0. Tailscale integration (high-impact, low scope)
+**Inspirace:** [tailscale.com](https://tailscale.com) — WireGuard-based zero-config
+mesh VPN. Free Personal plán: 100 zařízení, 3 uživatelé.
+
+**Use cases pro CG:**
+1. **Phone dispatch bez Cloudflare Tunnel** — `http://100.x.y.z:8765`
+   přímo z mobilu, žádný 62 MB cloudflared.exe + tunnel infrastructure
+2. **Cluster runs napříč zařízeními** — agenty na desktopu + laptopu
+   + headless NUC, dispatch z kteréhokoli node
+3. **Browser pilot na headless serveru** — ručně přihlášený NUC v
+   ložnici, pilot se ho ptá z office
+4. **Sdílení run results týmu** — kolega otevře tvůj
+   `http://100.x.y.z:8765` a vidí historie + výsledky live (zero-config
+   zero-trust, nepotřebuje VPN config)
+5. **Tailscale Funnel** (free 3 shares per tailnet) — public HTTPS URL
+   s automatickým certifikátem, replace v10 Cloudflare Tunnel kompletně
+6. **Headscale** — self-hosted coordination server pro paranoid users
+
+**Plán implementace (~1.5h):**
+1. Settings tab → "Tailscale mode" toggle (vedle "Cloudflare Tunnel")
+2. Backend: `subprocess.run(["tailscale", "ip"])` → tailnet IP, fallback
+   na localhost když TS není installed
+3. Když TS active: dashboard inzeruje tailnet URL místo tunnel URL
+4. Phone Dispatch endpoint vrací stable tailnet IP (nemění se při restartu
+   jako tunnel hostname)
+5. `cg tailscale-setup` CLI command — detekce, zobrazení IP, link na
+   tailscale.com/admin pro přidání zařízení
+
+**Status:** Tailscale **NENÍ** nainstalovaný na user PC zatím.
+Implementaci dělat až po user-confirm + install.
+
 ### 1. CMUX/wmux-style multi-terminal spawning
 **Inspirace:** [openwong2kim/wmux](https://github.com/openwong2kim/wmux),
 ten že lze spustit klidně 50 separátních terminálů s agenty.

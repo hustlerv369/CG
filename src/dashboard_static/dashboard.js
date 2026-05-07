@@ -1251,12 +1251,36 @@ async function openRun(runId) {
     depends_on: a.depends_on || [],
     prompt: "" /* original prompt not exposed by API; rerun uses spec from storage */
   }));
+  // Find the first agent label whose output looks like it has a
+  // renderable HTML / SVG fence — that's what the "open full page"
+  // button targets. Recomputed each time the toolbar renders.
+  const renderableLabel = (() => {
+    const m = meta.agents.find(a => {
+      const buf = (state.panels[a.label]?.rawBuffer || "") + "";
+      return /```\s*html?/i.test(buf) || /```\s*svg/i.test(buf) ||
+             /<html[\s\S]*?<\/html>/i.test(buf) ||
+             /<svg[\s\S]*?<\/svg>/i.test(buf);
+    });
+    return m ? m.label : null;
+  })();
+  const fullPageBtn = renderableLabel
+    ? `<button class="ghost" id="full-page-btn"
+         title="Open the rendered HTML/SVG in a new tab (full window, scroll, hover, scroll-snap all work)"
+         data-label="${renderableLabel}">↗ Open full page</button>`
+    : "";
   tools.innerHTML = `
     <button class="ghost" id="cancel-btn">⨯ Cancel</button>
     <button class="ghost" id="rerun-btn">↻ Reload</button>
     <button class="ghost" id="export-btn">⬇ Export .md</button>
+    ${fullPageBtn}
     <button class="ghost" id="open-design-btn" title="Drop this run's report into Open Design's imports/ folder">🎨 Open in OD</button>
   `;
+  if (renderableLabel) {
+    tools.querySelector("#full-page-btn").onclick = () => {
+      window.open(`/api/runs/${meta.id}/preview/${renderableLabel}`,
+                    "_blank", "noopener");
+    };
+  }
   tools.querySelector("#cancel-btn").onclick = async () => {
     if (!confirm("Cancel this run? Running agents will be killed.")) return;
     await fetch(`/api/runs/${meta.id}`, { method: "DELETE" });
