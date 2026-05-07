@@ -71,12 +71,13 @@ def test_get_agents(client):
     # New specific model ids must all be present
     for kid in ("claude-sonnet-4-6", "claude-opus-4-7", "claude-opus-4-6",
                  "gemini-flash", "gemini-pro", "gemini-3-pro",
-                 "browser", "subworkflow"):
+                 "browser", "subworkflow", "opencode"):
         assert kid in ids, f"missing model id {kid!r} in {ids}"
     # Each entry has family + summary
     for a in body["agents"]:
         assert a["family"] in {"claude", "gemini", "browser", "subworkflow",
-                                 "other", "custom"}
+                                 "opencode", "deepseek", "moonshot", "llama",
+                                 "mistral", "qwen", "glm", "other", "custom"}
         assert "summary" in a
 
 
@@ -1557,6 +1558,27 @@ def test_streaming_flag_round_trips_through_run(client):
     by_label = {a["label"]: a for a in body["agents"]}
     assert by_label["a"]["streaming"] is True
     assert by_label["b"]["streaming"] is False
+
+
+def test_v15_openrouter_models_appear_when_key_set(monkeypatch, tmp_path):
+    """v15: setting OPENROUTER_API_KEY exposes the cheap-coder family."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-or-key")
+    monkeypatch.setattr(dash, "RUNS_DIR", tmp_path / "runs")
+    dash.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(dash, "INDEX_PATH", tmp_path / "i.json")
+    new_models = dash._build_http_models()
+    for kid in ("or-deepseek-r1", "or-kimi-k2",
+                  "or-llama-3.3", "or-mistral-large"):
+        assert kid in new_models, f"v15 OpenRouter id {kid!r} missing"
+
+
+def test_v15_deepseek_direct_appears_when_key_set(monkeypatch, tmp_path):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "test-ds-key")
+    monkeypatch.setattr(dash, "RUNS_DIR", tmp_path / "runs")
+    dash.RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    new_models = dash._build_http_models()
+    assert "deepseek-chat" in new_models
+    assert "deepseek-reasoner" in new_models
 
 
 def test_streaming_assistant_deltas_emitted_as_text(client, monkeypatch, tmp_path):

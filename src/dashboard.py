@@ -216,6 +216,19 @@ AGENT_KINDS: dict[str, dict[str, Any]] = {
         "stdin_prompt": False,
         "env": {"GOOGLE_GENAI_USE_GCA": "true"},
     },
+    # ---- OpenCode (sst/opencode CLI — open-source local agent) -----------
+    # https://github.com/sst/opencode — TUI/CLI similar to Claude Code,
+    # supports any provider via config. Headless invocation: `opencode run`.
+    # Subscription-friendly: bring-your-own provider keys, no per-token
+    # markup over native pricing.
+    "opencode": {
+        "label": "OpenCode (open-source)",
+        "family": "opencode",
+        "summary": "sst/opencode CLI — bring your own model config",
+        "command": [_resolve_executable("opencode"), "run"],
+        "stdin_prompt": True,
+        "env": {},
+    },
     # ---- browser agent (built-in) ----------------------------------------
     "browser": {
         "label": "🌐 Browser (Playwright)",
@@ -294,7 +307,103 @@ def _build_http_models() -> dict[str, dict[str, Any]]:
                                  "X-Title": "CG Dashboard"},
                 },
             },
+            "or-deepseek-r1": {
+                "label": "DeepSeek R1 via OpenRouter",
+                "family": "deepseek",
+                "summary": "$0.55/$2.19 per M — strong reasoning model",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "deepseek/deepseek-r1",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+            "or-kimi-k2": {
+                "label": "Kimi K2 via OpenRouter",
+                "family": "moonshot",
+                "summary": "$0.55/$2.19 per M — Moonshot 1T MoE, agentic",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "moonshotai/kimi-k2",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+            "or-llama-3.3": {
+                "label": "Llama 3.3 70B via OpenRouter",
+                "family": "llama",
+                "summary": "$0.13/$0.39 per M — Meta open weights, fast",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "meta-llama/llama-3.3-70b-instruct",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
+            "or-mistral-large": {
+                "label": "Mistral Large via OpenRouter",
+                "family": "mistral",
+                "summary": "$2/$6 per M — Mistral flagship, strong code",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://openrouter.ai/api/v1/chat/completions",
+                    "model": "mistralai/mistral-large",
+                    "api_key_env": "OPENROUTER_API_KEY",
+                    "headers": {"HTTP-Referer": "https://github.com/hustlerv369/CG",
+                                 "X-Title": "CG Dashboard"},
+                },
+            },
         })
+
+    # DeepSeek API direct (cheapest path to DeepSeek if you have a key)
+    if os.environ.get("DEEPSEEK_API_KEY"):
+        out.update({
+            "deepseek-chat": {
+                "label": "DeepSeek Chat (direct API)",
+                "family": "deepseek",
+                "summary": "$0.27/$1.10 per M — cheapest robust coder",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://api.deepseek.com/chat/completions",
+                    "model": "deepseek-chat",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                    "headers": {},
+                },
+            },
+            "deepseek-reasoner": {
+                "label": "DeepSeek Reasoner (direct API)",
+                "family": "deepseek",
+                "summary": "$0.55/$2.19 per M — R1-class reasoning",
+                "runner": "http",
+                "http": {
+                    "endpoint": "https://api.deepseek.com/chat/completions",
+                    "model": "deepseek-reasoner",
+                    "api_key_env": "DEEPSEEK_API_KEY",
+                    "headers": {},
+                },
+            },
+        })
+
+    # Moonshot Kimi direct API
+    if os.environ.get("MOONSHOT_API_KEY"):
+        out["kimi-k2-direct"] = {
+            "label": "Kimi K2 (Moonshot direct)",
+            "family": "moonshot",
+            "summary": "$0.60/$2.50 per M — Moonshot direct, China region",
+            "runner": "http",
+            "http": {
+                "endpoint": "https://api.moonshot.cn/v1/chat/completions",
+                "model": "moonshot-v1-128k",
+                "api_key_env": "MOONSHOT_API_KEY",
+                "headers": {},
+            },
+        }
 
     # Z.ai GLM direct
     if os.environ.get("ZHIPU_API_KEY") or os.environ.get("ZAI_API_KEY"):
