@@ -4,10 +4,14 @@
 
 ---
 
-## Stav projektu (k commitu `ba9c5c8`, 5-agent pipeline live-verified)
+## Stav projektu (k commitu `848c9b4`, deployed + history persistence)
 
-- **38 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **41 commitů** na https://github.com/hustlerv369/CG (origin master synced)
 - **167 / 167 testů** passing
+- 🌐 **HustlerV polished landing LIVE: https://hustlerv369.github.io/CG/** (gh-pages branch)
+- ✅ History persistence: dashboard runs přežijí restart (hydrate_from_disk)
+- ✅ Visual canvas: zoom + pan + fit + fullscreen (Ctrl+wheel, F, 0)
+- ✅ Visual mode roztáhne grid layout — designer column 380px → 1fr
 - ✅ Skutečný multi-agent collaboration prokázaný end-to-end (5 agentů, 4 dependency edges, 61KB total output, 6+ minut wall time)
 - ✅ Gemini model resolution opravený (canonical `gemini-2.5-pro` / `gemini-2.5-flash` místo shorthand routovaných na vadný `gemini-3.1-pro-preview`)
 - ✅ Streaming default ON pro nové claude/gemini rows
@@ -175,5 +179,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `ba9c5c8` — 5-agent pipeline ověřen live, multi-agent automation hotová)
+**Aktualizováno:** 2026-05-07 (po commitu `848c9b4` — DEPLOYED + history persistence + zoom/pan)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
