@@ -4,10 +4,10 @@
 
 ---
 
-## Stav projektu (k commitu `0c50493`, artifact preview + OD + Gemini fix)
+## Stav projektu (k commitu `ebe7250`, mojibake fix + design test pass)
 
-- **32 commitů** na https://github.com/hustlerv369/CG (origin master synced)
-- **164 / 164 testů** passing (`python -m pytest tests/ -q`)
+- **35 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+- **167 / 167 testů** passing (`python -m pytest tests/ -q`)
 - ✅ Gemini model resolution opravený (canonical `gemini-2.5-pro` / `gemini-2.5-flash` místo shorthand routovaných na vadný `gemini-3.1-pro-preview`)
 - ✅ Streaming default ON pro nové claude/gemini rows
 - ✅ Artifact-style preview tab (sandboxed iframe pro HTML/SVG/JSX, img pro data:URLs)
@@ -52,6 +52,9 @@
 | feat | `0c50493` | artifact preview + OD export + Gemini canonical model strings + streaming default |
 | docs | `010ea33` | RESUME bump |
 | fix | `da1f4a3` | cache-bust /static/dashboard.{js,css} via mtime stamp (browser was holding stale JS after deploys) |
+| docs | `c6af8cd` | RESUME bump |
+| feat | `55926a4` | full-page preview endpoint + "↗ Open full page" button + Tailscale roadmap |
+| fix | `ebe7250` | Windows-CLI emoji mojibake recovery via ftfy (🧠 was arriving as đź§) |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -168,5 +171,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `da1f4a3` — všechno live ověřeno v browseru)
+**Aktualizováno:** 2026-05-07 (po commitu `ebe7250` — HustlerV design end-to-end fungoval, emoji recovered)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
