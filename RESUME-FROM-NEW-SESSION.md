@@ -50,6 +50,8 @@
 | test | `0b18c94` | examples/retry_decorator.py + tests/test_retry_decorator.py — Pipeline-2 critique "impl is correct" verdict survived 18 adversarial tests |
 | docs | `d340dc6` | RESUME bump |
 | feat | `0c50493` | artifact preview + OD export + Gemini canonical model strings + streaming default |
+| docs | `010ea33` | RESUME bump |
+| fix | `da1f4a3` | cache-bust /static/dashboard.{js,css} via mtime stamp (browser was holding stale JS after deploys) |
 
 ## Co NENÍ hotové (žádný okamžitý todo)
 
@@ -166,5 +168,5 @@ Pokud čteš tohle z phone-dispatch (přes Cloudflare Tunnel `POST /api/phone-di
 
 ---
 
-**Aktualizováno:** 2026-05-07 (po commitu `0c50493`)
+**Aktualizováno:** 2026-05-07 (po commitu `da1f4a3` — všechno live ověřeno v browseru)
 **Maintainer:** ten Claude Code session co právě commituje. Vždy bumpni datum + commit hash při každém pushi.
