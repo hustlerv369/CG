@@ -912,6 +912,250 @@ main.settings-pane {
   font-size: 11.5px;
 }
 
+/* v16 — view-mode toggle (Classic / Visual) */
+.view-mode-toggle {
+  display: inline-flex; gap: 0;
+  padding: 2px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 14px;
+}
+.view-mode-toggle .vm-seg {
+  padding: 5px 12px;
+  font-size: 11.5px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--fg-secondary);
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.view-mode-toggle .vm-seg:hover {
+  color: var(--fg);
+}
+.view-mode-toggle .vm-seg.active {
+  background: var(--accent, #a78bfa);
+  color: #0a0a0c;
+  font-weight: 600;
+}
+
+/* v16 — visual node-graph editor */
+.visual-pane {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.visual-toolbar {
+  display: flex; align-items: center; gap: 8px;
+}
+.visual-toolbar .visual-hint {
+  flex: 1;
+  font-size: 10.5px;
+  color: var(--fg-tertiary);
+  font-style: italic;
+}
+.visual-canvas-wrap {
+  position: relative;
+  height: 460px;
+  background:
+    radial-gradient(rgba(255,255,255,0.04) 1px, transparent 1px) 0 0/16px 16px,
+    var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: auto;
+}
+.visual-canvas {
+  display: block;
+  width: 100%; height: 100%;
+  min-width: 800px; min-height: 460px;
+  color: var(--fg-tertiary);  /* arrow stroke */
+}
+.visual-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--fg-tertiary);
+  font-size: 12px;
+  pointer-events: none;
+}
+.connections-layer path {
+  fill: none;
+  stroke: rgba(167, 139, 250, 0.55);
+  stroke-width: 1.6;
+  transition: stroke 0.15s, stroke-width 0.15s;
+  cursor: pointer;
+  pointer-events: stroke;
+}
+.connections-layer path:hover {
+  stroke: var(--error);
+  stroke-width: 2.4;
+}
+.connections-layer path.flowing {
+  stroke: var(--accent, #a78bfa);
+  stroke-width: 2.6;
+  filter: drop-shadow(0 0 4px var(--accent, #a78bfa));
+}
+.nodes-layer foreignObject { overflow: visible; }
+.vis-node {
+  width: 200px;
+  background: rgba(20, 20, 24, 0.92);
+  backdrop-filter: blur(10px);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  cursor: grab;
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  font-family: var(--font-sans);
+  user-select: none;
+}
+.vis-node:hover {
+  border-color: var(--accent, #a78bfa);
+}
+.vis-node.dragging {
+  cursor: grabbing;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  transform: scale(1.02);
+}
+.vis-node.status-running {
+  border-color: #38bdf8;
+  box-shadow: 0 0 0 1px #38bdf8 inset, 0 0 12px rgba(56, 189, 248, 0.25);
+  animation: vis-pulse 1.4s ease-in-out infinite;
+}
+.vis-node.status-done    { border-color: #22c55e; }
+.vis-node.status-failed  { border-color: #ef4444; }
+.vis-node.status-cancelled { border-color: #71717a; opacity: 0.6; }
+@keyframes vis-pulse {
+  0%, 100% { box-shadow: 0 0 0 1px #38bdf8 inset, 0 0 8px rgba(56, 189, 248, 0.2); }
+  50% { box-shadow: 0 0 0 1px #38bdf8 inset, 0 0 18px rgba(56, 189, 248, 0.45); }
+}
+.vis-node-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--fg);
+  margin-bottom: 4px;
+}
+.vis-node-head .vis-emoji { font-size: 14px; }
+.vis-node-head .vis-label { flex: 1;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.vis-node-head .vis-status {
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg-input);
+  color: var(--fg-tertiary);
+}
+.vis-node-head .vis-close {
+  background: none; border: none;
+  color: var(--fg-tertiary);
+  font-size: 14px; line-height: 1;
+  cursor: pointer; padding: 0 2px;
+  border-radius: 4px;
+}
+.vis-node-head .vis-close:hover { color: var(--error); }
+.vis-node-model {
+  font-size: 10.5px;
+  color: var(--fg-secondary);
+  font-family: var(--font-mono);
+  margin-bottom: 4px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.vis-node-prompt {
+  font-size: 10px;
+  color: var(--fg-tertiary);
+  max-height: 36px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.35;
+}
+.vis-node-log {
+  margin-top: 6px;
+  font-size: 9.5px;
+  color: var(--accent, #a78bfa);
+  font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  opacity: 0.85;
+}
+.vis-node-edit {
+  margin-top: 6px;
+  display: none;
+  flex-direction: column; gap: 4px;
+}
+.vis-node.editing .vis-node-edit { display: flex; }
+.vis-node.editing .vis-node-prompt,
+.vis-node.editing .vis-node-log { display: none; }
+.vis-node-edit select,
+.vis-node-edit textarea,
+.vis-node-edit input {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 10.5px;
+  background: var(--bg-input);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+.vis-node-edit textarea { min-height: 50px; resize: vertical; }
+.vis-node-edit .row {
+  display: flex; gap: 4px;
+}
+.vis-node-edit .row button {
+  padding: 3px 8px; font-size: 10px;
+}
+
+/* Node palette modal */
+.vis-palette-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000;
+}
+.vis-palette {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  min-width: 360px; max-width: 80vw;
+  max-height: 70vh; overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.vis-palette h3 {
+  margin: 0 0 10px 0; font-size: 13px;
+}
+.vis-palette-list {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 6px;
+}
+.vis-palette-card {
+  padding: 8px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 11px;
+  transition: all var(--transition);
+}
+.vis-palette-card:hover {
+  border-color: var(--accent, #a78bfa);
+  background: var(--accent-soft, rgba(139, 92, 246, 0.1));
+}
+.vis-palette-card .name {
+  font-weight: 600; color: var(--fg); margin-bottom: 2px;
+}
+.vis-palette-card .meta {
+  color: var(--fg-tertiary); font-size: 10px;
+}
+.vis-palette-actions {
+  margin-top: 10px; display: flex; justify-content: flex-end;
+}
+
 /* K4 — browser step builder */
 .browser-builder {
   margin-top: 8px;

@@ -79,10 +79,40 @@
         <input id="run-title" type="text" placeholder="What is this run for?" />
       </div>
 
-      <div id="agent-rows"></div>
+      <div class="view-mode-toggle" id="view-mode-toggle"
+           title="Switch between linear (Classic) and node-graph (Visual) editor">
+        <button class="vm-seg active" data-vm="classic">📋 Classic</button>
+        <button class="vm-seg" data-vm="visual">🌐 Visual</button>
+      </div>
 
-      <div class="agent-controls">
-        <button class="ghost" id="add-agent">+ add agent</button>
+      <div id="classic-pane">
+        <div id="agent-rows"></div>
+        <div class="agent-controls">
+          <button class="ghost" id="add-agent">+ add agent</button>
+        </div>
+      </div>
+
+      <div id="visual-pane" class="visual-pane" style="display:none">
+        <div class="visual-toolbar">
+          <button class="ghost" id="visual-add-node" title="Add a node">+ node</button>
+          <button class="ghost" id="visual-auto-layout" title="Re-layout all nodes">⚡ auto-layout</button>
+          <span class="visual-hint">drag node to move · click to edit · click connection to remove</span>
+        </div>
+        <div class="visual-canvas-wrap" id="visual-canvas-wrap">
+          <svg id="visual-canvas" class="visual-canvas">
+            <defs>
+              <marker id="arrowhead" markerWidth="10" markerHeight="7"
+                      refX="10" refY="3.5" orient="auto">
+                <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
+              </marker>
+            </defs>
+            <g class="connections-layer"></g>
+            <g class="nodes-layer"></g>
+          </svg>
+          <div class="visual-empty" id="visual-empty">
+            Empty — click <strong>+ node</strong> to add an agent.
+          </div>
+        </div>
       </div>
 
       <div class="actions">

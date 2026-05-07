@@ -2770,10 +2770,16 @@ def _list_workflow_files() -> list[dict[str, Any]]:
             data = json.loads(p.read_text(encoding="utf-8"))
         except Exception:
             continue
+        if not isinstance(data, dict):
+            # Tolerate non-dict workflow files (corrupt / hand-edited)
+            continue
+        spec = data.get("spec")
+        if not isinstance(spec, list):
+            spec = []
         out.append({
             "name": _name_of(p),
             "title": data.get("title") or _name_of(p),
-            "agentCount": len(data.get("spec", [])),
+            "agentCount": len(spec),
             "savedAt": data.get("savedAt"),
         })
     return out

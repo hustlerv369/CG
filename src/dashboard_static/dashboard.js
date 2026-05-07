@@ -35,6 +35,7 @@ async function init() {
   // workspace's empty spec triggers the safety fallback inside applyDraft)
   initWorkspaces();
   ensureOneAgentRow();
+  initVisualMode();
   requestNotificationPermission();
   // CLI auto-load: cg dashboard --workflow <name>
   await autoLoadFromUrl();
@@ -73,6 +74,7 @@ function captureCurrentDraft() {
   return {
     title: ($("#run-title")?.value || "").trim(),
     spec: readSpec(),
+    positions: window.__visPositions || {},  // v16 — visual canvas layout
   };
 }
 
@@ -82,6 +84,13 @@ function applyDraft(draft) {
   $("#agent-rows").innerHTML = "";
   (draft.spec || []).forEach(s => addAgentRow(s));
   if (($$(".agent-row") || []).length === 0) addAgentRow();
+  // v16 — restore saved canvas positions for this workspace
+  window.__visPositions = (draft.positions && typeof draft.positions === "object")
+    ? { ...draft.positions } : {};
+  if (typeof renderVisualCanvas === "function" &&
+      $("#visual-pane")?.style.display !== "none") {
+    renderVisualCanvas();
+  }
 }
 
 function persistActiveDraft() {
@@ -189,6 +198,368 @@ function initWorkspaces() {
   if (!list.find(w => w.id === getActiveWsId())) setActiveWsId(active.id);
   applyDraft(active.draft);
   renderWorkspaceList();
+}
+
+// ---------- v16: visual canvas (n8n / make.com style) ------------------
+//
+// State model: the source of truth for the workflow remains the classic
+// agent-rows DOM. Visual mode reads via readSpec(), writes back via
+// addAgentRow / inline edit. Per-workspace node positions live on
+// `window.__visPositions` (mirrored into draft.positions on persist).
+
+const VIEW_MODE_KEY = "cg.viewMode";
+const VIS_NODE_W = 200;
+const VIS_NODE_H = 110;
+const VIS_COL_GAP = 80;
+const VIS_ROW_GAP = 40;
+
+function getViewMode() {
+  return localStorage.getItem(VIEW_MODE_KEY) || "classic";
+}
+function setViewMode(mode) {
+  localStorage.setItem(VIEW_MODE_KEY, mode);
+}
+
+function familyEmoji(family) {
+  return ({
+    claude: "🅒", gemini: "🅖", browser: "🌐", subworkflow: "🔁",
+    opencode: "🅞", deepseek: "🐳", moonshot: "🌙", glm: "🇿",
+    qwen: "🅠", llama: "🦙", mistral: "🅼", custom: "🛠",
+  }[family] || "•");
+}
+
+function topoLayout(spec) {
+  // Layered topological layout: column = longest depends_on chain depth.
+  const byLabel = Object.fromEntries(spec.map(s => [s.label, s]));
+  const depth = {};
+  function depthOf(label, seen = new Set()) {
+    if (depth[label] !== undefined) return depth[label];
+    if (seen.has(label)) return 0;  // cycle guard
+    seen.add(label);
+    const node = byLabel[label];
+    if (!node || !node.depends_on || node.depends_on.length === 0) {
+      depth[label] = 0; return 0;
+    }
+    const d = 1 + Math.max(...node.depends_on.map(d => depthOf(d, seen)));
+    depth[label] = d; return d;
+  }
+  spec.forEach(s => depthOf(s.label));
+  // Group by depth
+  const cols = {};
+  spec.forEach(s => {
+    const d = depth[s.label] || 0;
+    (cols[d] ||= []).push(s);
+  });
+  const positions = {};
+  Object.keys(cols).sort((a, b) => +a - +b).forEach(d => {
+    cols[d].forEach((s, i) => {
+      positions[s.label] = {
+        x: 30 + (+d) * (VIS_NODE_W + VIS_COL_GAP),
+        y: 30 + i * (VIS_NODE_H + VIS_ROW_GAP),
+      };
+    });
+  });
+  return positions;
+}
+
+function renderVisualCanvas() {
+  const svg = document.getElementById("visual-canvas");
+  if (!svg) return;
+  const nodesLayer = svg.querySelector(".nodes-layer");
+  const connsLayer = svg.querySelector(".connections-layer");
+  nodesLayer.innerHTML = "";
+  connsLayer.innerHTML = "";
+
+  const spec = readSpec();
+  document.getElementById("visual-empty").style.display =
+    spec.length === 0 ? "flex" : "none";
+  if (spec.length === 0) return;
+
+  // Resolve positions: saved > auto-layout fallback
+  const auto = topoLayout(spec);
+  const positions = window.__visPositions = window.__visPositions || {};
+  spec.forEach(s => {
+    if (!positions[s.label]) positions[s.label] = auto[s.label];
+  });
+  // Drop positions for labels that no longer exist
+  Object.keys(positions).forEach(label => {
+    if (!spec.find(s => s.label === label)) delete positions[label];
+  });
+
+  // Resize canvas to fit
+  const maxX = Math.max(...spec.map(s => (positions[s.label]?.x || 0))) + VIS_NODE_W + 60;
+  const maxY = Math.max(...spec.map(s => (positions[s.label]?.y || 0))) + VIS_NODE_H + 60;
+  svg.setAttribute("viewBox", `0 0 ${Math.max(800, maxX)} ${Math.max(460, maxY)}`);
+  svg.style.width = Math.max(800, maxX) + "px";
+  svg.style.height = Math.max(460, maxY) + "px";
+
+  // Draw connections first (under nodes)
+  spec.forEach(s => {
+    (s.depends_on || []).forEach(dep => {
+      const from = positions[dep], to = positions[s.label];
+      if (!from || !to) return;
+      const x1 = from.x + VIS_NODE_W;
+      const y1 = from.y + VIS_NODE_H / 2;
+      const x2 = to.x;
+      const y2 = to.y + VIS_NODE_H / 2;
+      const dx = Math.max(40, (x2 - x1) / 2);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d",
+        `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+      path.setAttribute("marker-end", "url(#arrowhead)");
+      path.dataset.from = dep;
+      path.dataset.to = s.label;
+      path.addEventListener("click", e => {
+        if (!confirm(`Remove dependency ${dep} → ${s.label}?`)) return;
+        // Remove dep from target's depends_on row
+        const targetRow = $$(".agent-row").find((r, i) =>
+          (r.querySelector(".label").value.trim() || `agent-${i + 1}`) === s.label);
+        if (targetRow) {
+          const dInp = targetRow.querySelector(".depends_on");
+          dInp.value = (dInp.value || "")
+            .split(",").map(x => x.trim()).filter(x => x && x !== dep)
+            .join(",");
+        }
+        renderVisualCanvas();
+      });
+      connsLayer.appendChild(path);
+    });
+  });
+
+  // Draw nodes (foreignObject so we get full HTML+CSS inside SVG)
+  spec.forEach(s => {
+    const pos = positions[s.label];
+    if (!pos) return;
+    const fo = document.createElementNS("http://www.w3.org/2000/svg", "foreignObject");
+    fo.setAttribute("x", pos.x);
+    fo.setAttribute("y", pos.y);
+    fo.setAttribute("width", VIS_NODE_W);
+    fo.setAttribute("height", VIS_NODE_H + 80);  // extra for edit panel
+    fo.dataset.label = s.label;
+    const node = document.createElement("div");
+    node.className = "vis-node";
+    node.dataset.label = s.label;
+    const meta = state.agents.find(a => a.id === s.agent);
+    node.innerHTML = `
+      <div class="vis-node-head">
+        <span class="vis-emoji">${familyEmoji(meta?.family)}</span>
+        <span class="vis-label">${escapeHtml(s.label || "(unnamed)")}</span>
+        <span class="vis-status">queued</span>
+        <button class="vis-close" title="Remove">×</button>
+      </div>
+      <div class="vis-node-model">${escapeHtml(meta?.label || s.agent)}</div>
+      <div class="vis-node-prompt">${escapeHtml((s.prompt || "").slice(0, 200))}</div>
+      <div class="vis-node-log"></div>
+      <div class="vis-node-edit">
+        <select class="vne-agent">${buildAgentSelectOptions()}</select>
+        <input type="text" class="vne-label" placeholder="label" />
+        <input type="text" class="vne-deps" placeholder="depends_on (comma)" />
+        <textarea class="vne-prompt" placeholder="prompt"></textarea>
+        <div class="row">
+          <button type="button" class="primary vne-save">Save</button>
+          <button type="button" class="ghost vne-cancel">Cancel</button>
+        </div>
+      </div>
+    `;
+    // Set form values from the live spec entry
+    node.querySelector(".vne-agent").value = s.agent;
+    node.querySelector(".vne-label").value = s.label;
+    node.querySelector(".vne-deps").value = (s.depends_on || []).join(",");
+    node.querySelector(".vne-prompt").value = s.prompt || "";
+
+    // Click body → toggle edit. Skip if drag started or button clicked.
+    node.addEventListener("click", e => {
+      if (node.dataset.dragged === "1") { node.dataset.dragged = "0"; return; }
+      if (e.target.closest("button, select, input, textarea")) return;
+      node.classList.toggle("editing");
+    });
+
+    // Edit panel buttons
+    node.querySelector(".vne-cancel").onclick = () => node.classList.remove("editing");
+    node.querySelector(".vne-save").onclick = () => {
+      const newLabel = node.querySelector(".vne-label").value.trim() || s.label;
+      const newAgent = node.querySelector(".vne-agent").value;
+      const newDeps = node.querySelector(".vne-deps").value.trim();
+      const newPrompt = node.querySelector(".vne-prompt").value;
+      // Find the matching classic row by label and patch it in place
+      const row = $$(".agent-row").find((r, i) =>
+        (r.querySelector(".label").value.trim() || `agent-${i + 1}`) === s.label);
+      if (row) {
+        row.querySelector(".agent-select").value = newAgent;
+        row.querySelector(".label").value = newLabel;
+        row.querySelector(".depends_on").value = newDeps;
+        row.querySelector(".prompt").value = newPrompt;
+        // re-fire applyBrowserMode if needed
+        if (typeof applyBrowserMode === "function") applyBrowserMode(row, { prompt: newPrompt });
+      }
+      // Carry position over if label was renamed
+      if (newLabel !== s.label && positions[s.label]) {
+        positions[newLabel] = positions[s.label];
+        delete positions[s.label];
+      }
+      renderVisualCanvas();
+    };
+
+    // Remove
+    node.querySelector(".vis-close").onclick = e => {
+      e.stopPropagation();
+      if (!confirm(`Remove node "${s.label}"?`)) return;
+      const row = $$(".agent-row").find((r, i) =>
+        (r.querySelector(".label").value.trim() || `agent-${i + 1}`) === s.label);
+      if (row) row.remove();
+      delete positions[s.label];
+      renderVisualCanvas();
+    };
+
+    // Drag — pointer-based (works for mouse + touch)
+    let dragState = null;
+    node.addEventListener("pointerdown", e => {
+      if (e.target.closest("button, select, input, textarea")) return;
+      if (node.classList.contains("editing")) return;
+      dragState = {
+        startX: e.clientX, startY: e.clientY,
+        origX: positions[s.label].x, origY: positions[s.label].y,
+        moved: false,
+      };
+      node.classList.add("dragging");
+      node.setPointerCapture(e.pointerId);
+    });
+    node.addEventListener("pointermove", e => {
+      if (!dragState) return;
+      const dx = e.clientX - dragState.startX;
+      const dy = e.clientY - dragState.startY;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.moved = true;
+      // Scale coordinates by canvas viewport
+      const svgRect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      const sx = vb.width / svgRect.width;
+      const sy = vb.height / svgRect.height;
+      positions[s.label] = {
+        x: Math.max(0, dragState.origX + dx * sx),
+        y: Math.max(0, dragState.origY + dy * sy),
+      };
+      fo.setAttribute("x", positions[s.label].x);
+      fo.setAttribute("y", positions[s.label].y);
+      // Redraw connections live
+      drawConnectionsOnly(svg, spec, positions);
+    });
+    node.addEventListener("pointerup", e => {
+      if (dragState && dragState.moved) node.dataset.dragged = "1";
+      dragState = null;
+      node.classList.remove("dragging");
+    });
+
+    fo.appendChild(node);
+    nodesLayer.appendChild(fo);
+  });
+}
+
+function drawConnectionsOnly(svg, spec, positions) {
+  const layer = svg.querySelector(".connections-layer");
+  layer.innerHTML = "";
+  spec.forEach(s => {
+    (s.depends_on || []).forEach(dep => {
+      const from = positions[dep], to = positions[s.label];
+      if (!from || !to) return;
+      const x1 = from.x + VIS_NODE_W;
+      const y1 = from.y + VIS_NODE_H / 2;
+      const x2 = to.x;
+      const y2 = to.y + VIS_NODE_H / 2;
+      const dx = Math.max(40, (x2 - x1) / 2);
+      const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+      path.setAttribute("d",
+        `M ${x1} ${y1} C ${x1 + dx} ${y1}, ${x2 - dx} ${y2}, ${x2} ${y2}`);
+      path.setAttribute("marker-end", "url(#arrowhead)");
+      path.dataset.from = dep;
+      path.dataset.to = s.label;
+      layer.appendChild(path);
+    });
+  });
+}
+
+function visualUpdateAgentStatus(label, status, lastLine) {
+  const node = document.querySelector(
+    `#visual-pane .vis-node[data-label="${CSS.escape(label)}"]`);
+  if (!node) return;
+  ["queued", "waiting", "running", "done", "failed", "cancelled"].forEach(s =>
+    node.classList.remove("status-" + s));
+  if (status) node.classList.add("status-" + status);
+  const badge = node.querySelector(".vis-status");
+  if (badge && status) badge.textContent = status;
+  if (lastLine) {
+    const log = node.querySelector(".vis-node-log");
+    if (log) log.textContent = lastLine.slice(0, 80);
+  }
+  // Pulse the connection FROM each completed dep TO this node when running
+  if (status === "running") {
+    document.querySelectorAll(
+      `.connections-layer path[data-to="${CSS.escape(label)}"]`
+    ).forEach(p => p.classList.add("flowing"));
+  }
+  if (status === "done" || status === "failed" || status === "cancelled") {
+    document.querySelectorAll(
+      `.connections-layer path[data-from="${CSS.escape(label)}"]`
+    ).forEach(p => p.classList.remove("flowing"));
+  }
+}
+
+function openNodePalette() {
+  const back = document.createElement("div");
+  back.className = "vis-palette-backdrop";
+  const palette = document.createElement("div");
+  palette.className = "vis-palette";
+  palette.innerHTML = `
+    <h3>Add a node</h3>
+    <div class="vis-palette-list"></div>
+    <div class="vis-palette-actions">
+      <button class="ghost vp-cancel">Cancel</button>
+    </div>
+  `;
+  const list = palette.querySelector(".vis-palette-list");
+  state.agents.forEach(a => {
+    const card = document.createElement("div");
+    card.className = "vis-palette-card";
+    card.innerHTML = `
+      <div class="name">${familyEmoji(a.family)} ${escapeHtml(a.label)}</div>
+      <div class="meta">${escapeHtml(a.summary || a.id)}</div>
+    `;
+    card.onclick = () => {
+      // Compute a default label based on existing count
+      const spec = readSpec();
+      const base = a.family || "agent";
+      let i = 1, label = base;
+      while (spec.find(s => s.label === label)) { i++; label = `${base}-${i}`; }
+      addAgentRow({ agent: a.id, label, prompt: "" });
+      back.remove();
+      renderVisualCanvas();
+    };
+    list.appendChild(card);
+  });
+  palette.querySelector(".vp-cancel").onclick = () => back.remove();
+  back.addEventListener("click", e => { if (e.target === back) back.remove(); });
+  back.appendChild(palette);
+  document.body.appendChild(back);
+}
+
+function applyViewMode(mode) {
+  setViewMode(mode);
+  document.querySelectorAll(".view-mode-toggle .vm-seg").forEach(b =>
+    b.classList.toggle("active", b.dataset.vm === mode));
+  $("#classic-pane").style.display = mode === "classic" ? "" : "none";
+  $("#visual-pane").style.display = mode === "visual" ? "flex" : "none";
+  if (mode === "visual") renderVisualCanvas();
+}
+
+function initVisualMode() {
+  document.querySelectorAll(".view-mode-toggle .vm-seg").forEach(b => {
+    b.addEventListener("click", () => applyViewMode(b.dataset.vm));
+  });
+  $("#visual-add-node")?.addEventListener("click", openNodePalette);
+  $("#visual-auto-layout")?.addEventListener("click", () => {
+    window.__visPositions = {};  // forget saved
+    renderVisualCanvas();
+  });
+  applyViewMode(getViewMode());
 }
 
 // ---------- saved workflows in localStorage ----------
@@ -941,6 +1312,10 @@ function buildPanel(agent) {
 }
 
 function handleStatus(d) {
+  // v16 — also paint the visual canvas node
+  if (typeof visualUpdateAgentStatus === "function") {
+    visualUpdateAgentStatus(d.label, d.status);
+  }
   const p = state.panels[d.label];
   if (!p) return;
   p.statusBadge.textContent = d.status;
@@ -958,6 +1333,10 @@ function handleSnapshot(d) {
 }
 
 function handleLog(d) {
+  // v16 — surface the latest line in the visual canvas node
+  if (typeof visualUpdateAgentStatus === "function") {
+    visualUpdateAgentStatus(d.label, null, d.line);
+  }
   const p = state.panels[d.label];
   if (!p) return;
   // Append to the canonical raw buffer
