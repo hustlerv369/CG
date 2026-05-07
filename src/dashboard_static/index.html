@@ -96,7 +96,12 @@
         <div class="visual-toolbar">
           <button class="ghost" id="visual-add-node" title="Add a node">+ node</button>
           <button class="ghost" id="visual-auto-layout" title="Re-layout all nodes">⚡ auto-layout</button>
-          <span class="visual-hint">drag node to move · click to edit · click connection to remove</span>
+          <button class="ghost" id="visual-zoom-out" title="Zoom out (or Ctrl+wheel)">−</button>
+          <button class="ghost" id="visual-zoom-reset" title="Reset zoom (or press 0)">100%</button>
+          <button class="ghost" id="visual-zoom-in" title="Zoom in (or Ctrl+wheel)">+</button>
+          <button class="ghost" id="visual-fit" title="Fit graph to viewport">⤧ fit</button>
+          <button class="ghost" id="visual-fullscreen" title="Toggle fullscreen canvas (F)">⛶</button>
+          <span class="visual-hint">drag node · drag canvas to pan · Ctrl+wheel zoom · 0 reset · F fullscreen</span>
         </div>
         <div class="visual-canvas-wrap" id="visual-canvas-wrap">
           <svg id="visual-canvas" class="visual-canvas">
@@ -106,12 +111,15 @@
                 <polygon points="0 0, 10 3.5, 0 7" fill="currentColor" />
               </marker>
             </defs>
-            <g class="connections-layer"></g>
-            <g class="nodes-layer"></g>
+            <g class="zoom-group">
+              <g class="connections-layer"></g>
+              <g class="nodes-layer"></g>
+            </g>
           </svg>
           <div class="visual-empty" id="visual-empty">
             Empty — click <strong>+ node</strong> to add an agent.
           </div>
+          <div class="zoom-readout" id="zoom-readout">100%</div>
         </div>
       </div>
 

@@ -448,18 +448,15 @@ function renderVisualCanvas() {
       const dx = e.clientX - dragState.startX;
       const dy = e.clientY - dragState.startY;
       if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.moved = true;
-      // Scale coordinates by canvas viewport
-      const svgRect = svg.getBoundingClientRect();
-      const vb = svg.viewBox.baseVal;
-      const sx = vb.width / svgRect.width;
-      const sy = vb.height / svgRect.height;
+      // Account for current zoom: 1 px on screen = 1/zoom in canvas
+      // coords (the .zoom-group transform handles the scaling).
+      const z = (window.__visView && window.__visView.zoom) || 1;
       positions[s.label] = {
-        x: Math.max(0, dragState.origX + dx * sx),
-        y: Math.max(0, dragState.origY + dy * sy),
+        x: Math.max(0, dragState.origX + dx / z),
+        y: Math.max(0, dragState.origY + dy / z),
       };
       fo.setAttribute("x", positions[s.label].x);
       fo.setAttribute("y", positions[s.label].y);
-      // Redraw connections live
       drawConnectionsOnly(svg, spec, positions);
     });
     node.addEventListener("pointerup", e => {
@@ -471,6 +468,10 @@ function renderVisualCanvas() {
     fo.appendChild(node);
     nodesLayer.appendChild(fo);
   });
+
+  // Re-apply current zoom/pan transform — we replaced layer children
+  // but the .zoom-group itself survives renderVisualCanvas calls.
+  if (typeof applyVisView === "function") applyVisView();
 }
 
 function drawConnectionsOnly(svg, spec, positions) {
@@ -573,16 +574,139 @@ function applyViewMode(mode) {
   if (mode === "visual") renderVisualCanvas();
 }
 
+// ---------- Visual canvas zoom + pan + fullscreen ----------
+window.__visView = window.__visView || { zoom: 1, panX: 0, panY: 0 };
+
+function applyVisView() {
+  const g = document.querySelector("#visual-canvas .zoom-group");
+  if (!g) return;
+  const { zoom, panX, panY } = window.__visView;
+  g.setAttribute("transform",
+    `translate(${panX} ${panY}) scale(${zoom})`);
+  const readout = document.getElementById("zoom-readout");
+  const resetBtn = document.getElementById("visual-zoom-reset");
+  const pct = Math.round(zoom * 100) + "%";
+  if (readout) readout.textContent = pct;
+  if (resetBtn) resetBtn.textContent = pct;
+}
+
+function setVisZoom(nextZoom, anchorX, anchorY) {
+  const wrap = document.getElementById("visual-canvas-wrap");
+  if (!wrap) return;
+  const v = window.__visView;
+  const z = Math.max(0.2, Math.min(3, nextZoom));
+  if (anchorX !== undefined && anchorY !== undefined) {
+    const rect = wrap.getBoundingClientRect();
+    const px = anchorX - rect.left;
+    const py = anchorY - rect.top;
+    v.panX = px - (px - v.panX) * (z / v.zoom);
+    v.panY = py - (py - v.panY) * (z / v.zoom);
+  }
+  v.zoom = z;
+  applyVisView();
+}
+
+function fitVisToViewport() {
+  const wrap = document.getElementById("visual-canvas-wrap");
+  const svg = document.getElementById("visual-canvas");
+  if (!wrap || !svg) return;
+  const nodes = svg.querySelectorAll(".nodes-layer foreignObject");
+  if (!nodes.length) return;
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  nodes.forEach(fo => {
+    const x = +fo.getAttribute("x"), y = +fo.getAttribute("y");
+    const w = +fo.getAttribute("width"), h = +fo.getAttribute("height");
+    minX = Math.min(minX, x); minY = Math.min(minY, y);
+    maxX = Math.max(maxX, x + w); maxY = Math.max(maxY, y + h);
+  });
+  const margin = 40;
+  const cw = wrap.clientWidth - margin * 2;
+  const ch = wrap.clientHeight - margin * 2;
+  const gw = maxX - minX, gh = maxY - minY;
+  if (gw <= 0 || gh <= 0) return;
+  const z = Math.min(cw / gw, ch / gh, 2);
+  window.__visView = {
+    zoom: z,
+    panX: margin - minX * z + (cw - gw * z) / 2,
+    panY: margin - minY * z + (ch - gh * z) / 2,
+  };
+  applyVisView();
+}
+
 function initVisualMode() {
   document.querySelectorAll(".view-mode-toggle .vm-seg").forEach(b => {
     b.addEventListener("click", () => applyViewMode(b.dataset.vm));
   });
   $("#visual-add-node")?.addEventListener("click", openNodePalette);
   $("#visual-auto-layout")?.addEventListener("click", () => {
-    window.__visPositions = {};  // forget saved
+    window.__visPositions = {};
     renderVisualCanvas();
   });
+
+  $("#visual-zoom-in")?.addEventListener("click", () =>
+    setVisZoom(window.__visView.zoom * 1.2));
+  $("#visual-zoom-out")?.addEventListener("click", () =>
+    setVisZoom(window.__visView.zoom / 1.2));
+  $("#visual-zoom-reset")?.addEventListener("click", () => {
+    window.__visView = { zoom: 1, panX: 0, panY: 0 };
+    applyVisView();
+  });
+  $("#visual-fit")?.addEventListener("click", fitVisToViewport);
+  $("#visual-fullscreen")?.addEventListener("click", () => {
+    document.body.classList.toggle("visual-fullscreen");
+    setTimeout(fitVisToViewport, 200);
+  });
+
+  // Ctrl+wheel = zoom around cursor; drag bg = pan
+  const wrap = document.getElementById("visual-canvas-wrap");
+  if (wrap) {
+    wrap.addEventListener("wheel", (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      const delta = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+      setVisZoom(window.__visView.zoom * delta, e.clientX, e.clientY);
+    }, { passive: false });
+
+    let panState = null;
+    wrap.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".vis-node, button, input, select, textarea")) return;
+      panState = {
+        startX: e.clientX, startY: e.clientY,
+        origPanX: window.__visView.panX, origPanY: window.__visView.panY,
+      };
+      wrap.classList.add("panning");
+      wrap.setPointerCapture(e.pointerId);
+    });
+    wrap.addEventListener("pointermove", (e) => {
+      if (!panState) return;
+      window.__visView.panX = panState.origPanX + (e.clientX - panState.startX);
+      window.__visView.panY = panState.origPanY + (e.clientY - panState.startY);
+      applyVisView();
+    });
+    wrap.addEventListener("pointerup", () => {
+      panState = null;
+      wrap.classList.remove("panning");
+    });
+  }
+
+  document.addEventListener("keydown", (e) => {
+    if (!document.body.classList.contains("visual-mode-active")) return;
+    if (e.target.matches("input, textarea, select, [contenteditable]")) return;
+    if (e.key === "0") {
+      window.__visView = { zoom: 1, panX: 0, panY: 0 };
+      applyVisView(); e.preventDefault();
+    } else if (e.key === "f" || e.key === "F") {
+      document.body.classList.toggle("visual-fullscreen");
+      setTimeout(fitVisToViewport, 200); e.preventDefault();
+    } else if (e.key === "+" || e.key === "=") {
+      setVisZoom(window.__visView.zoom * 1.2); e.preventDefault();
+    } else if (e.key === "-" || e.key === "_") {
+      setVisZoom(window.__visView.zoom / 1.2); e.preventDefault();
+    }
+  });
+
   applyViewMode(getViewMode());
+  applyVisView();
 }
 
 // ---------- saved workflows in localStorage ----------

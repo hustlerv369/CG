@@ -993,6 +993,31 @@ main.settings-pane {
   font-size: 12px;
   pointer-events: none;
 }
+.zoom-readout {
+  position: absolute; right: 12px; bottom: 12px;
+  background: rgba(20, 20, 24, 0.85);
+  color: var(--fg-secondary);
+  padding: 4px 9px;
+  font-size: 10.5px;
+  font-family: var(--font-mono);
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  pointer-events: none;
+  user-select: none;
+}
+.visual-canvas-wrap { cursor: grab; }
+.visual-canvas-wrap.panning { cursor: grabbing; }
+.visual-canvas-wrap .vis-node.dragging { cursor: grabbing; }
+body.visual-fullscreen #visual-pane {
+  position: fixed; inset: 0; z-index: 9999;
+  background: var(--bg);
+  padding: 16px;
+  display: flex; flex-direction: column;
+}
+body.visual-fullscreen .visual-canvas-wrap {
+  flex: 1;
+  height: auto !important;
+}
 .connections-layer path {
   fill: none;
   stroke: rgba(167, 139, 250, 0.55);

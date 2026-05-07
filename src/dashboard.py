@@ -2027,9 +2027,14 @@ class RunManager:
             {
                 "id": r.id, "title": r.title, "created": r.created,
                 "finished": r.finished,
+                "spec": r.spec,  # full spec — needed to rehydrate after restart
                 "agents": [
-                    {"label": a.label, "agent": a.agent, "status": a.status,
-                     "exit_code": a.exit_code}
+                    {"label": a.label, "agent": a.agent,
+                     "depends_on": a.depends_on,
+                     "status": a.status, "exit_code": a.exit_code,
+                     "started": a.started, "finished": a.finished,
+                     "log_chars": sum(len(l) for l in a.log_lines),
+                     "streaming": a.streaming}
                     for a in r.agents.values()
                 ],
             }
@@ -2043,6 +2048,67 @@ class RunManager:
             )
         except Exception:
             pass
+
+    def hydrate_from_disk(self) -> int:
+        """Reload finished runs from INDEX_PATH on startup so the
+        dashboard's history survives a restart. Best-effort — broken
+        entries are skipped, never raised. Returns hydrated count."""
+        if not INDEX_PATH.exists():
+            return 0
+        try:
+            data = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return 0
+        if not isinstance(data, list):
+            return 0
+        loaded = 0
+        for entry in data:
+            try:
+                if not isinstance(entry, dict):
+                    continue
+                rid = entry.get("id")
+                if not rid or rid in self.runs:
+                    continue
+                run = RunState(
+                    id=rid,
+                    title=entry.get("title") or rid,
+                    created=float(entry.get("created") or time.time()),
+                    spec=entry.get("spec") or [],
+                )
+                run.finished = bool(entry.get("finished"))
+                for a in entry.get("agents") or []:
+                    label = a.get("label") or "agent"
+                    agent_state = AgentRunState(
+                        label=label,
+                        agent=a.get("agent") or "claude-sonnet-4-6",
+                        depends_on=list(a.get("depends_on") or []),
+                        status=a.get("status") or "done",
+                        started=a.get("started"),
+                        finished=a.get("finished"),
+                        exit_code=a.get("exit_code"),
+                        streaming=bool(a.get("streaming", False)),
+                    )
+                    # Refill log_lines from on-disk capture file
+                    out_path = RUNS_DIR / rid / f"{label}.out.md"
+                    if out_path.exists():
+                        try:
+                            agent_state.log_lines = out_path.read_text(
+                                encoding="utf-8").splitlines()
+                        except Exception:
+                            pass
+                    err_path = RUNS_DIR / rid / f"{label}.err.md"
+                    if err_path.exists():
+                        try:
+                            agent_state.stderr_lines = err_path.read_text(
+                                encoding="utf-8").splitlines()
+                        except Exception:
+                            pass
+                    run.agents[label] = agent_state
+                self.runs[rid] = run
+                loaded += 1
+            except Exception:
+                continue
+        return loaded
 
 
 # ---------------------------------------------------------------------------
@@ -3328,6 +3394,11 @@ def create_app() -> FastAPI:
     from contextlib import asynccontextmanager
 
     manager = RunManager()
+    # Reload finished runs from on-disk index so dashboard history
+    # survives a restart. Best-effort.
+    hydrated = manager.hydrate_from_disk()
+    if hydrated:
+        print(f"[CG] Hydrated {hydrated} run(s) from disk")
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):

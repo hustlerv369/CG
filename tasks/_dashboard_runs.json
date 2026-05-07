@@ -1,21 +1,28 @@
 [
   {
-    "id": "a6779bbf90b8",
-    "title": "stream-flag",
-    "created": 1778182886.7837598,
+    "id": "33f8386aad0a",
+    "title": "stream-out",
+    "created": 1778183936.2166636,
     "finished": true,
+    "spec": [
+      {
+        "agent": "claude-sonnet-4-6",
+        "label": "c",
+        "prompt": "x",
+        "streaming": true
+      }
+    ],
     "agents": [
       {
-        "label": "a",
+        "label": "c",
         "agent": "claude-sonnet-4-6",
+        "depends_on": [],
         "status": "done",
-        "exit_code": 0
-      },
-      {
-        "label": "b",
-        "agent": "gemini-pro",
-        "status": "done",
-        "exit_code": 0
+        "exit_code": 0,
+        "started": 1778183936.2176874,
+        "finished": 1778183936.281066,
+        "log_chars": 11,
+        "streaming": true
       }
     ]
   }
