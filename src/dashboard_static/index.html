@@ -111,9 +111,13 @@
       </div>
 
       <div class="view-mode-toggle" id="view-mode-toggle"
-           title="Switch between linear (Classic) and node-graph (Visual) editor">
-        <button class="vm-seg active" data-vm="classic">📋 Classic</button>
-        <button class="vm-seg" data-vm="visual">🌐 Visual</button>
+           title="Editor mode — Terminal (linear rows, CMUX-style) ↔ Visual (n8n graph)">
+        <button class="vm-seg active" data-vm="classic">
+          <span class="vm-seg-icon">⌨</span><span class="vm-seg-label">Terminal</span>
+        </button>
+        <button class="vm-seg" data-vm="visual">
+          <span class="vm-seg-icon">◇</span><span class="vm-seg-label">Visual</span>
+        </button>
       </div>
 
       <div id="classic-pane">

@@ -1243,34 +1243,46 @@ main.settings-pane {
 
 /* v16 — view-mode toggle (Classic / Visual) */
 .view-mode-toggle {
-  display: inline-flex; gap: 0;
-  padding: 2px;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
   background: var(--bg-input);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  margin-bottom: 14px;
+  border-radius: var(--radius);
+  margin-bottom: var(--space-4);
 }
 .view-mode-toggle .vm-seg {
-  padding: 5px 12px;
-  font-size: 11.5px;
-  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 14px;
+  font: 500 var(--fs-sm)/1 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
   background: transparent;
   color: var(--fg-secondary);
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all var(--transition);
 }
 .view-mode-toggle .vm-seg:hover {
   color: var(--fg);
+  background: var(--bg-hover);
 }
 .view-mode-toggle .vm-seg.active {
-  background: var(--accent);
+  background: var(--accent-gradient);
   color: var(--bg-base);
   font-weight: 600;
   box-shadow: 0 0 0 1px var(--accent-strong),
-              0 0 18px rgba(255, 122, 89, 0.28);
+              0 4px 18px rgba(255, 122, 89, 0.34);
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.2);
 }
+.vm-seg-icon {
+  font: 700 14px/1 var(--font-mono);
+  width: 16px;
+  text-align: center;
+}
+.vm-seg-label { letter-spacing: 0.02em; }
 
 /* v16 — visual node-graph editor */
 .visual-pane {
@@ -2390,6 +2402,52 @@ select optgroup {
 .agent-panel-log::-webkit-scrollbar-thumb:hover {
   background: var(--accent-strong);
 }
+
+/* ============================================================
+ * v26 — ANSI palette (raw mode terminal feel)
+ * Cohesive 8-color palette tuned for warm-black background.
+ * ============================================================ */
+.agent-panel-log.ansi-rendered {
+  font-variant-ligatures: none;
+}
+.ansi-bold      { font-weight: 700; }
+.ansi-underline { text-decoration: underline; text-underline-offset: 2px; }
+.ansi-dim       { opacity: 0.62; }
+
+.ansi-black     { color: #4a4642; }
+.ansi-red       { color: #FF6B5C; }
+.ansi-green     { color: #5DD68C; }
+.ansi-yellow    { color: #FFC857; }
+.ansi-blue      { color: #6FA8FF; }
+.ansi-magenta   { color: #E08CFF; }
+.ansi-cyan      { color: #5BE3D8; }
+.ansi-white     { color: #f5ebe0; }
+
+.ansi-br-black   { color: #6e6864; }
+.ansi-br-red     { color: #FF7A59; }   /* Hustler coral — accent in errors */
+.ansi-br-green   { color: #7FE8A4; }
+.ansi-br-yellow  { color: #FFD680; }
+.ansi-br-blue    { color: #8FBFFF; }
+.ansi-br-magenta { color: #F0A8FF; }
+.ansi-br-cyan    { color: #80EFE6; }
+.ansi-br-white   { color: #FFFFFF; }
+
+.ansi-bg-black   { background: rgba(74, 70, 66, 0.4); }
+.ansi-bg-red     { background: rgba(255, 107, 92, 0.22); }
+.ansi-bg-green   { background: rgba(93, 214, 140, 0.18); }
+.ansi-bg-yellow  { background: rgba(255, 200, 87, 0.18); }
+.ansi-bg-blue    { background: rgba(111, 168, 255, 0.18); }
+.ansi-bg-magenta { background: rgba(224, 140, 255, 0.18); }
+.ansi-bg-cyan    { background: rgba(91, 227, 216, 0.18); }
+.ansi-bg-white   { background: rgba(245, 235, 224, 0.14); }
+.ansi-bg-br-red     { background: rgba(255, 122, 89, 0.24); }
+.ansi-bg-br-green   { background: rgba(127, 232, 164, 0.20); }
+.ansi-bg-br-yellow  { background: rgba(255, 214, 128, 0.20); }
+.ansi-bg-br-blue    { background: rgba(143, 191, 255, 0.20); }
+.ansi-bg-br-magenta { background: rgba(240, 168, 255, 0.20); }
+.ansi-bg-br-cyan    { background: rgba(128, 239, 230, 0.20); }
+.ansi-bg-br-white   { background: rgba(255, 255, 255, 0.12); }
+.ansi-bg-br-black   { background: rgba(110, 104, 100, 0.40); }
 
 /* ============================================================
  * v25 — Inspector rail (right column, contextual to selection)

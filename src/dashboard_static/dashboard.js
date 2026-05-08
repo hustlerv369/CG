@@ -1699,7 +1699,15 @@ function rerenderPanel(p) {
     p.log.appendChild(renderArtifactPreview(text));
   } else {
     p.log.classList.remove("md-rendered", "diff-rendered", "preview-rendered");
-    p.log.textContent = text;
+    // v26 — ANSI escape parsing in raw mode for true terminal feel
+    const html = ansiToHtml(text);
+    if (html.hasAnsi) {
+      p.log.classList.add("ansi-rendered");
+      p.log.innerHTML = html.html;
+    } else {
+      p.log.classList.remove("ansi-rendered");
+      p.log.textContent = text;
+    }
   }
   if (stickToBottom) p.log.scrollTop = p.log.scrollHeight;
 }
@@ -3581,6 +3589,105 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/* ============================================================
+ * v26 — ANSI escape sequence parser (raw mode → colored HTML)
+ * Supports SGR (\x1b[...m) for 8 colors + bright + bold + underline +
+ * 256-color fg/bg + reset. Strips other CSI sequences (cursor moves
+ * etc.) so they don't render as garbage.
+ * ============================================================ */
+const ANSI_BASE_FG = {
+  30: "ansi-black",   31: "ansi-red",    32: "ansi-green",  33: "ansi-yellow",
+  34: "ansi-blue",    35: "ansi-magenta",36: "ansi-cyan",   37: "ansi-white",
+  90: "ansi-br-black",91: "ansi-br-red", 92: "ansi-br-green",93: "ansi-br-yellow",
+  94: "ansi-br-blue", 95: "ansi-br-magenta",96: "ansi-br-cyan",97: "ansi-br-white",
+};
+const ANSI_BASE_BG = {
+  40: "ansi-bg-black",   41: "ansi-bg-red",    42: "ansi-bg-green",
+  43: "ansi-bg-yellow",  44: "ansi-bg-blue",   45: "ansi-bg-magenta",
+  46: "ansi-bg-cyan",    47: "ansi-bg-white",
+  100:"ansi-bg-br-black",101:"ansi-bg-br-red", 102:"ansi-bg-br-green",
+  103:"ansi-bg-br-yellow",104:"ansi-bg-br-blue",105:"ansi-bg-br-magenta",
+  106:"ansi-bg-br-cyan", 107:"ansi-bg-br-white",
+};
+
+function ansiToHtml(input) {
+  if (!input) return { html: "", hasAnsi: false };
+  // Quick reject: no escape char
+  if (input.indexOf("\x1b") === -1) return { html: "", hasAnsi: false };
+
+  let out = "";
+  let openSpans = 0;
+  let cur = { fg: null, bg: null, bold: false, underline: false, dim: false };
+  let hasAnsi = false;
+
+  const closeAll = () => {
+    while (openSpans > 0) { out += "</span>"; openSpans--; }
+  };
+  const openCurrent = () => {
+    const cls = [];
+    if (cur.fg) cls.push(cur.fg);
+    if (cur.bg) cls.push(cur.bg);
+    if (cur.bold) cls.push("ansi-bold");
+    if (cur.underline) cls.push("ansi-underline");
+    if (cur.dim) cls.push("ansi-dim");
+    if (cls.length === 0) return;
+    out += `<span class="${cls.join(" ")}">`;
+    openSpans++;
+  };
+
+  // Match: ESC[..m for SGR; or ESC[..<other-letter> to strip
+  const re = /\x1b\[([0-9;]*)([A-Za-z])/g;
+  let last = 0;
+  let m;
+  while ((m = re.exec(input)) !== null) {
+    // Append plain text before this escape
+    out += escapeHtml(input.slice(last, m.index));
+    last = re.lastIndex;
+    hasAnsi = true;
+    const params = m[1];
+    const final = m[2];
+    if (final !== "m") continue; // strip non-SGR sequences
+
+    closeAll();
+    const codes = params.length === 0 ? [0] : params.split(";").map(Number);
+    for (let i = 0; i < codes.length; i++) {
+      const c = codes[i];
+      if (c === 0) {
+        cur = { fg: null, bg: null, bold: false, underline: false, dim: false };
+      } else if (c === 1) cur.bold = true;
+      else if (c === 2) cur.dim = true;
+      else if (c === 4) cur.underline = true;
+      else if (c === 22) { cur.bold = false; cur.dim = false; }
+      else if (c === 24) cur.underline = false;
+      else if (c === 39) cur.fg = null;
+      else if (c === 49) cur.bg = null;
+      else if (ANSI_BASE_FG[c]) cur.fg = ANSI_BASE_FG[c];
+      else if (ANSI_BASE_BG[c]) cur.bg = ANSI_BASE_BG[c];
+      else if (c === 38 && codes[i + 1] === 5 && codes[i + 2] != null) {
+        // 256-color FG: ESC[38;5;Nm
+        cur.fg = `ansi-256-fg-${codes[i + 2]}`;
+        i += 2;
+      } else if (c === 48 && codes[i + 1] === 5 && codes[i + 2] != null) {
+        cur.bg = `ansi-256-bg-${codes[i + 2]}`;
+        i += 2;
+      }
+      // 38;2;R;G;B and 48;2;R;G;B (true color) — fall back to inline style
+      else if (c === 38 && codes[i + 1] === 2 && codes[i + 4] != null) {
+        cur.fg = `style:color:rgb(${codes[i+2]},${codes[i+3]},${codes[i+4]})`;
+        i += 4;
+      } else if (c === 48 && codes[i + 1] === 2 && codes[i + 4] != null) {
+        cur.bg = `style:bg:rgb(${codes[i+2]},${codes[i+3]},${codes[i+4]})`;
+        i += 4;
+      }
+    }
+    openCurrent();
+  }
+  // Trailing tail
+  out += escapeHtml(input.slice(last));
+  closeAll();
+  return { html: out, hasAnsi };
 }
 
 /* v21 — compact integer formatter (1234 → 1.2k, 1234567 → 1.2M) */
