@@ -2673,6 +2673,467 @@ PRESETS: list[dict[str, Any]] = [
             },
         ],
     },
+    # ============================================================
+    # v38 — Real-world workflow presets (Hustler practical pack)
+    # Each one ships with sensible default ${VARS} you edit once in
+    # Settings → Variables. Together they target the highest-volume
+    # automations: content, design, research, code, comms, ops.
+    # ============================================================
+    {
+        "id": "blog-article-full",
+        "title": "📝 Blog article pipeline (research → outline → draft → SEO polish)",
+        "description": "End-to-end blog post: web research → structured outline → "
+                       "long-form draft → SEO-polished final. Set ${TOPIC}, ${TONE}, "
+                       "${WORD_COUNT} once in Settings → Variables. Critique catches "
+                       "weak claims and suggests internal-link anchors.",
+        "variables": {
+            "TOPIC": "Why open-source multi-agent orchestrators are eating Zapier",
+            "TONE": "expert but readable — confident, no fluff, no AI clichés",
+            "WORD_COUNT": "1400",
+        },
+        "spec": [
+            {
+                "agent": "gemini-pro", "label": "research",
+                "prompt": "You are a research analyst. For the topic below, return a "
+                          "Markdown brief with: 5-7 fact-checked talking points (each "
+                          "with a credible source URL or a 'verify:' note if uncertain), "
+                          "3 contrarian angles, 2 data points worth quoting, and 5 "
+                          "long-tail keywords search-engines will reward. Output "
+                          "Markdown only.\n\n## Topic\n${TOPIC}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "outline",
+                "depends_on": ["research"],
+                "prompt": "Write a tight outline for a ${WORD_COUNT}-word blog post on "
+                          "'${TOPIC}'. Structure: H1, 4-6 H2 sections, hook, "
+                          "objection-handling, CTA. Pull from the research brief. "
+                          "Output Markdown only.\n\n## Research brief\n{{research}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "draft",
+                "depends_on": ["outline", "research"],
+                "prompt": "Write the full blog post following the outline. Tone: ${TONE}. "
+                          "Target ${WORD_COUNT} words. Use concrete examples from the "
+                          "research brief. Add a punchy intro hook (≤2 sentences) and "
+                          "a CTA at the end. No headings beyond H2/H3. No 'in this "
+                          "post we will' filler. Output Markdown only.\n\n"
+                          "## Outline\n{{outline}}\n\n## Research\n{{research}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "seo-polish",
+                "depends_on": ["draft"],
+                "prompt": "Polish this draft for SEO + readability. Tasks: tighten "
+                          "intro to 2 sentences, add 1 internal-link anchor placeholder "
+                          "[INT: ...] per H2, replace passive voice, add meta title "
+                          "(≤60 chars) + meta description (≤155 chars) at the top, "
+                          "spell-check, and remove any AI cliché phrases. Output the "
+                          "final polished post.\n\n{{draft}}",
+            },
+        ],
+    },
+    {
+        "id": "social-content-fanout",
+        "title": "📱 Social content fan-out (1 article → 5 platform posts)",
+        "description": "Take one long-form piece and produce 5 platform-tuned posts: "
+                       "X thread, LinkedIn, Instagram caption, TikTok hook, "
+                       "Facebook. Each agent runs in parallel. Paste your source "
+                       "into ${SOURCE} or use {{file:path/to/article.md}}.",
+        "variables": {
+            "SOURCE": "[Paste your article / blog / talk transcript here, or replace "
+                      "with {{file:notes/post-2026-05-08.md}} to pull from disk.]",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "x-thread",
+                "prompt": "Convert the source into an X (Twitter) thread of 6-9 posts. "
+                          "Hook in post 1 (≤200 chars). Each post ≤280 chars. End "
+                          "with a clear CTA. No emojis unless the source already had "
+                          "them. Output as numbered list 1/ 2/ etc.\n\n## Source\n${SOURCE}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "linkedin",
+                "prompt": "Write a LinkedIn post (1500-2200 chars) from the source. "
+                          "Hook ≤2 lines. Use line breaks generously. End with one "
+                          "thoughtful question to drive comments. No hashtags in body — "
+                          "list 5 relevant hashtags below.\n\n## Source\n${SOURCE}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "instagram",
+                "prompt": "Write an Instagram caption (≤2200 chars but aim for 800-1400). "
+                          "Hook ≤125 chars (preview-safe). Bullet-style for scanability. "
+                          "End with a soft CTA + 12-20 niche hashtags grouped at the "
+                          "bottom.\n\n## Source\n${SOURCE}",
+            },
+            {
+                "agent": "gemini-flash", "label": "tiktok-hook",
+                "prompt": "Pull 3 TikTok script hooks from the source. Each hook ≤8 "
+                          "seconds spoken (≈25 words). Format: \"HOOK: ... \" — make "
+                          "them stop-the-scroll worthy. Output as a numbered list.\n\n"
+                          "## Source\n${SOURCE}",
+            },
+            {
+                "agent": "gemini-flash", "label": "facebook",
+                "prompt": "Write a Facebook post (400-700 chars) from the source. "
+                          "Conversational tone. End with an open-ended question. "
+                          "No hashtags.\n\n## Source\n${SOURCE}",
+            },
+        ],
+    },
+    {
+        "id": "design-brief-to-concepts",
+        "title": "🎨 Design brief → 3 directions → critique",
+        "description": "Turn a brief into 3 distinct design directions (mood, palette, "
+                       "type stack, key components), then critique against the brief. "
+                       "Pair with Stitch MCP to render screens for each direction, "
+                       "or with Open Design MCP for a full prototype.",
+        "variables": {
+            "BRIEF": "Landing page for an indie developer-tool SaaS. Audience: senior "
+                     "engineers. Vibe: confident, terminal-adjacent, premium. Must "
+                     "feel different from Linear and Vercel.",
+            "BRAND_COLORS": "(optional) coral #FF7A59, amber #FFB87A, cream #F5E6D3",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "direction-a",
+                "prompt": "You are a senior brand designer. Given the brief, propose "
+                          "Direction A. Output Markdown sections: Concept (2 sentences), "
+                          "Mood (5 adjectives), Palette (4-6 hex codes with names + "
+                          "rationale; respect ${BRAND_COLORS} if provided), Type stack "
+                          "(display + body + mono), Key components (10 bullet points "
+                          "with one-line spec each), Hero copy (headline + sub).\n\n"
+                          "## Brief\n${BRIEF}\n\n## Brand colors\n${BRAND_COLORS}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "direction-b",
+                "prompt": "Same brief as direction A. Propose a DIFFERENT direction B "
+                          "(distinct mood + palette + type). Same Markdown structure. "
+                          "Avoid duplicating direction A's choices.\n\n## Brief\n${BRIEF}\n\n"
+                          "## Brand colors\n${BRAND_COLORS}",
+            },
+            {
+                "agent": "gemini-pro", "label": "direction-c",
+                "prompt": "Same brief as A and B. Propose direction C — go bolder, "
+                          "more contrarian. Different mood + palette + type. Same "
+                          "Markdown structure.\n\n## Brief\n${BRIEF}\n\n"
+                          "## Brand colors\n${BRAND_COLORS}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "critique",
+                "depends_on": ["direction-a", "direction-b", "direction-c"],
+                "prompt": "Compare the 3 directions against the brief. Score each "
+                          "0-10 on: Brief fit, Differentiation, Memorability, "
+                          "Implementation cost. End with 'Recommendation: …' (one "
+                          "paragraph). Be terse.\n\n## Brief\n${BRIEF}\n\n"
+                          "## A\n{{direction-a}}\n\n## B\n{{direction-b}}\n\n"
+                          "## C\n{{direction-c}}",
+            },
+        ],
+    },
+    {
+        "id": "translate-cz-en",
+        "title": "🌍 Translate CZ ↔ EN (draft → review → polish)",
+        "description": "Two-pass translation with a different model on the second "
+                       "pass for catch-anything-missed. Set ${SRC_LANG}, ${DST_LANG}, "
+                       "${REGISTER}.",
+        "variables": {
+            "SRC_LANG": "Czech",
+            "DST_LANG": "English",
+            "REGISTER": "professional but warm — like a fluent native, not a robot",
+            "SOURCE": "[Paste source text here, or use {{file:notes/text-cz.md}}.]",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "draft",
+                "prompt": "Translate from ${SRC_LANG} to ${DST_LANG}. Register: "
+                          "${REGISTER}. Preserve formatting (Markdown, code, lists, "
+                          "links). Don't translate code identifiers or quoted brand "
+                          "names. Don't add commentary. Output ONLY the translation.\n\n"
+                          "## Source\n${SOURCE}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "review",
+                "depends_on": ["draft"],
+                "prompt": "Review this ${DST_LANG} translation. Find: literal/awkward "
+                          "phrasing, missing nuance, wrong register, lost cultural "
+                          "context. Output a Markdown bullet list of fixes (≤8 "
+                          "bullets) with the specific phrase quoted. If perfect, "
+                          "say so.\n\n## Source (${SRC_LANG})\n${SOURCE}\n\n"
+                          "## Draft (${DST_LANG})\n{{draft}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "final",
+                "depends_on": ["draft", "review"],
+                "prompt": "Apply the reviewer's fixes to the draft. Output ONLY the "
+                          "final ${DST_LANG} text, no commentary, preserve original "
+                          "formatting.\n\n## Draft\n{{draft}}\n\n## Reviewer fixes\n{{review}}",
+            },
+        ],
+    },
+    {
+        "id": "email-drip-5",
+        "title": "✉️ Email drip sequence (5-email value series)",
+        "description": "Generate a 5-email nurture sequence. Each email lands a "
+                       "different angle: welcome, problem, story, proof, CTA. Set "
+                       "${PRODUCT}, ${PERSONA}, ${OUTCOME}.",
+        "variables": {
+            "PRODUCT": "CG — multi-agent orchestrator that runs Claude + Gemini in "
+                       "parallel on subscription plans (no API keys)",
+            "PERSONA": "Senior engineer at a 10-50 person startup who's already paying "
+                       "for Claude Pro and Gemini Advanced and feels Zapier/Make are "
+                       "too consumer-focused",
+            "OUTCOME": "Replace 70% of their Make.com subscription cost with a self-hosted "
+                       "agent pipeline they own end-to-end",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "email-1-welcome",
+                "prompt": "Write email 1 of 5: WELCOME. Subject + preheader + body "
+                          "(120-180 words). Tone: warm, no fluff. Set the stage. "
+                          "Promise the next 4 emails. Single CTA: reply with their "
+                          "biggest pain point. Product: ${PRODUCT}. Persona: ${PERSONA}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "email-2-problem",
+                "prompt": "Write email 2 of 5: PROBLEM AGITATION. Subject + preheader + "
+                          "body (180-240 words). Open with a relatable pain story. "
+                          "Quantify the cost. No solution yet. Product: ${PRODUCT}. "
+                          "Persona: ${PERSONA}. Outcome they want: ${OUTCOME}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "email-3-story",
+                "prompt": "Write email 3 of 5: STORY/CASE. Subject + preheader + "
+                          "body (200-300 words). Tell a believable customer-style "
+                          "story (label as 'composite — based on real users'). Show "
+                          "the before/after. Product: ${PRODUCT}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "email-4-proof",
+                "prompt": "Write email 4 of 5: PROOF. Subject + preheader + body "
+                          "(160-220 words). Show 3 concrete proofs (numbers, "
+                          "screenshots described in [SCREENSHOT: ...] tags, social "
+                          "quotes). End with a soft CTA: book a 15-min walkthrough. "
+                          "Product: ${PRODUCT}.",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "email-5-cta",
+                "prompt": "Write email 5 of 5: HARD CTA. Subject + preheader + body "
+                          "(120-180 words). Recap the journey from emails 1-4 in 2 "
+                          "sentences. Single clear CTA with urgency (free trial / "
+                          "demo / first month at 50%). Product: ${PRODUCT}. Outcome: "
+                          "${OUTCOME}.",
+            },
+        ],
+    },
+    {
+        "id": "research-deep-dive",
+        "title": "🔬 Research deep-dive (web crawl → synthesis → bullets)",
+        "description": "Pulls fresh content from the web, synthesizes it through 3 "
+                       "lenses, then a director compiles 10 bullets. Replace "
+                       "${URLS} with comma-separated URLs to feed.",
+        "variables": {
+            "QUESTION": "What are the most useful self-hostable open-source alternatives "
+                        "to Zapier in 2026? Compare on agent support, MCP compatibility, "
+                        "and learning curve.",
+            "URLS": "https://news.ycombinator.com,https://github.com/trending",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "lens-tech",
+                "prompt": "From a TECHNICAL ARCHITECT lens, answer this question. "
+                          "Use the web sources below as primary input. Cite by name "
+                          "where possible. Output Markdown sections: Findings (5-8 "
+                          "bullets), Strongest argument (one paragraph), Weakest "
+                          "evidence (one paragraph).\n\n## Question\n${QUESTION}\n\n"
+                          "## Sources\n{{web:${URLS}}}",
+            },
+            {
+                "agent": "gemini-pro", "label": "lens-business",
+                "prompt": "Same question, but from a BUSINESS OPERATOR lens — what "
+                          "matters for cost, vendor risk, hiring. Same Markdown "
+                          "structure as the tech lens.\n\n## Question\n${QUESTION}\n\n"
+                          "## Sources\n{{web:${URLS}}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "lens-user",
+                "prompt": "Same question, but from a DAY-TO-DAY USER lens — onboarding, "
+                          "ergonomics, debugging. Same structure.\n\n## Question\n"
+                          "${QUESTION}\n\n## Sources\n{{web:${URLS}}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "synthesis",
+                "depends_on": ["lens-tech", "lens-business", "lens-user"],
+                "prompt": "Synthesize the 3 lenses into 10 prioritized bullets that "
+                          "directly answer the question. Each bullet ≤25 words. Group "
+                          "by theme. End with 'TL;DR: …' (one sentence).\n\n"
+                          "## Question\n${QUESTION}\n\n## Tech\n{{lens-tech}}\n\n"
+                          "## Business\n{{lens-business}}\n\n## User\n{{lens-user}}",
+            },
+        ],
+    },
+    {
+        "id": "meeting-to-actions",
+        "title": "🎙 Meeting transcript → summary + action items",
+        "description": "Turn a meeting transcript into: 2-paragraph summary, "
+                       "decisions made, blockers, and a numbered list of action "
+                       "items with [Owner / Due] tags. Paste transcript into "
+                       "${TRANSCRIPT} or use {{file:transcripts/2026-05-08.txt}}.",
+        "variables": {
+            "TRANSCRIPT": "[Paste transcript here. Use ${PARTICIPANTS} as a hint to the "
+                          "model so it gets owners right.]",
+            "PARTICIPANTS": "Hustler (founder), Claude (engineer)",
+        },
+        "spec": [
+            {
+                "agent": "gemini-flash", "label": "summary",
+                "prompt": "Summarize this meeting in EXACTLY 2 paragraphs. Paragraph 1: "
+                          "context + main topics. Paragraph 2: outcomes + sentiment. "
+                          "No bullet lists. ≤220 words total.\n\n## Participants\n"
+                          "${PARTICIPANTS}\n\n## Transcript\n${TRANSCRIPT}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "decisions-blockers",
+                "prompt": "Pull 'Decisions made' and 'Blockers/Risks' from this "
+                          "transcript. Two Markdown sections. Quote the speaker who "
+                          "owns each.\n\n## Participants\n${PARTICIPANTS}\n\n"
+                          "## Transcript\n${TRANSCRIPT}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "action-items",
+                "depends_on": ["decisions-blockers"],
+                "prompt": "Extract action items as a numbered list. Format: "
+                          "'1. [Owner / Due] task — context'. Owner from "
+                          "${PARTICIPANTS}. Due defaults to 'this week' if not stated. "
+                          "Be conservative — only include explicit asks, not vague "
+                          "wishes.\n\n## Transcript\n${TRANSCRIPT}\n\n"
+                          "## Decisions + blockers\n{{decisions-blockers}}",
+            },
+        ],
+    },
+    {
+        "id": "code-pr-review",
+        "title": "🔍 Code PR review (security + perf + readability)",
+        "description": "Three reviewers each from a different angle, then a director "
+                       "deduplicates. Inject the diff with {{git:diff}} or paste it "
+                       "into ${DIFF}.",
+        "variables": {
+            "DIFF": "{{git:diff}}",
+            "CONTEXT": "Python 3.12, FastAPI backend, PostgreSQL via Prisma. Hot path; "
+                       "perf matters more than purity.",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "security",
+                "prompt": "You are an OWASP-trained security auditor. Review THIS "
+                          "DIFF for: injection (SQL/cmd/prompt), authn/authz holes, "
+                          "missing input validation, secrets in code, insecure "
+                          "deserialization, SSRF, XSS, CSRF. Output Markdown: severity "
+                          "(Critical/High/Med/Low), CWE id, exact file:line, fix. "
+                          "If clean, say so.\n\n## Context\n${CONTEXT}\n\n## Diff\n${DIFF}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "performance",
+                "prompt": "Review for performance issues only: N+1 queries, blocking "
+                          "I/O on async paths, unnecessary loops, allocations in hot "
+                          "paths, missing indexes. Output Markdown bullets with "
+                          "file:line refs. If clean, say so.\n\n## Context\n${CONTEXT}\n\n"
+                          "## Diff\n${DIFF}",
+            },
+            {
+                "agent": "gemini-pro", "label": "readability",
+                "prompt": "Review for readability + maintainability: unclear naming, "
+                          "missing tests, dead code, over-abstraction, missed comments. "
+                          "Output ≤8 bullets. If clean, say so.\n\n## Context\n${CONTEXT}\n\n"
+                          "## Diff\n${DIFF}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "verdict",
+                "depends_on": ["security", "performance", "readability"],
+                "prompt": "Merge the 3 reviews. Dedup overlapping findings. Order "
+                          "by severity. End with a clear verdict: 'APPROVE' / "
+                          "'APPROVE_WITH_NITS' / 'REQUEST_CHANGES'. One sentence "
+                          "rationale.\n\n## Security\n{{security}}\n\n## Perf\n{{performance}}\n\n"
+                          "## Readability\n{{readability}}",
+            },
+        ],
+    },
+    {
+        "id": "product-description-3",
+        "title": "🛍 Product description (3 angles + winner)",
+        "description": "Generate 3 product descriptions targeting different buyer "
+                       "motivations (status, savings, ease), then a critic picks "
+                       "the strongest. Set ${PRODUCT}, ${AUDIENCE}, ${KEY_FEATURE}.",
+        "variables": {
+            "PRODUCT": "ergonomic split mechanical keyboard, 60% layout, hot-swap, RGB",
+            "AUDIENCE": "developers + writers who type 6+ hours daily",
+            "KEY_FEATURE": "modular thumb cluster you can rearrange in 30 seconds",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "status-angle",
+                "prompt": "Write a product description (120-180 words) hooking on "
+                          "STATUS and craft. Lead with 'For people who notice the "
+                          "difference between …'. Hero feature: ${KEY_FEATURE}. "
+                          "Audience: ${AUDIENCE}. Product: ${PRODUCT}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "savings-angle",
+                "prompt": "Same product, same length. Hook on SAVINGS / ROI: 'Pay "
+                          "once, type for a decade'. Quantify the savings. Product: "
+                          "${PRODUCT}. Audience: ${AUDIENCE}. Hero: ${KEY_FEATURE}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "ease-angle",
+                "prompt": "Same product, same length. Hook on EASE / ergonomics: "
+                          "'Your hands will thank you in week 2'. Concrete physical "
+                          "comfort claims. Product: ${PRODUCT}. Audience: ${AUDIENCE}. "
+                          "Hero: ${KEY_FEATURE}.",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "winner",
+                "depends_on": ["status-angle", "savings-angle", "ease-angle"],
+                "prompt": "Pick the strongest of the 3 angles for this product + "
+                          "audience. Quote 2 lines from the winner that prove it. "
+                          "Suggest 2 small edits to make it even better. End with "
+                          "'WINNER: <angle> — because …' (one sentence).\n\n"
+                          "## Status\n{{status-angle}}\n\n## Savings\n{{savings-angle}}\n\n"
+                          "## Ease\n{{ease-angle}}",
+            },
+        ],
+    },
+    {
+        "id": "github-readme-from-code",
+        "title": "📚 GitHub README generator (from code base)",
+        "description": "Reads your project files, drafts a README with badges, "
+                       "install, quickstart, and feature highlights. Set ${PROJECT_NAME} "
+                       "and ${KEY_FILES} (comma-separated paths).",
+        "variables": {
+            "PROJECT_NAME": "CG — multi-agent orchestrator",
+            "KEY_FILES": "src/cg.py,README.md,CHANGELOG.md,pyproject.toml",
+            "ONE_LINER": "Run Claude Code + Gemini in parallel on your subscriptions, "
+                         "no API keys, n8n-style canvas in the browser.",
+        },
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6", "label": "scan",
+                "prompt": "You are scanning a project to write its README. Read the "
+                          "key files below. Output Markdown sections: Project type "
+                          "(detected from files), Main entry-points, Public surface "
+                          "(top-level symbols / commands), Notable libs in use, "
+                          "Inferred audience.\n\n## Files\n{{file:${KEY_FILES}}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "readme",
+                "depends_on": ["scan"],
+                "prompt": "Write a complete GitHub README for ${PROJECT_NAME}. "
+                          "Sections in order: Title + 1-line tagline (use ${ONE_LINER}), "
+                          "Status badges (placeholders [![...]]), 3-line elevator pitch, "
+                          "Quickstart (copy-pasteable), Features (8-12 bullets, group "
+                          "by area), Architecture (one diagram, ASCII or mermaid "
+                          "fenced block), CLI reference, Contributing, License (MIT). "
+                          "Use the scan output as ground truth.\n\n## Scan\n{{scan}}",
+            },
+        ],
+    },
 ]
 
 
