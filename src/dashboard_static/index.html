@@ -597,7 +597,10 @@
       <input type="text" id="palette-input" autocomplete="off"
              spellcheck="false"
              placeholder="Type a command, agent, run, or workflow…" />
-      <kbd class="palette-kbd-hint">esc</kbd>
+      <button type="button" class="palette-kbd-hint" id="palette-esc-btn"
+              title="Close (Esc)" aria-label="Close palette">esc</button>
+      <button type="button" class="palette-close-btn" id="palette-close-btn"
+              title="Close" aria-label="Close palette">×</button>
     </div>
     <div class="palette-results" id="palette-results">
       <!-- Populated by JS: sections (Run · Jump to · Editor · Settings · Actions) -->

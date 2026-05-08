@@ -3865,6 +3865,16 @@ function initCommandPalette() {
 
   backdrop.addEventListener("click", closePalette);
 
+  // v32 — explicit close affordances (esc kbd + × button)
+  const escBtn   = document.getElementById("palette-esc-btn");
+  const closeBtn = document.getElementById("palette-close-btn");
+  if (escBtn)   escBtn.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation(); closePalette();
+  });
+  if (closeBtn) closeBtn.addEventListener("click", (e) => {
+    e.preventDefault(); e.stopPropagation(); closePalette();
+  });
+
   input.addEventListener("input", () => {
     _paletteState.query = input.value;
     _paletteState.active = 0;
@@ -3887,6 +3897,11 @@ function initCommandPalette() {
       e.preventDefault();
       const item = _paletteState.filtered[_paletteState.active];
       if (item) executePaletteItem(item);
+    } else if (e.key === "Escape") {
+      // v32 — belt-and-suspenders: also close from input directly
+      e.preventDefault();
+      e.stopPropagation();
+      closePalette();
     }
   });
 }
@@ -4077,8 +4092,31 @@ function renderPalette(opts = {}) {
   }
 
   if (_paletteState.filtered.length === 0) {
-    results.innerHTML =
-      '<div class="palette-empty">No matches. Try a different query.</div>';
+    const q = escapeHtml(_paletteState.query || "");
+    results.innerHTML = `
+      <div class="palette-empty">
+        <div class="palette-empty-glyph">⌖</div>
+        <p class="palette-empty-msg">
+          No matches for <code>${q}</code>.
+        </p>
+        <p class="palette-empty-hint">
+          Try a different keyword, or close to dismiss.
+        </p>
+        <div class="palette-empty-actions">
+          <button type="button" class="ghost" id="pe-clear">Clear search</button>
+          <button type="button" class="primary" id="pe-close">Close palette</button>
+        </div>
+      </div>`;
+    const clearBtn = document.getElementById("pe-clear");
+    const closeBtn2 = document.getElementById("pe-close");
+    if (clearBtn) clearBtn.onclick = () => {
+      const inp = document.getElementById("palette-input");
+      if (inp) { inp.value = ""; inp.focus(); }
+      _paletteState.query = "";
+      _paletteState.active = 0;
+      renderPalette();
+    };
+    if (closeBtn2) closeBtn2.onclick = closePalette;
     return;
   }
 
