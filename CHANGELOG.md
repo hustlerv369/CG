@@ -6,6 +6,75 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
+## v18–v24 — 2026-05-08 — Hustler Claude Gravity redesign
+
+A six-commit shell redesign that takes the dashboard from "experimental
+custom" to a unified premium product. No backend or API contract changes
+— pure UI/UX upgrade across `index.html`, `dashboard.css`, `dashboard.js`.
+
+Driving documents (sub-agent research):
+- `notes/redesign-competitor-analysis.md` — CMUX, Claude Squad, n8n,
+  Linear, Mac, Warp, Charm — patterns to steal
+- `notes/redesign-current-state-audit.md` — 7-section inventory + pain
+  points + reusable bones + hard constraints
+- `notes/redesign-wireframe-spec.md` — 3 layout proposals + recommendation
+- `notes/redesign-master-plan.md` — implementation roadmap
+
+### v24 — 2026-05-08 — Workspace rail polish + docs (current)
+- Workspace cards: warm-tinted hover, accent-gradient stripe on active,
+  red close-button on hover, smoother motion + token-aligned spacing
+- `+ new workspace` button: dashed accent border, fills with coral on hover
+- README / CHANGELOG / RESUME-FROM-NEW-SESSION refreshed for v18-v24
+
+### v23 — 2026-05-08 — Brand header + Settings accordion (`3a1e397`)
+- Inline-SVG brand mark (gradient orbital atom), wordmark + sub-line
+- Header search-bar opens ⌘K palette
+- Settings split into 8 native `<details>` accordion sections — kills
+  the scrollwall flagged by the audit
+- History list cards + monitor empty state polish
+
+### v22 — 2026-05-08 — CMUX-style grid layout selector (`a938d68`)
+- 5-position layout toggle in monitor toolbar:
+  ⊞ auto · ▢ single · ⊟ 2-col · ⊠ 2×2 · ▦ compact
+- Persists choice to `localStorage[cg.layoutMode.v1]`
+- Single mode hides siblings beyond the first agent (focus mode)
+
+### v21 — 2026-05-08 — Warp-style block agent panes (`8ce8e1c`)
+- 3px state-driven left border per status (queued / waiting / running /
+  done / failed / cancelled), coral side-glow when running
+- 8px family-coded dot in title (claude / gemini / browser / opencode)
+- Inline `MM:SS` elapsed timer, ticks live during running, freezes on done
+- `~Nk tok` token-count chip estimated from log buffer length
+- Hover-revealed action buttons: ⧉ copy log · ⛶ fullscreen mode
+- Sticky-bottom auto-scroll with user scroll-up release
+- Status badge gets explicit DOM dot (replaces ::before) for flex-safety
+
+### v20 — 2026-05-08 — Resizable layout gutters (`aabd7c0`)
+- Two draggable 5px gutters between workspaces rail | designer | monitor
+- Drag to resize, double-click to collapse, persist to
+  `localStorage[cg.layout.v1]`
+- Keyboard: Ctrl+\\ collapses rail, Ctrl+Shift+\\ collapses designer
+- Bounded sizes (col1 0–240px, col2 240–720px clipped to window)
+
+### v19 — 2026-05-08 — Status bar + ⌘K command palette (`075221f`)
+- Bottom 28px status bar: backend dot · runs · queued · tunnel · build
+- Live elapsed timer for active run; click-to-jump segments
+- Linear/Warp-style command palette: fuzzy search across tabs, presets,
+  saved workflows, recent runs, settings actions
+- Keyboard: ⌘K / Ctrl+K open, ↑↓ navigate, Enter execute, Esc close
+
+### v18 — 2026-05-08 — Hustler Claude Gravity design tokens (`cbf6192`)
+- Replace Revolut purple with Hustler coral (`#FF7A59`) + amber gradient
+- Full `--space-1..8` (4-64px) and `--fs-micro..3xl` type scales
+- Motion tokens (`--motion-micro/fast/slow/spring`) and z-index scale
+- Body radial glow: coral + amber instead of purple/blue
+- Visual canvas status colors unified with tokens (running uses --accent)
+- Drop 10x `var(--accent, #a78bfa)` fallbacks → clean `var(--accent)`
+- Move toast() inline cssText to `.cg-toast` utility class
+- Universal accent focus ring; family accents extended (browser /
+  opencode / custom gold)
+- Bug fix: stray duplicate `</main>` at index.html:154-156
+
 ## v17 — 2026-05-07 — Autonomous browser pilot (`c04f991`)
 
 ### Added

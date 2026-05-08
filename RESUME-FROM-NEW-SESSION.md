@@ -4,9 +4,37 @@
 
 ---
 
-## Stav projektu (k commitu `848c9b4`, deployed + history persistence)
+## ✨ Hot — co bylo poslední sprint (v18-v24, 2026-05-08)
 
-- **41 commitů** na https://github.com/hustlerv369/CG (origin master synced)
+**Hustler Claude Gravity redesign** — kompletní UI/UX upgrade dashboardu
+z "experimental custom" na premium produkt. 6 commitů, 0 backend změn,
+0 API contract změn, 167/167 testů zelená po každém kroku.
+
+| Tag | Commit | Feature |
+|---|---|---|
+| v18 | `cbf6192` | Design tokens — Hustler coral × amber × cream, --space-1..8, motion + z-index scales |
+| v19 | `075221f` | Bottom status bar (live runs/queue/elapsed/tunnel/build) + ⌘K command palette |
+| v20 | `aabd7c0` | Resizable layout gutters — drag rail/designer/monitor, persist, dbl-click collapse, Ctrl+\\ |
+| v21 | `8ce8e1c` | Warp-style block agent panes — state edge, family dot, MM:SS, token chip, copy/fullscreen |
+| v22 | `a938d68` | CMUX-style grid layout selector (auto / single / 2-col / 2×2 / compact) |
+| v23 | `3a1e397` | Brand header + Settings 8-section accordion + history/empty polish |
+| v24 | _pending_ | Workspace rail polish (gradient stripe on active, dashed accent +) + this docs refresh |
+
+**Driving research artifacts** (in `notes/`):
+- `redesign-competitor-analysis.md` — CMUX, Claude Squad, n8n, Linear, Mac, Warp, Charm patterns
+- `redesign-current-state-audit.md` — 7-section inventory + pain points + reusable bones
+- `redesign-wireframe-spec.md` — 3 layout proposals + final recommendation (Hybrid C-on-A)
+- `redesign-master-plan.md` — implementation roadmap
+
+**Note on version numbering:** these v18-v24 supersede the older nominal
+"v18" `a0ab42a` (which was just a preset tweak). The redesign is the
+v18 worth remembering.
+
+---
+
+## Stav projektu (po redesign sprintu, before git push)
+
+- **47 commitů** lokálně; origin master synced až po `848c9b4` — push pending
 - **167 / 167 testů** passing
 - 🌐 **HustlerV polished landing LIVE: https://hustlerv369.github.io/CG/** (gh-pages branch)
 - ✅ History persistence: dashboard runs přežijí restart (hydrate_from_disk)
