@@ -1153,7 +1153,7 @@ function populatePresets() {
         }
       }
       if (added > 0) {
-        saveSettings(settings);
+        persistSettings(settings);
         if (typeof renderVariables === "function") renderVariables();
         // v39 — point the user at the Inputs panel above (not Settings far away)
         const ks = Object.keys(preset.variables).join(", ");
@@ -1272,7 +1272,7 @@ function renderInputsPanel() {
         settings.variables = settings.variables || {};
         const name = el.dataset.var;
         settings.variables[name] = el.value;
-        saveSettings(settings);
+        persistSettings(settings);
         // Mirror into the Settings tab vars list if rendered there
         if (typeof renderVariables === "function") renderVariables();
       }, 250);
