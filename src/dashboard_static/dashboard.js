@@ -661,25 +661,33 @@ function showVisContextMenu(x, y, s, spec, positions) {
     });
   });
 
-  // Auto-close on outside click or Escape
-  setTimeout(() => {
-    const close = (e) => {
-      if (!menu.contains(e.target)) {
-        menu.remove();
-        document.removeEventListener("mousedown", close);
-        document.removeEventListener("keydown", esc);
-      }
-    };
-    const esc = (e) => {
-      if (e.key === "Escape") {
-        menu.remove();
-        document.removeEventListener("mousedown", close);
-        document.removeEventListener("keydown", esc);
-      }
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", esc);
-  }, 0);
+  // Auto-close on outside click or Escape.
+  // v37 hot-fix — listeners installed synchronously (capture-phase for Esc
+  // so it wins over any other Escape handler). The setTimeout indirection
+  // we used before lost the keydown if Chrome MCP fired Escape immediately
+  // after the contextmenu event (before next macro-tick).
+  const close = (e) => {
+    if (!menu.contains(e.target)) cleanup();
+  };
+  const esc = (e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      cleanup();
+    }
+  };
+  const cleanup = () => {
+    if (!menu.parentNode) return;
+    menu.remove();
+    document.removeEventListener("mousedown", close, true);
+    document.removeEventListener("keydown", esc, true);
+  };
+  // Attach next animation frame so the very right-click mousedown that
+  // OPENED the menu doesn't immediately close it.
+  requestAnimationFrame(() => {
+    document.addEventListener("mousedown", close, true);
+    document.addEventListener("keydown", esc, true);
+  });
 }
 
 function openNodePalette() {
