@@ -1501,6 +1501,170 @@ body.visual-fullscreen .visual-canvas-wrap {
   pointer-events: stroke;
 }
 /* ============================================================
+ * v41 — Quick Start hero
+ * The first thing a user sees in the designer. One textarea,
+ * one button, agents do the rest.
+ * ============================================================ */
+.quick-start {
+  margin: 0 0 var(--space-4);
+  padding: var(--space-5) var(--space-5) var(--space-4);
+  background:
+    radial-gradient(ellipse 80% 60% at 50% -10%,
+                    rgba(255, 122, 89, 0.12) 0%,
+                    transparent 60%),
+    var(--bg-card);
+  border: 1px solid var(--accent-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-card),
+              0 0 36px rgba(255, 122, 89, 0.08);
+  position: relative;
+  overflow: hidden;
+  transition: max-height var(--motion-slow) var(--ease-out),
+              opacity var(--motion-slow) var(--ease-out),
+              padding var(--motion-slow) var(--ease-out),
+              margin var(--motion-slow) var(--ease-out);
+}
+.quick-start.collapsed {
+  max-height: 0;
+  opacity: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  border-width: 0;
+  pointer-events: none;
+}
+.quick-start-head {
+  text-align: center;
+  margin-bottom: var(--space-4);
+}
+.quick-start-spark {
+  display: inline-block;
+  font-size: 32px;
+  filter: drop-shadow(0 0 16px rgba(255, 122, 89, 0.6));
+  animation: quickStartPulse 2.4s ease-in-out infinite;
+}
+@keyframes quickStartPulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.08); }
+}
+.quick-start-title {
+  margin: var(--space-2) 0 var(--space-1);
+  font: 700 var(--fs-xl)/1.2 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.quick-start-sub {
+  margin: 0;
+  font: 400 var(--fs-sm)/1.5 var(--font-sans);
+  color: var(--fg-secondary);
+  letter-spacing: 0;
+}
+.quick-start-textarea {
+  width: 100%;
+  min-height: 96px;
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-input);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius);
+  color: var(--fg);
+  font: 500 var(--fs-md)/1.55 var(--font-sans);
+  letter-spacing: 0;
+  outline: none;
+  resize: vertical;
+  margin-bottom: var(--space-3);
+  transition: border-color var(--motion-fast),
+              box-shadow var(--motion-fast),
+              background var(--motion-fast);
+}
+.quick-start-textarea:focus {
+  border-color: var(--accent);
+  background: rgba(18, 16, 15, 0.95);
+  box-shadow: 0 0 0 4px var(--accent-soft),
+              0 8px 24px rgba(255, 122, 89, 0.12);
+}
+.quick-start-textarea::placeholder {
+  color: var(--fg-tertiary);
+  font-style: italic;
+}
+.quick-start-textarea.input-error {
+  animation: shakeX 360ms cubic-bezier(.36,.07,.19,.97);
+  border-color: var(--error);
+}
+@keyframes shakeX {
+  0%, 100% { transform: translateX(0); }
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
+.quick-start-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.quick-start-go {
+  font: 700 var(--fs-md)/1 var(--font-sans);
+  padding: var(--space-3) var(--space-5);
+  letter-spacing: var(--tracking-tight);
+  flex-shrink: 0;
+}
+.quick-start-mode {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+.quick-start-mode-label {
+  font: 500 var(--fs-xs)/1 var(--font-sans);
+  color: var(--fg-tertiary);
+  letter-spacing: 0;
+}
+.quick-start-mode-btn {
+  padding: 5px var(--space-3);
+  font: 500 var(--fs-xs)/1 var(--font-sans);
+  border-radius: var(--radius-pill);
+  letter-spacing: 0;
+}
+.quick-start-mode-btn.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+.quick-start-toggle-advanced {
+  display: block;
+  width: 100%;
+  padding: var(--space-2);
+  background: transparent;
+  border: 0;
+  border-top: 1px dashed var(--border);
+  margin-top: var(--space-3);
+  font: 500 var(--fs-xs)/1.4 var(--font-sans);
+  color: var(--fg-tertiary);
+  cursor: pointer;
+  letter-spacing: 0;
+  transition: color var(--motion-micro);
+}
+.quick-start-toggle-advanced:hover {
+  color: var(--accent);
+}
+
+/* Advanced block hidden by default until user clicks "Power user" */
+.advanced-block {
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  transition: max-height var(--motion-slow) var(--ease-out),
+              opacity var(--motion-slow) var(--ease-out);
+}
+.advanced-block.expanded {
+  max-height: 100000px;  /* enough for any spec */
+  opacity: 1;
+}
+
+/* ============================================================
  * v39 — Inputs panel (prominent ${VAR} editor in the designer)
  * Sits below Title, surfaces every variable referenced in the
  * current spec so users don't have to dig through Settings.

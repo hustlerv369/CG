@@ -2117,6 +2117,281 @@ class RunManager:
 
 
 PRESETS: list[dict[str, Any]] = [
+    # ============================================================
+    # v41 — FLAGSHIP "from idea" presets
+    # The CG vision: type one idea, get a finished thing.
+    # These three cover the highest-volume "I have an idea" use cases:
+    # build a product, plan a content series, pitch a startup.
+    # ============================================================
+    {
+        "id": "idea-to-app",
+        "title": "💡 Idea → finished app (one prompt, full project)",
+        "description": "Type your idea once in ${IDEA}. Director analyzes it. "
+                       "Three Opus specialists work in parallel (designer, "
+                       "architect, PM). Implementer (Opus 1M context) writes "
+                       "the full code. Sonnet writes tests + reviews. Final "
+                       "agent produces README + deploy guide. End result: a "
+                       "complete project you can paste into a repo and run.",
+        "variables": {
+            "IDEA": "An app for solo freelancers to track billable hours and "
+                    "auto-generate invoices in PDF. Mobile-first PWA. Stripe "
+                    "for payments. Dark mode default. CZ + EN locales.",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "director",
+                "prompt": "You are the project director. Turn this idea into a "
+                          "precise build spec a team can execute today. Output "
+                          "Markdown with these sections, in order:\n\n"
+                          "## Product\n2 sentences explaining what it does and for whom.\n\n"
+                          "## Target user persona\nName + 1 paragraph.\n\n"
+                          "## MVP scope\n5-7 must-have features as bullets. NO nice-to-haves.\n\n"
+                          "## Tech stack\nConcrete picks (e.g. 'Next.js 15 App Router + Tailwind 4 + tRPC + Drizzle + Postgres + Stripe + Resend'). One-line rationale per choice.\n\n"
+                          "## File tree\nEvery file the project needs, as a tree.\n\n"
+                          "## Data model\nTables + columns + relations. SQL-DDL ready.\n\n"
+                          "## API contract\nEvery endpoint: METHOD /path · request shape · response shape. JSON.\n\n"
+                          "## Acceptance criteria\n5-10 testable bullets.\n\n"
+                          "## Risks + mitigations\n3 bullets.\n\n"
+                          "Be opinionated. No 'depends on requirements' hedging.\n\n"
+                          "## Idea\n${IDEA}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "designer",
+                "depends_on": ["director"],
+                "prompt": "You are the lead designer. From the spec, output:\n\n"
+                          "## Design tokens\nCSS custom properties block — colors (hex), type scale, spacing scale, radii, shadows.\n\n"
+                          "## Component inventory\n10-15 components needed (Button, Input, DataTable, …) with one-line spec each.\n\n"
+                          "## Three key screens\nFor each: name, purpose, layout described in 6-10 bullets, then a self-contained inline SVG (≥800×500) showing the actual layout. NOT generic placeholders — real labels, real button text, real numbers.\n\n"
+                          "## Mood\n3 sentences on the overall vibe.\n\n"
+                          "## Spec\n{{director}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "architect",
+                "depends_on": ["director"],
+                "prompt": "You are the architect. From the spec, output the "
+                          "COMPLETE project scaffold:\n\n"
+                          "## Package manifest\nFull `package.json` (or `pyproject.toml`) with concrete pinned versions.\n\n"
+                          "## Folder structure\nEvery file with one-line purpose.\n\n"
+                          "## Config files\n`.env.example`, `tsconfig.json`, `tailwind.config.ts`, `next.config.ts`, `drizzle.config.ts` etc. — full content for each.\n\n"
+                          "## Setup commands\nFrom `git clone` to `localhost:3000` working — copy-pasteable shell block.\n\n"
+                          "## Spec\n{{director}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "implementation",
+                "depends_on": ["director", "architect", "designer"],
+                "prompt": "You are the implementer. Write the FULL working "
+                          "implementation. Output EVERY file as a fenced code "
+                          "block whose first line is a comment with the file "
+                          "path: `// path/to/file.ts` (or `# path/to/file.py`).\n\n"
+                          "Cover, in order: data layer (schema + migrations), "
+                          "API endpoints (every one in the contract), business "
+                          "logic, auth (basic email + password OR OAuth — pick), "
+                          "frontend pages (every screen the designer drew), "
+                          "components (everything in the inventory), error "
+                          "boundaries, loading states. Use the design tokens "
+                          "from {{designer}} verbatim. Wire Stripe / Resend / "
+                          "etc. with code that actually compiles, not stubs.\n\n"
+                          "NO 'TODO' or 'implement later' comments. NO "
+                          "placeholder strings. If you can't fit something, "
+                          "state which file is partial at the bottom and why.\n\n"
+                          "## Spec\n{{director}}\n\n## Scaffold\n{{architect}}\n\n"
+                          "## Design tokens + components\n{{designer}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "tests",
+                "depends_on": ["director", "implementation"],
+                "prompt": "Write thorough tests for this implementation. Cover:\n"
+                          "- Happy path for every endpoint in the API contract\n"
+                          "- Each acceptance-criterion bullet\n"
+                          "- Edge cases (null/empty/zero/negative/overflow)\n"
+                          "- Auth + authz boundaries\n"
+                          "- Error responses\n\n"
+                          "Use the framework matching the stack (Vitest for "
+                          "TS, pytest for Python, etc.). Output every test "
+                          "file as a fenced code block with `// path/to/...` "
+                          "first line.\n\n"
+                          "## Spec\n{{director}}\n\n## Implementation\n{{implementation}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "reviewer",
+                "depends_on": ["implementation", "tests"],
+                "prompt": "You are the senior code reviewer. Find: bugs, "
+                          "security issues (injection / authz / secrets / SSRF / "
+                          "CSRF), missing acceptance criteria, missing error "
+                          "handling, perf concerns (N+1, blocking I/O), "
+                          "deployment risks. Markdown bullet list with "
+                          "severity tag (CRIT / HIGH / MED / LOW), exact "
+                          "file:line, and a one-sentence fix per finding.\n\n"
+                          "End with: `Ship readiness: <0-10>` and one sentence "
+                          "rationale. Be honest — if not ready, say so.\n\n"
+                          "## Implementation\n{{implementation}}\n\n## Tests\n{{tests}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "readme-deploy",
+                "depends_on": ["director", "architect", "implementation"],
+                "prompt": "Write the project's complete README + deploy guide:\n\n"
+                          "## README.md\n- Title + tagline (≤12 words)\n- Hero "
+                          "screenshot placeholder\n- Feature list (from MVP "
+                          "scope)\n- Quickstart (copy-pasteable)\n- Project "
+                          "structure section\n- Env vars table\n- "
+                          "Contributing\n- License (MIT)\n\n"
+                          "## DEPLOY.md\nPick ONE cloud (Vercel + Neon for JS, "
+                          "Fly.io + Postgres for Python, etc.) and give "
+                          "step-by-step deploy instructions a beginner can "
+                          "follow. Include cost estimate.\n\n"
+                          "## Spec\n{{director}}\n\n## Scaffold\n{{architect}}",
+            },
+        ],
+    },
+    {
+        "id": "idea-to-content-plan",
+        "title": "💡 Idea → 90-day content plan (calendar + 3 sample pieces)",
+        "description": "Type one ${TOPIC}. Strategist analyzes audience + "
+                       "competitors. Editor builds 90-day content calendar "
+                       "across blog / social / email. Three writers produce "
+                       "a sample piece each (blog, X thread, email). Critic "
+                       "scores the plan.",
+        "variables": {
+            "TOPIC": "Practical multi-agent AI for small dev teams that already "
+                     "pay for Claude + Gemini and want to stop renting Make / "
+                     "Zapier monthly.",
+            "AUDIENCE": "Senior engineers + tech-savvy founders, 25-45, "
+                        "subscribe to The Pragmatic Engineer / Latent Space.",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "strategy",
+                "prompt": "You are head of content. From the topic + audience, "
+                          "output:\n\n"
+                          "## Positioning\n2 sentences — what we own vs the rest.\n\n"
+                          "## 5 content pillars\nName + 1-line intent each.\n\n"
+                          "## 10 evergreen post hooks\nNumbered, each headline-ready (≤90 chars).\n\n"
+                          "## Channel mix\n%-split across blog, X, LinkedIn, newsletter, video. Justify.\n\n"
+                          "## North-star metric\nOne KPI + 90-day target.\n\n"
+                          "## Topic\n${TOPIC}\n\n## Audience\n${AUDIENCE}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "calendar",
+                "depends_on": ["strategy"],
+                "prompt": "From the strategy, build a 90-day calendar. Output "
+                          "Markdown table: `| Day | Channel | Format | Title | Pillar | KPI focus |`. "
+                          "Aim for 3-4 posts/week, mixed channels, ladder up "
+                          "to a flagship piece in week 8 and a recap in week "
+                          "12.\n\n## Strategy\n{{strategy}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "sample-blog",
+                "depends_on": ["strategy", "calendar"],
+                "prompt": "Pick the strongest blog headline from the calendar "
+                          "and write the full 1500-word post. Tone: confident, "
+                          "no fluff, one strong opinion. Add SEO title + meta "
+                          "description.\n\n## Strategy\n{{strategy}}\n\n## Calendar\n{{calendar}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "sample-thread",
+                "depends_on": ["strategy", "calendar"],
+                "prompt": "Pick the strongest X (Twitter) hook from the "
+                          "calendar and write the full 8-tweet thread. Each "
+                          "tweet ≤280 chars. End with a CTA.\n\n## Strategy\n{{strategy}}\n\n"
+                          "## Calendar\n{{calendar}}",
+            },
+            {
+                "agent": "gemini-pro", "label": "sample-email",
+                "depends_on": ["strategy", "calendar"],
+                "prompt": "Pick the strongest newsletter idea from the "
+                          "calendar and write the full email (subject + "
+                          "preheader + 350-450 words body + single CTA). "
+                          "Conversational tone.\n\n## Strategy\n{{strategy}}\n\n"
+                          "## Calendar\n{{calendar}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "critic",
+                "depends_on": ["strategy", "calendar", "sample-blog",
+                               "sample-thread", "sample-email"],
+                "prompt": "Critique the whole plan. Score 0-10 on: "
+                          "Audience fit, Differentiation, Cadence realism, "
+                          "Content quality, KPI achievability. Be honest. End "
+                          "with 'Top fix: …' (one sentence).\n\n"
+                          "## Strategy\n{{strategy}}\n\n## Calendar\n{{calendar}}\n\n"
+                          "## Blog\n{{sample-blog}}\n\n## Thread\n{{sample-thread}}\n\n"
+                          "## Email\n{{sample-email}}",
+            },
+        ],
+    },
+    {
+        "id": "idea-to-pitch-deck",
+        "title": "💡 Idea → pitch deck (10 slides + investor Q&A)",
+        "description": "Type one ${IDEA}. Strategist sharpens the angle. "
+                       "Three parallel agents draft Problem, Solution, "
+                       "Market+Competition. Implementer writes 10 slides as "
+                       "Markdown ready to paste into Slides / Pitch / "
+                       "Beautiful.ai. Reviewer simulates 12 investor questions "
+                       "with answers.",
+        "variables": {
+            "IDEA": "AI-native bookkeeping for solo freelancers — auto-imports "
+                    "invoices from email, categorizes, files VAT in CZ + DE in "
+                    "one click. Subscription €19/mo.",
+            "STAGE": "Pre-seed, raising €500k for 12 months runway",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "angle",
+                "prompt": "You are a pitch coach. From the idea + stage, "
+                          "sharpen the angle:\n\n"
+                          "## One-line pitch\n≤14 words. Memorable.\n\n"
+                          "## Why now\n3 bullets — what changed in the world that makes this possible/urgent.\n\n"
+                          "## Why us\n3 bullets — unfair advantages.\n\n"
+                          "## Founder narrative\n2 sentences — the personal story that makes investors believe.\n\n"
+                          "## Idea\n${IDEA}\n\n## Stage\n${STAGE}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "problem",
+                "depends_on": ["angle"],
+                "prompt": "Write the Problem section: 1 customer story (named "
+                          "persona, real day-in-the-life), 3 quantified pain "
+                          "points (numbers), and how today's solutions fall "
+                          "short. ≤200 words.\n\n## Angle\n{{angle}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "solution",
+                "depends_on": ["angle"],
+                "prompt": "Write the Solution section: 3-step user journey "
+                          "(before/during/after), unique mechanism (the 'how'), "
+                          "and one demo screenshot description (label-only "
+                          "wireframe). ≤200 words.\n\n## Angle\n{{angle}}",
+            },
+            {
+                "agent": "gemini-pro", "label": "market",
+                "depends_on": ["angle"],
+                "prompt": "Write the Market + Competition section: TAM/SAM/SOM "
+                          "with cited sources or 'estimate based on …', "
+                          "competitor matrix (3-4 competitors × 4 attributes), "
+                          "and your differentiator in one sentence. ≤200 words.\n\n"
+                          "## Angle\n{{angle}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "deck",
+                "depends_on": ["angle", "problem", "solution", "market"],
+                "prompt": "Assemble the 10-slide deck as Markdown. Each slide "
+                          "is a `## Slide N: Title` heading + 5-8 bullet "
+                          "points. Order: 1 Cover · 2 Problem · 3 Solution · "
+                          "4 Why now · 5 Market · 6 Product (screenshot stub) · "
+                          "7 Business model · 8 Traction · 9 Team · 10 Ask. "
+                          "End with one-line speaker note per slide.\n\n"
+                          "## Angle\n{{angle}}\n\n## Problem\n{{problem}}\n\n"
+                          "## Solution\n{{solution}}\n\n## Market\n{{market}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "qa",
+                "depends_on": ["deck"],
+                "prompt": "Simulate 12 of the toughest questions a "
+                          "${STAGE} investor will ask after seeing this deck. "
+                          "For each: the question + your 3-sentence answer + "
+                          "what NOT to say. Format as numbered list.\n\n"
+                          "## Deck\n{{deck}}",
+            },
+        ],
+    },
     {
         "id": "compare",
         "title": "Two-model compare (Sonnet × Gemini Pro)",

@@ -3480,7 +3480,118 @@ document.addEventListener("DOMContentLoaded", () => {
   initThemeToggle();
   initKeyboardSheet();
   initDragDropUpload();
+  initQuickStart();
 });
+
+/* ----------------------------------------------------------
+ * v41 — Quick Start hero
+ * One-liner UX for the core CG vision: type your idea once,
+ * the system builds the whole project end-to-end.
+ * ---------------------------------------------------------- */
+const QUICK_START_DISMISSED_KEY = "cg.quickStart.dismissed";
+const QUICK_START_PRESET_FOR_MODE = {
+  app:     "idea-to-app",
+  content: "idea-to-content-plan",
+  pitch:   "idea-to-pitch-deck",
+};
+const QUICK_START_VAR_FOR_PRESET = {
+  "idea-to-app":          "IDEA",
+  "idea-to-content-plan": "TOPIC",
+  "idea-to-pitch-deck":   "IDEA",
+};
+
+function initQuickStart() {
+  const hero  = document.getElementById("quick-start");
+  const adv   = document.getElementById("advanced-block");
+  const goBtn = document.getElementById("quick-start-go-btn");
+  const toggleBtn = document.getElementById("quick-start-toggle-advanced");
+  const ideaTa = document.getElementById("quick-start-idea");
+  if (!hero || !goBtn || !ideaTa) return;
+
+  // Default mode: app (covers most "I have an idea" cases)
+  let activeMode = "app";
+  const setMode = (m) => {
+    activeMode = m;
+    document.querySelectorAll(".quick-start-mode-btn").forEach(b => {
+      b.classList.toggle("active", b.dataset.quickMode === m);
+    });
+  };
+  setMode("app");
+  document.querySelectorAll(".quick-start-mode-btn").forEach(btn => {
+    btn.addEventListener("click", () => setMode(btn.dataset.quickMode));
+  });
+
+  // "Make it real" — fill IDEA var, load preset, scroll to inputs
+  goBtn.addEventListener("click", () => {
+    const idea = (ideaTa.value || "").trim();
+    if (!idea) {
+      ideaTa.focus();
+      ideaTa.classList.add("input-error");
+      setTimeout(() => ideaTa.classList.remove("input-error"), 800);
+      if (typeof toast === "function") toast("Type your idea above first.", 2500);
+      return;
+    }
+
+    const presetId = QUICK_START_PRESET_FOR_MODE[activeMode] || "idea-to-app";
+    const varName  = QUICK_START_VAR_FOR_PRESET[presetId] || "IDEA";
+
+    // Persist the idea into the variable BEFORE picking the preset, so
+    // the preset's onchange merge sees it (the merge skips keys that
+    // already exist, so we win the race on the user's text).
+    const settings = loadSettings();
+    settings.variables = settings.variables || {};
+    settings.variables[varName] = idea;
+    persistSettings(settings);
+
+    // Pick the preset programmatically — fires its onchange handler
+    const presetSelect = document.getElementById("preset-select");
+    if (presetSelect) {
+      presetSelect.value = presetId;
+      presetSelect.dispatchEvent(new Event("change"));
+    }
+
+    // Reveal advanced controls so the user can fine-tune steps if they want
+    hero.classList.add("collapsed");
+    if (adv) adv.classList.add("expanded");
+
+    // Scroll the inputs panel into view
+    setTimeout(() => {
+      const ip = document.getElementById("inputs-panel");
+      if (ip) ip.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
+
+    if (typeof toast === "function") {
+      const modeLabel = { app: "app", content: "content plan", pitch: "pitch deck" }[activeMode] || "project";
+      toast(`Loaded the "${modeLabel}" build team. Hit ▶ Run workflow when ready.`, 4000);
+    }
+  });
+
+  // Toggle advanced block — for power users who want to see templates / steps
+  toggleBtn?.addEventListener("click", () => {
+    const expanded = adv?.classList.toggle("expanded");
+    toggleBtn.textContent = expanded
+      ? "Hide templates / step editor ↑"
+      : "Power user? Show templates / build steps manually ↓";
+  });
+
+  // If the user already loaded a preset / has steps from a previous session,
+  // collapse the hero so it doesn't dominate the page.
+  if (document.querySelectorAll("#agent-rows .agent-row").length > 0) {
+    const presetSelect = document.getElementById("preset-select");
+    if (presetSelect && presetSelect.value) {
+      hero.classList.add("collapsed");
+      if (adv) adv.classList.add("expanded");
+    }
+  }
+
+  // Cmd+Enter / Ctrl+Enter inside the hero textarea = submit
+  ideaTa.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+      e.preventDefault();
+      goBtn.click();
+    }
+  });
+}
 
 /* ----------------------------------------------------------
  * v30 — Keyboard shortcuts cheat sheet (toggle with "?")

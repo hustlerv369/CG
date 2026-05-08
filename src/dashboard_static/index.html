@@ -101,6 +101,39 @@
     <section class="designer">
       <h2>Workflow</h2>
 
+      <!-- v41 — Quick Start hero: type an idea, agents do the rest. -->
+      <section class="quick-start" id="quick-start">
+        <header class="quick-start-head">
+          <span class="quick-start-spark">💡</span>
+          <h3 class="quick-start-title">What do you want to build today?</h3>
+          <p class="quick-start-sub">Type your idea once. A team of AIs will design,
+            build, test, and document it for you.</p>
+        </header>
+        <textarea id="quick-start-idea" class="quick-start-textarea"
+                  placeholder="e.g. An app for solo freelancers to track time and auto-generate invoices in PDF. Mobile-first. Stripe payments. Dark mode default."
+                  rows="4"></textarea>
+        <div class="quick-start-actions">
+          <button class="primary quick-start-go" id="quick-start-go-btn"
+                  title="Spawn the build team and start working on your idea">
+            ✨ Make it real
+          </button>
+          <div class="quick-start-mode">
+            <span class="quick-start-mode-label">or build:</span>
+            <button class="ghost quick-start-mode-btn" data-quick-mode="app"
+                    title="App / website / SaaS — full code project">app</button>
+            <button class="ghost quick-start-mode-btn" data-quick-mode="content"
+                    title="Content plan — 90-day calendar + sample pieces">content plan</button>
+            <button class="ghost quick-start-mode-btn" data-quick-mode="pitch"
+                    title="Pitch deck — 10 slides + investor Q&amp;A">pitch deck</button>
+          </div>
+        </div>
+        <button class="quick-start-toggle-advanced" id="quick-start-toggle-advanced"
+                title="Show templates + manual editor">
+          Power user? Show templates / build steps manually ↓
+        </button>
+      </section>
+
+      <div class="advanced-block" id="advanced-block">
       <div class="row">
         <label>Start from a template
           <span class="row-hint">— pick a ready-made workflow you can edit</span>
@@ -206,6 +239,8 @@
         <button class="primary" id="run-btn" title="Start running all steps in order">▶ Run workflow</button>
         <button class="ghost" id="clear-btn" title="Empty all steps and start fresh">Clear all steps</button>
       </div>
+
+      </div><!-- /advanced-block -->
 
       <h2 class="section">Past runs</h2>
       <ul id="history"></ul>
