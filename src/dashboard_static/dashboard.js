@@ -1891,13 +1891,13 @@ function applyBrowserMode(row, spec = {}) {
     if (!ta.dataset.builderHidden) {
       ta.style.display = "none";
     }
-    deps.placeholder = "depends_on (comma-separated, optional for browser)";
+    deps.placeholder = "leave empty unless this browser step needs an earlier step's output";
     if (streamLabel) streamLabel.style.display = "none";  // streaming N/A
   } else {
     if (builder) builder.remove();
     ta.style.display = "block";
     delete ta.dataset.builderHidden;
-    deps.placeholder = "depends_on (comma-separated labels)";
+    deps.placeholder = "leave empty if this step doesn't need any earlier output";
     if (streamLabel) streamLabel.style.display = "";
   }
 }
