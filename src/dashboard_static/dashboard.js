@@ -216,7 +216,12 @@ const VIS_ROW_GAP = 40;
 function getViewMode() {
   return localStorage.getItem(VIEW_MODE_KEY) || "classic";
 }
-function setViewMode(mode) {
+/* v36 — renamed from setViewMode to avoid collision with the
+ * setViewMode() at line ~2209 (which controls the OUTPUT view:
+ * raw / markdown / diff / preview). Same name = the later
+ * declaration overrode this one, so persisting Classic↔Visual
+ * to localStorage silently never happened. */
+function persistVisualMode(mode) {
   localStorage.setItem(VIEW_MODE_KEY, mode);
 }
 
@@ -608,7 +613,7 @@ function openNodePalette() {
 }
 
 function applyViewMode(mode) {
-  setViewMode(mode);
+  persistVisualMode(mode);  // v36 — was setViewMode (collided with output renderer)
   document.querySelectorAll(".view-mode-toggle .vm-seg").forEach(b =>
     b.classList.toggle("active", b.dataset.vm === mode));
   $("#classic-pane").style.display = mode === "classic" ? "" : "none";
@@ -4316,13 +4321,10 @@ function activateTab(name) {
   if (tab) tab.click();
 }
 
-function escapeHtml(s) {
-  return String(s == null ? "" : s)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
+/* v36 — duplicate escapeHtml() removed; the canonical one at line
+ * ~2291 also escapes single quotes (XSS-safer). This duplicate was
+ * overriding it via JS declaration hoisting, leaving rendered output
+ * vulnerable to ' in user-supplied strings. */
 
 /* ============================================================
  * v26 — ANSI escape sequence parser (raw mode → colored HTML)
