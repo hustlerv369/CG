@@ -1353,6 +1353,50 @@ body.visual-fullscreen .visual-canvas-wrap {
   cursor: pointer;
   pointer-events: stroke;
 }
+/* v27 — drag-to-connect ports + ghost wire */
+.vis-port {
+  fill: var(--bg-rise);
+  stroke: var(--accent);
+  stroke-width: 1.5;
+  cursor: crosshair;
+  transition: fill var(--motion-fast),
+              stroke var(--motion-fast),
+              r var(--motion-fast),
+              filter var(--motion-fast);
+  filter: drop-shadow(0 0 6px transparent);
+}
+.vis-port--out:hover,
+.vis-port--in:hover {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 8px var(--accent));
+  r: 6.5;
+}
+.vis-port--target {
+  fill: var(--accent);
+  filter: drop-shadow(0 0 12px var(--accent));
+  r: 7;
+}
+.visual-canvas.wire-dragging .vis-port--in {
+  fill: var(--accent-soft);
+  stroke-width: 2;
+  filter: drop-shadow(0 0 6px var(--accent-strong));
+}
+.visual-canvas.wire-dragging {
+  cursor: crosshair;
+}
+.vis-wire-ghost {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-dasharray: 6 4;
+  filter: drop-shadow(0 0 8px var(--accent));
+  pointer-events: none;
+  animation: wire-march 600ms linear infinite;
+}
+@keyframes wire-march {
+  to { stroke-dashoffset: -10; }
+}
+
 .connections-layer path:hover {
   stroke: var(--error);
   stroke-width: 2.4;

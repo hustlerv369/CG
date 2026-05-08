@@ -345,6 +345,33 @@ function renderVisualCanvas() {
     });
   });
 
+  // v27 — drag-to-connect: native SVG ports (output right, input left)
+  spec.forEach(s => {
+    const pos = positions[s.label];
+    if (!pos) return;
+    const NS = "http://www.w3.org/2000/svg";
+    const outPort = document.createElementNS(NS, "circle");
+    outPort.setAttribute("cx", pos.x + VIS_NODE_W);
+    outPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
+    outPort.setAttribute("r", 5);
+    outPort.classList.add("vis-port", "vis-port--out");
+    outPort.dataset.label = s.label;
+    outPort.dataset.kind = "out";
+    nodesLayer.appendChild(outPort);
+
+    const inPort = document.createElementNS(NS, "circle");
+    inPort.setAttribute("cx", pos.x);
+    inPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
+    inPort.setAttribute("r", 5);
+    inPort.classList.add("vis-port", "vis-port--in");
+    inPort.dataset.label = s.label;
+    inPort.dataset.kind = "in";
+    nodesLayer.appendChild(inPort);
+  });
+
+  // Wire ports → drag-to-connect on the svg root (single delegated handler)
+  attachWireDragHandlers(svg, spec, positions);
+
   // Draw nodes (foreignObject so we get full HTML+CSS inside SVG)
   spec.forEach(s => {
     const pos = positions[s.label];
@@ -3611,6 +3638,122 @@ const ANSI_BASE_BG = {
   103:"ansi-bg-br-yellow",104:"ansi-bg-br-blue",105:"ansi-bg-br-magenta",
   106:"ansi-bg-br-cyan", 107:"ansi-bg-br-white",
 };
+
+/* ============================================================
+ * v27 — Drag-to-connect for the Visual canvas
+ * Pointerdown on a node's output port (right circle) → drag a ghost
+ * bezier to cursor → pointerup over another node's input port creates
+ * a depends_on edge in the spec. Cancel on Escape or release elsewhere.
+ * ============================================================ */
+function attachWireDragHandlers(svg, spec, positions) {
+  // Attach once per render — clear handlers from prior render via dataset flag
+  if (svg.__cgWireBound) return;
+  svg.__cgWireBound = true;
+
+  const NS = "http://www.w3.org/2000/svg";
+  let drag = null;
+
+  const screenToCanvas = (clientX, clientY) => {
+    const pt = svg.createSVGPoint();
+    pt.x = clientX; pt.y = clientY;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return { x: 0, y: 0 };
+    const m = ctm.inverse();
+    const local = pt.matrixTransform(m);
+    return { x: local.x, y: local.y };
+  };
+
+  svg.addEventListener("pointerdown", (e) => {
+    const port = e.target.closest(".vis-port--out");
+    if (!port) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const fromLabel = port.dataset.label;
+    const startX = Number(port.getAttribute("cx"));
+    const startY = Number(port.getAttribute("cy"));
+
+    const ghost = document.createElementNS(NS, "path");
+    ghost.classList.add("vis-wire-ghost");
+    ghost.setAttribute("d", `M ${startX} ${startY} L ${startX} ${startY}`);
+    ghost.setAttribute("marker-end", "url(#arrowhead)");
+    svg.querySelector(".connections-layer").appendChild(ghost);
+
+    drag = { fromLabel, startX, startY, ghost, pointerId: e.pointerId };
+    svg.setPointerCapture(e.pointerId);
+    svg.classList.add("wire-dragging");
+  });
+
+  svg.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const { x, y } = screenToCanvas(e.clientX, e.clientY);
+    const dx = Math.max(40, (x - drag.startX) / 2);
+    drag.ghost.setAttribute("d",
+      `M ${drag.startX} ${drag.startY} ` +
+      `C ${drag.startX + dx} ${drag.startY}, ` +
+      `${x - dx} ${y}, ` +
+      `${x} ${y}`);
+    // Highlight any input port under cursor
+    svg.querySelectorAll(".vis-port--in").forEach(p => p.classList.remove("vis-port--target"));
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    if (under && under.classList && under.classList.contains("vis-port--in")
+        && under.dataset.label !== drag.fromLabel) {
+      under.classList.add("vis-port--target");
+    }
+  });
+
+  const endDrag = (e) => {
+    if (!drag) return;
+    let dropped = false;
+    const under = document.elementFromPoint(e.clientX, e.clientY);
+    if (under && under.classList && under.classList.contains("vis-port--in")) {
+      const toLabel = under.dataset.label;
+      if (toLabel && toLabel !== drag.fromLabel) {
+        addDepInDesigner(toLabel, drag.fromLabel);
+        dropped = true;
+      }
+    }
+    drag.ghost.remove();
+    svg.querySelectorAll(".vis-port--target").forEach(p => p.classList.remove("vis-port--target"));
+    svg.classList.remove("wire-dragging");
+    try { svg.releasePointerCapture(drag.pointerId); } catch {}
+    drag = null;
+    if (dropped) renderVisualCanvas();
+  };
+  svg.addEventListener("pointerup", endDrag);
+  svg.addEventListener("pointercancel", endDrag);
+
+  // Esc cancels
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape" && drag) {
+      drag.ghost.remove();
+      svg.classList.remove("wire-dragging");
+      svg.querySelectorAll(".vis-port--target").forEach(p => p.classList.remove("vis-port--target"));
+      drag = null;
+    }
+  });
+}
+
+/* Patch a depends_on entry into the classic agent-row designer.
+ * Used by drag-to-connect. Idempotent — won't add duplicates. */
+function addDepInDesigner(targetLabel, depLabel) {
+  const rows = document.querySelectorAll("#agent-rows .agent-row");
+  let target = null;
+  rows.forEach((row, i) => {
+    const labelInput = row.querySelector(".label");
+    const rowLabel = (labelInput && labelInput.value.trim()) || `agent-${i + 1}`;
+    if (rowLabel === targetLabel) target = row;
+  });
+  if (!target) return;
+  const dInp = target.querySelector(".depends_on");
+  if (!dInp) return;
+  const existing = (dInp.value || "").split(",").map(x => x.trim()).filter(Boolean);
+  if (existing.includes(depLabel)) return;
+  existing.push(depLabel);
+  dInp.value = existing.join(",");
+  dInp.dispatchEvent(new Event("change"));
+  if (typeof toast === "function") toast(`Connected: ${depLabel} → ${targetLabel}`, 1500);
+}
 
 function ansiToHtml(input) {
   if (!input) return { html: "", hasAnsi: false };
