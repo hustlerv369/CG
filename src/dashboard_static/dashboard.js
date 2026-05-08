@@ -3150,7 +3150,149 @@ document.addEventListener("DOMContentLoaded", () => {
   initInspector();
   initSlashCommands();
   initThemeToggle();
+  initKeyboardSheet();
+  initDragDropUpload();
 });
+
+/* ----------------------------------------------------------
+ * v30 — Keyboard shortcuts cheat sheet (toggle with "?")
+ * ---------------------------------------------------------- */
+const KEYBOARD_SHORTCUTS = [
+  { section: "Global", items: [
+    { keys: ["⌘K", "Ctrl+K"],     desc: "Open command palette" },
+    { keys: ["?"],                 desc: "Toggle this cheat sheet" },
+    { keys: ["Esc"],               desc: "Close any open overlay" },
+    { keys: ["Ctrl+Shift+L"],      desc: "Toggle dark / light theme" },
+    { keys: ["I"],                 desc: "Toggle inspector rail" },
+  ]},
+  { section: "Layout", items: [
+    { keys: ["Ctrl+\\"],           desc: "Collapse / expand workspace rail" },
+    { keys: ["Ctrl+Shift+\\"],     desc: "Collapse / expand designer" },
+    { keys: ["double-click gutter"], desc: "Collapse adjacent column" },
+    { keys: ["drag gutter"],       desc: "Resize columns (persisted)" },
+  ]},
+  { section: "Visual canvas", items: [
+    { keys: ["F"],                 desc: "Toggle fullscreen canvas" },
+    { keys: ["0"],                 desc: "Reset zoom to 100%" },
+    { keys: ["Ctrl + wheel"],      desc: "Zoom in / out" },
+    { keys: ["drag node"],         desc: "Reposition (persisted per workspace)" },
+    { keys: ["drag port → port"],  desc: "Add depends_on edge" },
+    { keys: ["click edge"],        desc: "Remove dependency" },
+  ]},
+  { section: "Editor", items: [
+    { keys: ["Ctrl+S"],            desc: "Save current workflow / file / note" },
+    { keys: ["/"],                 desc: "Slash commands in any prompt" },
+    { keys: ["Tab / Enter"],       desc: "Pick slash item" },
+  ]},
+  { section: "Run / monitor", items: [
+    { keys: ["click panel"],       desc: "Inspect agent in right rail" },
+    { keys: ["⧉ button"],          desc: "Copy this agent's full output" },
+    { keys: ["⛶ button"],          desc: "Fullscreen this panel" },
+    { keys: ["drag file → row"],   desc: "Auto-insert {{file:path}} placeholder" },
+  ]},
+];
+
+function initKeyboardSheet() {
+  let overlay = null;
+  const close = () => {
+    if (overlay) { overlay.remove(); overlay = null; }
+  };
+  document.addEventListener("keydown", (e) => {
+    // "?" key — but ignore when typing in inputs
+    if (e.key !== "?") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+              t.isContentEditable || t.closest(".CodeMirror"))) return;
+    e.preventDefault();
+    if (overlay) return close();
+
+    overlay = document.createElement("div");
+    overlay.className = "kbd-sheet-overlay";
+    overlay.innerHTML = `
+      <div class="kbd-sheet-backdrop"></div>
+      <div class="kbd-sheet" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
+        <header class="kbd-sheet-head">
+          <h3>Keyboard shortcuts</h3>
+          <kbd class="kbd-hint">esc</kbd>
+        </header>
+        <div class="kbd-sheet-body">
+          ${KEYBOARD_SHORTCUTS.map(sec => `
+            <section class="kbd-sec">
+              <h4>${escapeHtml(sec.section)}</h4>
+              <ul>
+                ${sec.items.map(it => `
+                  <li>
+                    <span class="kbd-keys">${it.keys.map(k =>
+                      `<kbd>${escapeHtml(k)}</kbd>`).join('<span class="kbd-or">/</span>')}</span>
+                    <span class="kbd-desc">${escapeHtml(it.desc)}</span>
+                  </li>`).join("")}
+              </ul>
+            </section>`).join("")}
+        </div>
+        <footer class="kbd-sheet-foot">
+          Press <kbd>?</kbd> again or <kbd>esc</kbd> to close
+        </footer>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector(".kbd-sheet-backdrop").addEventListener("click", close);
+    const esc = (ev) => {
+      if (ev.key === "Escape" || ev.key === "?") {
+        ev.preventDefault();
+        close();
+        document.removeEventListener("keydown", esc);
+      }
+    };
+    document.addEventListener("keydown", esc);
+  });
+}
+
+/* ----------------------------------------------------------
+ * v30 — Drag-and-drop file upload onto agent rows
+ * Drag a file from your OS into any agent row → auto-inserts a
+ * {{file:abs/path}} placeholder at the prompt caret. Also supports
+ * dropping multiple files (joined with newlines).
+ * ---------------------------------------------------------- */
+function initDragDropUpload() {
+  const isAgentRow = (el) =>
+    el && el.closest && (el.closest(".agent-row") || el.closest(".vis-node"));
+
+  document.addEventListener("dragover", (e) => {
+    if (!isAgentRow(e.target)) return;
+    if (!e.dataTransfer || !Array.from(e.dataTransfer.types || []).includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    const row = isAgentRow(e.target);
+    row.classList.add("drag-target");
+  });
+
+  document.addEventListener("dragleave", (e) => {
+    const row = isAgentRow(e.target);
+    if (row) row.classList.remove("drag-target");
+  });
+
+  document.addEventListener("drop", (e) => {
+    const row = isAgentRow(e.target);
+    if (!row) return;
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    row.classList.remove("drag-target");
+
+    const ta = row.querySelector(".prompt") || row.querySelector(".vne-prompt");
+    if (!ta) return;
+    const files = Array.from(e.dataTransfer.files);
+    // We can't get full OS paths reliably (browser security) — files only
+    // expose names. Insert a {{file:NAME}} placeholder which the user can
+    // adjust. Nudge with a toast.
+    const inserts = files.map(f => `{{file:${f.name}}}`).join("\n");
+    const cur = ta.value || "";
+    const at = ta.selectionEnd != null ? ta.selectionEnd : cur.length;
+    ta.value = cur.slice(0, at) + inserts + cur.slice(at);
+    ta.dispatchEvent(new Event("input"));
+    if (typeof toast === "function") {
+      toast(`Inserted ${files.length} file placeholder${files.length === 1 ? "" : "s"} — adjust the path if needed.`, 3000);
+    }
+  });
+}
 
 /* ----------------------------------------------------------
  * v29 — Theme toggle (dark / light)
@@ -3826,6 +3968,17 @@ function buildPaletteItems() {
   }
 
   // Settings actions
+  items.push({
+    section: "Help",
+    icon: "?",
+    label: "Keyboard shortcuts",
+    hint: "Open the cheat sheet (?)",
+    meta: "HELP",
+    run: () => {
+      // Synthesize a "?" keypress so initKeyboardSheet handles it
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "?" }));
+    },
+  });
   items.push({
     section: "Settings",
     icon: "🌓",

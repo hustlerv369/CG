@@ -2489,6 +2489,176 @@ select optgroup {
 }
 
 /* ============================================================
+ * v30 — Keyboard shortcut cheat sheet (toggle with "?")
+ * ============================================================ */
+.kbd-sheet-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.kbd-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 6, 5, 0.55);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  animation: fadeIn 180ms var(--ease);
+}
+.kbd-sheet {
+  position: relative;
+  width: min(720px, 92vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-elevated);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
+  animation: scaleFadeIn 220ms var(--ease-out);
+  overflow: hidden;
+}
+.kbd-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg,
+              rgba(255, 122, 89, 0.06) 0%, transparent 100%);
+}
+.kbd-sheet-head h3 {
+  margin: 0;
+  font: 600 var(--fs-lg)/1.2 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font: 600 10px/1 var(--font-mono);
+  color: var(--fg-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.kbd-sheet-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4) var(--space-5);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--space-5);
+}
+.kbd-sec h4 {
+  margin: 0 0 var(--space-3);
+  font: 700 9.5px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.kbd-sec ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.kbd-sec li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--border);
+}
+.kbd-sec li:last-child { border-bottom: none; }
+.kbd-keys {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  min-width: 110px;
+  gap: 4px;
+}
+.kbd-keys kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  font: 600 10.5px/1 var(--font-mono);
+  color: var(--fg);
+  letter-spacing: 0.04em;
+}
+.kbd-or {
+  color: var(--fg-quaternary);
+  font-size: 10px;
+  padding: 0 1px;
+}
+.kbd-desc {
+  font: 400 var(--fs-sm)/1.4 var(--font-sans);
+  color: var(--fg-secondary);
+}
+.kbd-sheet-foot {
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--border);
+  background: rgba(10, 9, 8, 0.4);
+  font: 500 var(--fs-xs)/1 var(--font-sans);
+  color: var(--fg-tertiary);
+  text-align: center;
+}
+.kbd-sheet-foot kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 5px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font: 600 9.5px/1 var(--font-mono);
+  color: var(--fg-secondary);
+  margin: 0 2px;
+}
+
+/* ============================================================
+ * v30 — Drag-target highlight for file drop on agent rows
+ * ============================================================ */
+.agent-row.drag-target,
+.vis-node.drag-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  background: var(--accent-soft);
+  position: relative;
+}
+.agent-row.drag-target::after,
+.vis-node.drag-target::after {
+  content: '↓ drop file here · {{file:…}}';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font: 700 var(--fs-md)/1 var(--font-mono);
+  color: var(--accent);
+  background: rgba(255, 122, 89, 0.12);
+  border-radius: inherit;
+  pointer-events: none;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  filter: drop-shadow(0 0 12px var(--accent));
+}
+
+/* ============================================================
  * v28 — Slash command picker + Personas
  * Floating popover anchored under the active prompt textarea.
  * Keyboard-driven: ↑↓ navigate, Enter/Tab pick, Esc close.
