@@ -6,7 +6,30 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
-## v18–v24 — 2026-05-08 — Hustler Claude Gravity redesign
+## v18–v27 — 2026-05-08 — Hustler Claude Gravity redesign
+
+### v27 — 2026-05-08 — Drag-to-connect (`14b07b8`)
+- SVG ports on each Visual canvas node (output right · input left)
+- Wire-drag from output port → ghost bezier with marching dashed line +
+  drop-shadow follows cursor (correct under any zoom/pan)
+- Drop on input port adds `depends_on` in classic designer (source of
+  truth), idempotent, with toast confirmation
+- Esc + pointerup-elsewhere cancel cleanly; self-loops blocked
+- Closes the last n8n-parity gap (could only delete connections before)
+
+### v26 — 2026-05-08 — ANSI parser + Terminal/Visual rebrand (`d1b3845`)
+- New `ansiToHtml()` handles SGR escape sequences in raw view mode:
+  8 base colors + bright variants (FG + BG), bold, dim, underline,
+  256-color palette, true-color (rgb), proper reset, non-SGR CSI strip
+- ANSI palette tuned for warm-black background (bright-red is
+  Hustler coral — errors pop in brand color)
+- Auto-applied per panel: zero overhead for clean streams (quick reject
+  on missing 0x1B), `.ansi-rendered` class swap when colors detected
+- 📋 Classic toggle renamed to ⌨ Terminal (matches user mental model);
+  active segment now uses full accent gradient with depth shadow
+- ◇ Visual gets cleaner mark; toggle widened with monospace icons
+
+
 
 A six-commit shell redesign that takes the dashboard from "experimental
 custom" to a unified premium product. No backend or API contract changes
@@ -20,7 +43,22 @@ Driving documents (sub-agent research):
 - `notes/redesign-wireframe-spec.md` — 3 layout proposals + recommendation
 - `notes/redesign-master-plan.md` — implementation roadmap
 
-### v24 — 2026-05-08 — Workspace rail polish + docs (current)
+### v25 — 2026-05-08 — Inspector rail (`066e602`)
+- New 340px right rail (toggle-able): contextual panel for selected agent
+- Click any agent panel → populates inspector + opens; selected panel
+  gets accent ring
+- Three sections: Agent (label, model, family, depends, streaming) ·
+  Live state (status pill, elapsed, output size, token estimate) · Prompt
+  (full text, monospace box, 280px max-height + scroll)
+- Three actions: Copy prompt · Copy output · Jump to designer row
+  (target row flashes coral for 1.1s)
+- Live-refreshes on SSE status events for the focused agent
+- Toolbar button "⌖ inspector" + keyboard "i" + double-click right
+  gutter to close; visibility persisted in localStorage
+- Grid extends from 5 to 7 columns when shown (rail | g | designer |
+  g | monitor | g | inspector); --cg-col-3 width persisted
+
+### v24 — 2026-05-08 — Workspace rail polish + docs (`9ce5c95`)
 - Workspace cards: warm-tinted hover, accent-gradient stripe on active,
   red close-button on hover, smoother motion + token-aligned spacing
 - `+ new workspace` button: dashed accent border, fills with coral on hover
