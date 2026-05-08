@@ -993,23 +993,20 @@ function populatePresets() {
   };
 }
 
-// Tiny non-blocking toast (used by preset variable nudge)
+// Tiny non-blocking toast (used by preset variable nudge).
+// Styling lives in dashboard.css (.cg-toast) so it inherits design tokens.
 function toast(msg, ms = 4500) {
   let el = document.getElementById("cg-toast");
   if (!el) {
     el = document.createElement("div");
     el.id = "cg-toast";
-    el.style.cssText = "position:fixed;bottom:20px;right:20px;z-index:2000;" +
-      "background:rgba(20,20,24,0.95);color:#fff;padding:10px 14px;" +
-      "border-radius:8px;border:1px solid #a78bfa;font-size:12px;" +
-      "max-width:380px;box-shadow:0 8px 24px rgba(0,0,0,0.5);" +
-      "transition:opacity 0.25s;";
+    el.className = "cg-toast";
     document.body.appendChild(el);
   }
   el.textContent = msg;
-  el.style.opacity = "1";
+  el.classList.add("cg-toast--visible");
   clearTimeout(el._t);
-  el._t = setTimeout(() => { el.style.opacity = "0"; }, ms);
+  el._t = setTimeout(() => { el.classList.remove("cg-toast--visible"); }, ms);
 }
 
 // ---------- agent row designer ----------
