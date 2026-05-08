@@ -27,6 +27,13 @@ produkt s power-user features a vlastní brutal značkou. **15 commitů**,
 | v29 | `1316fe8` | Light mode (Ctrl+Shift+L) + mobile responsive skin (≤900px stacks vertical, ≤600px phone) |
 | v30 | `dfd2b7e` | Keyboard cheat sheet (?) covering 23 shortcuts in 5 sections + drag-drop file upload onto agent rows |
 | v31 | `dacabf4` | **Brutal Hustler logo + desktop icon** — SVG mark + full wordmark, multi-res `.ico`, Apple touch icon, `make-icons.py` Pillow generator, `install-desktop-shortcut.ps1` drops CLAUDEGRAVITY.lnk |
+| v32 | `f1afa2c` | Palette: × button + clickable esc kbd + actionable empty state |
+| v33 | `b8960c3` | Palette: bullet-proof close (force-hide), draggable titlebar; matching kbd-sheet close UX |
+| v34 | `b7d0d8b` | Designer scroll (status-bar subtract), drag-to-connect (ports above bodies), API keys per-section save |
+| v35 | `3cc59a5` | **CRITICAL** — `[hidden] { display: none !important; }` — root cause of every "won't close" report |
+| v36 | `be47e54` | **CRITICAL** — duplicate `setViewMode` + `escapeHtml` declarations (Visual mode now persists across refresh) |
+| v37 | `72a4f02` | Auto-connect new nodes (Make/n8n), right-click context menu (Edit/Run-from-here/Clone/Copy-ref/Delete), animated connection flow during runs |
+| v37.1 | `3835ee1` | Context menu Esc race fix (requestAnimationFrame + capture phase) |
 
 **Driving research artifacts** (in `notes/`):
 - `redesign-competitor-analysis.md` — CMUX, Claude Squad, n8n, Linear, Mac, Warp, Charm patterns

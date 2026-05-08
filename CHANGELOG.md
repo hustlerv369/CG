@@ -6,6 +6,61 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
+## v32–v37 — 2026-05-08 — Audit + Make/n8n-grade visual UX
+
+A full hands-on audit pass (live in Chromium via MCP) found and fixed
+five concrete bugs the user hit during real use, plus shipped three
+Make/n8n-style ergonomics on the Visual canvas.
+
+### v37.1 — Context menu Escape race (`3835ee1`)
+- requestAnimationFrame instead of setTimeout(0) to install close
+  listeners; capture-phase Esc so context menu closes reliably even
+  in fast input sequences
+
+### v37 — Auto-connect, context menu, animated flow (`72a4f02`)
+- "+ node" auto-connects new node from last existing node's output
+  (Make/n8n behavior); first node in empty canvas has no inbound edge
+- Right-click any node → glass-blurred context menu: Edit · Run from
+  here · Clone (with offset position) · Copy {{label}} ref · Delete
+- Connections feeding a running node now have animated dashes
+  (stroke-dashoffset 800ms linear infinite) — visible coral flow
+
+### v36 — Duplicate function declarations (`be47e54`)
+- Two `setViewMode` declarations: line 219 (visual mode persist) was
+  silently dead because line 2209 (output renderer) hoisted on top
+  of it. Renamed line 219 to persistVisualMode(). Visual mode now
+  actually persists across page refreshes.
+- Two `escapeHtml` declarations: line 4324's lacked single-quote
+  escape (latent XSS). Removed; line 2291 wins everywhere.
+
+### v35 — `[hidden]` attribute now actually hides modals (`3cc59a5`)
+- Root cause behind every "palette won't close" report from v32–v34:
+  CSS `display: flex` on `.palette` was overriding the UA stylesheet's
+  `[hidden] { display: none }`, leaving the palette visible no matter
+  how many JS handlers fired.
+- One-line fix: `[hidden] { display: none !important; }`
+
+### v34 — Three reported bugs (`b7d0d8b`)
+- Designer column scroll: main height now subtracts the 28px status
+  bar (calc(100vh - 53px - 28px))
+- Drag-to-connect: ports now render AFTER node bodies (was before, so
+  foreignObjects covered them and stole pointerdown). Bumped radius
+  5 → 6 and pushed cx outside body bounds for unambiguous targeting
+- API keys save: per-section "💾 Save API keys" button + inline
+  status "✓ Saved · N keys active" + toast
+
+### v33 — Bullet-proof palette close + draggable (`b8960c3`)
+- closePalette() force-hides regardless of state flag
+- Capture-phase Esc on window
+- Palette grows a draggable titlebar with always-visible × button;
+  drag to move, double-click to recenter
+- Keyboard sheet (?) gets matching × + esc-pill close affordances
+
+### v32 — Explicit close + actionable empty state (`f1afa2c`)
+- × button + clickable "esc" kbd pill in palette search bar
+- Direct Escape handler on the input element
+- Empty state shows "Clear search" + "Close palette" buttons
+
 ## v18–v31 — 2026-05-08 — Hustler Claude Gravity redesign
 
 ### v31 — 2026-05-08 — Brutal logo + desktop icon (`dacabf4`)
