@@ -2125,13 +2125,15 @@ PRESETS: list[dict[str, Any]] = [
     # ============================================================
     {
         "id": "idea-to-app",
-        "title": "💡 Idea → finished app (one prompt, full project)",
-        "description": "Type your idea once in ${IDEA}. Director analyzes it. "
-                       "Three Opus specialists work in parallel (designer, "
-                       "architect, PM). Implementer (Opus 1M context) writes "
-                       "the full code. Sonnet writes tests + reviews. Final "
-                       "agent produces README + deploy guide. End result: a "
-                       "complete project you can paste into a repo and run.",
+        "title": "💡 Idea → finished app (one prompt, multi-vendor team)",
+        "description": "Type your idea once in ${IDEA}. A mixed team of Claude "
+                       "AND Gemini agents collaborates: Opus directs + writes "
+                       "the architecture and code (1M context for big specs), "
+                       "Gemini Pro brings independent design + testing + market "
+                       "perspective, Sonnet runs the code review, Gemini Flash "
+                       "writes the docs. End result: a complete project you can "
+                       "paste into a repo and run, built by AIs from two vendors "
+                       "checking each other's work.",
         "variables": {
             "IDEA": "An app for solo freelancers to track billable hours and "
                     "auto-generate invoices in PDF. Mobile-first PWA. Stripe "
@@ -2156,9 +2158,10 @@ PRESETS: list[dict[str, Any]] = [
                           "## Idea\n${IDEA}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "designer",
+                "agent": "gemini-pro", "label": "designer",
                 "depends_on": ["director"],
-                "prompt": "You are the lead designer. From the spec, output:\n\n"
+                "prompt": "You are the lead designer (different vendor than the "
+                          "director, so bring fresh visual judgment). From the spec, output:\n\n"
                           "## Design tokens\nCSS custom properties block — colors (hex), type scale, spacing scale, radii, shadows.\n\n"
                           "## Component inventory\n10-15 components needed (Button, Input, DataTable, …) with one-line spec each.\n\n"
                           "## Three key screens\nFor each: name, purpose, layout described in 6-10 bullets, then a self-contained inline SVG (≥800×500) showing the actual layout. NOT generic placeholders — real labels, real button text, real numbers.\n\n"
@@ -2198,9 +2201,11 @@ PRESETS: list[dict[str, Any]] = [
                           "## Design tokens + components\n{{designer}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "tests",
+                "agent": "gemini-pro", "label": "tests",
                 "depends_on": ["director", "implementation"],
-                "prompt": "Write thorough tests for this implementation. Cover:\n"
+                "prompt": "You are the test author (different vendor than the "
+                          "implementer, so you'll catch what they missed). "
+                          "Write thorough tests for this implementation. Cover:\n"
                           "- Happy path for every endpoint in the API contract\n"
                           "- Each acceptance-criterion bullet\n"
                           "- Edge cases (null/empty/zero/negative/overflow)\n"
@@ -2227,7 +2232,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Implementation\n{{implementation}}\n\n## Tests\n{{tests}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "readme-deploy",
+                "agent": "gemini-flash", "label": "readme-deploy",
                 "depends_on": ["director", "architect", "implementation"],
                 "prompt": "Write the project's complete README + deploy guide:\n\n"
                           "## README.md\n- Title + tagline (≤12 words)\n- Hero "
