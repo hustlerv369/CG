@@ -396,9 +396,11 @@ main {
   gap: 0;
 }
 
-/* K5 + v20 — orchestrator: workspaces rail | gutter | designer | gutter | monitor
- * Column widths controlled by --cg-col-* CSS vars (set by JS, persisted to
- * localStorage). Gutters are 5px draggable handles between every pair.
+/* K5 + v20 + v25 — orchestrator layout grid
+ * 5 logical zones, separated by 5px draggable gutters:
+ *   workspaces rail | gutter | designer | gutter | monitor [ | gutter | inspector ]
+ * Inspector column appears only when body has .cg-inspector-shown class.
+ * Column widths controlled by --cg-col-* CSS vars persisted to localStorage.
  */
 main#tab-orchestrator.tab-pane.active {
   grid-template-columns:
@@ -406,31 +408,66 @@ main#tab-orchestrator.tab-pane.active {
     5px
     var(--cg-col-2, 380px)
     5px
-    1fr;
+    1fr
+    0px
+    0px;
+}
+body.cg-inspector-shown main#tab-orchestrator.tab-pane.active {
+  grid-template-columns:
+    var(--cg-col-1, 56px)
+    5px
+    var(--cg-col-2, 380px)
+    5px
+    1fr
+    5px
+    var(--cg-col-3, 340px);
 }
 /* v16/visual: when Visual mode is active, expand the designer column
  * to share the page 50/50 with the monitor (instead of being capped
- * at 380px). Layout: rail (56px) | gutter | canvas (1fr) | gutter | monitor (1fr) */
+ * at 380px). Layout: rail | gutter | canvas (1fr) | gutter | monitor (1fr) */
 body.visual-mode-active main#tab-orchestrator.tab-pane.active {
   grid-template-columns:
     var(--cg-col-1, 56px)
     5px
     var(--cg-col-2-visual, 1fr)
     5px
-    1fr;
+    1fr
+    0px
+    0px;
+}
+body.visual-mode-active.cg-inspector-shown main#tab-orchestrator.tab-pane.active {
+  grid-template-columns:
+    var(--cg-col-1, 56px)
+    5px
+    var(--cg-col-2-visual, 1fr)
+    5px
+    1fr
+    5px
+    var(--cg-col-3, 340px);
 }
 /* Collapsed-rail state */
 body.cg-rail-collapsed main#tab-orchestrator.tab-pane.active {
-  grid-template-columns: 0px 5px var(--cg-col-2, 380px) 5px 1fr;
+  grid-template-columns: 0px 5px var(--cg-col-2, 380px) 5px 1fr 0px 0px;
+}
+body.cg-rail-collapsed.cg-inspector-shown main#tab-orchestrator.tab-pane.active {
+  grid-template-columns: 0px 5px var(--cg-col-2, 380px) 5px 1fr 5px var(--cg-col-3, 340px);
 }
 body.cg-rail-collapsed .workspaces-rail {
   display: none;
 }
 /* Collapsed-designer state */
 body.cg-designer-collapsed main#tab-orchestrator.tab-pane.active {
-  grid-template-columns: var(--cg-col-1, 56px) 5px 0px 5px 1fr;
+  grid-template-columns: var(--cg-col-1, 56px) 5px 0px 5px 1fr 0px 0px;
+}
+body.cg-designer-collapsed.cg-inspector-shown main#tab-orchestrator.tab-pane.active {
+  grid-template-columns: var(--cg-col-1, 56px) 5px 0px 5px 1fr 5px var(--cg-col-3, 340px);
 }
 body.cg-designer-collapsed .designer {
+  display: none;
+}
+/* Inspector + its gutter are only visible when shown */
+body:not(.cg-inspector-shown) .inspector,
+body:not(.cg-inspector-shown) .resize-gutter--inspector {
   display: none;
 }
 body.visual-mode-active #classic-pane {
@@ -2215,6 +2252,22 @@ select optgroup {
 .agent-panel--block.status-failed    { border-left-color: var(--error); }
 .agent-panel--block.status-cancelled { border-left-color: var(--fg-tertiary); opacity: 0.74; }
 
+/* v25 — selected panel (mirrors inspector focus) */
+.agent-panel--block.is-selected {
+  border-color: var(--accent-strong);
+  box-shadow: var(--shadow-card),
+              0 0 0 1px var(--accent) inset;
+}
+
+/* v25 — designer agent row flashes when "jump to row" is clicked */
+.agent-row.is-flash {
+  animation: rowFlash 1100ms var(--ease-out);
+}
+@keyframes rowFlash {
+  0%   { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+  100% { background: transparent; box-shadow: none; }
+}
+
 .agent-family-dot {
   width: 8px;
   height: 8px;
@@ -2336,6 +2389,192 @@ select optgroup {
 }
 .agent-panel-log::-webkit-scrollbar-thumb:hover {
   background: var(--accent-strong);
+}
+
+/* ============================================================
+ * v25 — Inspector rail (right column, contextual to selection)
+ * ============================================================ */
+.inspector {
+  display: flex;
+  flex-direction: column;
+  background: rgba(8, 7, 6, 0.62);
+  backdrop-filter: blur(20px) saturate(160%);
+  -webkit-backdrop-filter: blur(20px) saturate(160%);
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+  min-width: 0;
+  animation: scaleFadeIn 220ms var(--ease-out);
+}
+.inspector-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+.inspector-title {
+  font: 700 var(--fs-micro)/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.inspector-close {
+  width: 22px;
+  height: 22px;
+}
+.inspector-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-4);
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+.inspector-body::-webkit-scrollbar { width: 6px; }
+.inspector-body::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+.inspector-empty {
+  text-align: center;
+  padding: var(--space-6) var(--space-3);
+  color: var(--fg-tertiary);
+}
+.inspector-empty-glyph {
+  display: block;
+  font-size: 40px;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  margin-bottom: var(--space-3);
+  filter: drop-shadow(0 0 18px rgba(255, 122, 89, 0.4));
+}
+.inspector-empty p {
+  font: 500 var(--fs-md)/1.5 var(--font-sans);
+  color: var(--fg-secondary);
+  margin: 0 0 var(--space-3);
+}
+.inspector-empty-tips {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  text-align: left;
+  display: inline-block;
+  font: 400 var(--fs-sm)/1.7 var(--font-sans);
+  color: var(--fg-tertiary);
+}
+.inspector-empty-tips li { padding: 2px 0; }
+
+/* Populated inspector content */
+.ins-section {
+  margin-bottom: var(--space-5);
+}
+.ins-section:last-child { margin-bottom: 0; }
+.ins-section-title {
+  display: block;
+  font: 700 9.5px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-tertiary);
+  margin-bottom: var(--space-2);
+}
+.ins-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+  border-bottom: 1px dashed var(--border);
+  font: 500 var(--fs-sm)/1.4 var(--font-sans);
+}
+.ins-row:last-child { border-bottom: none; }
+.ins-row-label {
+  flex-shrink: 0;
+  width: 90px;
+  color: var(--fg-tertiary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  font-size: 9.5px;
+}
+.ins-row-value {
+  flex: 1;
+  color: var(--fg);
+  font-family: var(--font-mono);
+  font-size: var(--fs-sm);
+  word-break: break-word;
+}
+.ins-row-value .badge { font-size: 9.5px; }
+.ins-prompt {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  font: 400 var(--fs-sm)/1.55 var(--font-mono);
+  color: var(--fg-secondary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 280px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+}
+.ins-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+  margin-top: var(--space-2);
+}
+.ins-actions button {
+  font-size: var(--fs-xs);
+  padding: 6px var(--space-3);
+}
+.ins-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font: 600 9.5px/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.ins-pill .badge-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Inspector toggle button in monitor toolbar */
+.inspector-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font: 500 var(--fs-xs)/1 var(--font-sans);
+}
+.inspector-toggle.active,
+body.cg-inspector-shown .inspector-toggle {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+.inspector-toggle-label {
+  letter-spacing: 0.02em;
+}
+@media (max-width: 1280px) {
+  .inspector-toggle-label { display: none; }
+}
+
+/* Pulse the gutter when inspector first opens */
+.resize-gutter--inspector::before {
+  background: var(--accent-strong);
+}
+.resize-gutter--inspector:hover::before,
+.resize-gutter--inspector.is-dragging::before {
+  background: var(--accent);
 }
 
 /* ============================================================

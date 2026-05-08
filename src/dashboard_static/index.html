@@ -188,6 +188,12 @@
           <button class="seg" data-layout="4" title="2×2 grid (4 panes)">⊠</button>
           <button class="seg" data-layout="n" title="Compact grid (auto, smaller min)">▦</button>
         </div>
+        <!-- v25 — Inspector toggle -->
+        <button class="ghost inspector-toggle" id="inspector-toggle-btn"
+                title="Toggle inspector rail (I)">
+          <span class="ap-icon">⌖</span>
+          <span class="inspector-toggle-label">inspector</span>
+        </button>
       </div>
       <div id="agent-grid" class="agent-grid">
         <div class="empty-state">
@@ -196,6 +202,34 @@
         </div>
       </div>
     </section>
+
+    <!-- v25 — resize gutter between monitor and inspector -->
+    <div class="resize-gutter resize-gutter--inspector" data-gutter="monitor-inspector"
+         role="separator" aria-orientation="vertical"
+         title="Drag to resize · Double-click to close"></div>
+
+    <!-- v25 — Inspector rail (right column, contextual to selection) -->
+    <aside class="inspector" id="inspector" aria-label="Inspector">
+      <header class="inspector-head">
+        <span class="inspector-title">Inspector</span>
+        <button class="ap-action inspector-close" id="inspector-close-btn"
+                title="Close inspector (or double-click gutter)">
+          <span class="ap-icon">×</span>
+        </button>
+      </header>
+      <div class="inspector-body" id="inspector-body">
+        <div class="inspector-empty">
+          <span class="inspector-empty-glyph">⌖</span>
+          <p>Click any agent panel to inspect it here.</p>
+          <ul class="inspector-empty-tips">
+            <li>· Live status, elapsed, token estimate</li>
+            <li>· Full prompt + dependencies</li>
+            <li>· Family, model, streaming flag</li>
+            <li>· Quick copy / kill / re-run actions</li>
+          </ul>
+        </div>
+      </div>
+    </aside>
   </main>
 
   <main id="tab-editor" class="tab-pane editor-pane">

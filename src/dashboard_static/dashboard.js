@@ -1645,6 +1645,10 @@ function handleStatus(d) {
   if (d.exit_code !== null && d.exit_code !== undefined) {
     p.exitEl.textContent = `exit ${d.exit_code}`;
   }
+  // v25 — refresh inspector if it's currently showing this agent
+  if (typeof refreshInspectorIfShowing === "function") {
+    refreshInspectorIfShowing(d.label);
+  }
 }
 
 function handleSnapshot(d) {
@@ -2756,12 +2760,211 @@ document.addEventListener("DOMContentLoaded", () => {
   initResizeGutters();
   initLayoutToggle();
   initHeaderPalette();
+  initInspector();
 });
 
 /* v23 — header search-bar opens the ⌘K palette */
 function initHeaderPalette() {
   const btn = document.getElementById("header-palette-btn");
   if (btn) btn.addEventListener("click", openPalette);
+}
+
+/* ----------------------------------------------------------
+ * v25 — Inspector rail
+ * Right-side contextual panel; opens on agent click or via
+ * toolbar toggle / keyboard "I". Persists visibility.
+ * ---------------------------------------------------------- */
+const CG_INSPECTOR_KEY = "cg.inspector.shown";
+let _inspectorState = { agentLabel: null };
+
+function initInspector() {
+  const toggleBtn = document.getElementById("inspector-toggle-btn");
+  const closeBtn  = document.getElementById("inspector-close-btn");
+  const grid      = document.getElementById("agent-grid");
+
+  // Restore visibility
+  const stored = localStorage.getItem(CG_INSPECTOR_KEY) === "1";
+  if (stored) document.body.classList.add("cg-inspector-shown");
+
+  // Init col-3 width from layout state
+  const layout = cgLoadLayout();
+  if (layout.col3) {
+    document.documentElement.style.setProperty("--cg-col-3", `${layout.col3}px`);
+  }
+
+  if (toggleBtn) toggleBtn.addEventListener("click", () => toggleInspector());
+  if (closeBtn)  closeBtn.addEventListener("click", () => setInspectorShown(false));
+
+  // Click any agent panel → populate inspector + show
+  if (grid) {
+    grid.addEventListener("click", (e) => {
+      const panel = e.target.closest(".agent-panel");
+      if (!panel) return;
+      // Don't capture clicks on action buttons
+      if (e.target.closest(".ap-action") || e.target.closest("button")) return;
+      const label = findAgentLabelFromPanel(panel);
+      if (label) {
+        renderInspector(label);
+        setInspectorShown(true);
+        // Highlight selected
+        grid.querySelectorAll(".agent-panel.is-selected")
+            .forEach(p => p.classList.remove("is-selected"));
+        panel.classList.add("is-selected");
+      }
+    });
+  }
+
+  // Keyboard "i" toggles inspector (when not typing in an input)
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "i" && e.key !== "I") return;
+    const t = e.target;
+    if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" ||
+              t.isContentEditable || t.closest(".CodeMirror"))) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    e.preventDefault();
+    toggleInspector();
+  });
+}
+
+function findAgentLabelFromPanel(panel) {
+  if (!panel || !state || !state.panels) return null;
+  for (const [label, p] of Object.entries(state.panels)) {
+    if (p && p.root === panel) return label;
+  }
+  // Fallback: read .agent-label text
+  const labelEl = panel.querySelector(".agent-label");
+  return labelEl ? labelEl.textContent.trim() : null;
+}
+
+function toggleInspector() {
+  setInspectorShown(!document.body.classList.contains("cg-inspector-shown"));
+}
+function setInspectorShown(show) {
+  document.body.classList.toggle("cg-inspector-shown", !!show);
+  try { localStorage.setItem(CG_INSPECTOR_KEY, show ? "1" : "0"); } catch {}
+}
+
+function renderInspector(agentLabel) {
+  const body = document.getElementById("inspector-body");
+  if (!body) return;
+  _inspectorState.agentLabel = agentLabel;
+
+  // Find agent spec from current state.spec or panels
+  const spec = (state.spec && Array.isArray(state.spec))
+    ? state.spec.find(a => a.label === agentLabel)
+    : null;
+  const panel = state.panels && state.panels[agentLabel];
+
+  if (!spec && !panel) {
+    body.innerHTML = `<div class="inspector-empty">
+      <span class="inspector-empty-glyph">?</span>
+      <p>Couldn't find spec for <strong>${escapeHtml(agentLabel)}</strong>.</p>
+    </div>`;
+    return;
+  }
+
+  const fam = spec ? familyOf(spec.agent) : "other";
+  const model = spec ? spec.agent : "(unknown)";
+  const status = panel
+    ? (panel.statusBadge.querySelector(".badge-text")?.textContent || "queued")
+    : "queued";
+  const buf = (panel && panel.rawBuffer) || "";
+  const charCount = buf.length;
+  const tokApprox = Math.round(charCount / 4);
+  const elapsedTxt = panel && panel.elapsedEl
+    ? (panel.elapsedEl.textContent || "--:--") : "--:--";
+  const deps = (spec && spec.depends_on && spec.depends_on.length)
+    ? spec.depends_on.join(", ") : "—";
+  const streaming = spec && spec.streaming ? "yes" : "—";
+  const promptText = spec ? (spec.prompt || "") : "";
+
+  body.innerHTML = `
+    <section class="ins-section">
+      <span class="ins-section-title">Agent</span>
+      <div class="ins-row">
+        <span class="ins-row-label">Label</span>
+        <span class="ins-row-value">${escapeHtml(agentLabel)}</span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Model</span>
+        <span class="ins-row-value">
+          <span class="badge ${fam}">${escapeHtml(shortAgentLabel(model))}</span>
+        </span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Family</span>
+        <span class="ins-row-value">${escapeHtml(fam)}</span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Depends</span>
+        <span class="ins-row-value">${escapeHtml(deps)}</span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Streaming</span>
+        <span class="ins-row-value">${escapeHtml(streaming)}</span>
+      </div>
+    </section>
+
+    <section class="ins-section">
+      <span class="ins-section-title">Live state</span>
+      <div class="ins-row">
+        <span class="ins-row-label">Status</span>
+        <span class="ins-row-value">
+          <span class="badge status ${escapeHtml(status)}">
+            <span class="badge-dot"></span>
+            <span class="badge-text">${escapeHtml(status)}</span>
+          </span>
+        </span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Elapsed</span>
+        <span class="ins-row-value">${escapeHtml(elapsedTxt)}</span>
+      </div>
+      <div class="ins-row">
+        <span class="ins-row-label">Output</span>
+        <span class="ins-row-value">
+          ${formatCount(charCount)} chars · ~${formatCount(tokApprox)} tok
+        </span>
+      </div>
+    </section>
+
+    <section class="ins-section">
+      <span class="ins-section-title">Prompt</span>
+      <div class="ins-prompt" id="ins-prompt-box">${escapeHtml(promptText) || '<em>(empty)</em>'}</div>
+      <div class="ins-actions">
+        <button class="ghost" id="ins-copy-prompt">Copy prompt</button>
+        <button class="ghost" id="ins-copy-output">Copy output</button>
+        <button class="ghost" id="ins-jump-row">Jump to designer row</button>
+      </div>
+    </section>
+  `;
+
+  document.getElementById("ins-copy-prompt").onclick = () => {
+    navigator.clipboard.writeText(promptText || "");
+    if (typeof toast === "function") toast("Prompt copied", 1200);
+  };
+  document.getElementById("ins-copy-output").onclick = () => {
+    navigator.clipboard.writeText(buf || "");
+    if (typeof toast === "function") toast(`Output copied (${formatCount(charCount)} chars)`, 1200);
+  };
+  document.getElementById("ins-jump-row").onclick = () => {
+    const rows = document.querySelectorAll("#agent-rows .agent-row");
+    rows.forEach(r => {
+      const labelInput = r.querySelector('input[name="label"]');
+      if (labelInput && labelInput.value === agentLabel) {
+        r.scrollIntoView({ behavior: "smooth", block: "center" });
+        r.classList.add("is-flash");
+        setTimeout(() => r.classList.remove("is-flash"), 1200);
+      }
+    });
+  };
+}
+
+/* Refresh inspector when status events flow in (live update) */
+function refreshInspectorIfShowing(label) {
+  if (!_inspectorState.agentLabel || _inspectorState.agentLabel !== label) return;
+  if (!document.body.classList.contains("cg-inspector-shown")) return;
+  renderInspector(label);
 }
 
 /* ----------------------------------------------------------
@@ -2807,12 +3010,14 @@ const CG_LAYOUT_DEFAULTS = {
   col1: 56,    // workspaces rail (px)
   col2: 380,   // designer (px)
   col2v: null, // designer in visual mode (null = 1fr)
+  col3: 340,   // inspector (px) — only visible when shown
   railCollapsed: false,
   designerCollapsed: false,
 };
 const CG_LAYOUT_BOUNDS = {
   col1: { min: 0, max: 240, snap: 56 },
   col2: { min: 240, max: 720, snap: 380 },
+  col3: { min: 240, max: 560, snap: 340 },
 };
 
 function cgLoadLayout() {
@@ -2833,6 +3038,9 @@ function cgApplyLayout(layout) {
   const root = document.documentElement;
   root.style.setProperty("--cg-col-1", `${layout.col1}px`);
   root.style.setProperty("--cg-col-2", `${layout.col2}px`);
+  if (layout.col3) {
+    root.style.setProperty("--cg-col-3", `${layout.col3}px`);
+  }
   if (layout.col2v != null) {
     root.style.setProperty("--cg-col-2-visual", `${layout.col2v}px`);
   } else {
@@ -2883,6 +3091,11 @@ function initResizeGutters() {
         if (visualMode) {
           layout.col2v = layout.col2;
         }
+      } else if (drag.which === "monitor-inspector") {
+        // Drag right gutter → invert dx (drag left = wider inspector)
+        const next = drag.startLayout.col3 - dx;
+        const b = CG_LAYOUT_BOUNDS.col3;
+        layout.col3 = Math.max(b.min, Math.min(b.max, next));
       }
       cgApplyLayout(layout);
       drag.startLayout._latest = layout;
@@ -2913,6 +3126,10 @@ function initResizeGutters() {
         if (!layout.designerCollapsed && layout.col2 < 240) {
           layout.col2 = CG_LAYOUT_BOUNDS.col2.snap;
         }
+      } else if (g.dataset.gutter === "monitor-inspector") {
+        // Double-click on inspector gutter closes the inspector
+        document.body.classList.remove("cg-inspector-shown");
+        try { localStorage.setItem("cg.inspector.shown", "0"); } catch {}
       }
       cgApplyLayout(layout);
       cgSaveLayout(layout);
