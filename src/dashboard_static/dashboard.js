@@ -1020,6 +1020,358 @@ function populatePresets() {
   };
 }
 
+/* ============================================================
+ * v28 — Slash commands in prompt textareas
+ * Type "/" in any .prompt or .vne-prompt to open a command picker.
+ * Completions insert CG placeholder syntax ({{file:}}, {{git:diff}},
+ * {{web:URL}}, ${VAR}) and personas (predefined system prompts).
+ * ============================================================ */
+const PERSONAS_KEY = "cg.personas.v1";
+
+const PERSONAS_BUILTIN = [
+  { id: "code-reviewer", icon: "🔍", name: "Senior code reviewer",
+    body: "You are a senior staff engineer reviewing code. Look for: bugs, race conditions, off-by-one errors, security issues, performance problems, missing edge cases, unclear naming, and over-engineering. Quote the exact line. Be terse — bullet points, no preamble." },
+  { id: "security-auditor", icon: "🛡", name: "Security auditor",
+    body: "You are an OWASP-trained security auditor. Find injection (SQL, command, prompt), auth/authz holes, missing input validation, secrets in code, insecure deserialization, SSRF, XSS, and CSRF. Output: severity (Critical/High/Med/Low), CWE id, exact line, exploitation sketch, fix." },
+  { id: "concise-summarizer", icon: "✦", name: "Concise summarizer",
+    body: "Summarize the input in ≤5 bullets. No preamble, no closing remarks, no apologies. Each bullet ≤20 words. Pull out concrete numbers and names. Match the source language (CZ if Czech, EN otherwise)." },
+  { id: "devils-advocate", icon: "⚔", name: "Devil's advocate critic",
+    body: "You are the strongest critic of the proposal. Don't be polite — find every weakness, hidden assumption, scalability concern, and edge case. Steel-man your objections. End with: 'Strongest objection: …' (one sentence)." },
+  { id: "pair-buddy", icon: "🤝", name: "Pair-programming buddy",
+    body: "You are a pair-programming buddy. Don't write code unless asked — instead, ask probing questions, suggest test cases, point out tradeoffs, and propose simpler alternatives. Encourage thinking out loud. Match the developer's vibe (terse if they're terse)." },
+  { id: "czech-translator", icon: "🇨🇿", name: "Czech translator",
+    body: "Translate the input to natural, idiomatic Czech. Preserve formatting (markdown, code blocks, lists). Don't add commentary, don't translate code identifiers, don't translate quoted brand names. Match register (formal/casual) of the source." },
+  { id: "test-writer", icon: "🧪", name: "Test writer",
+    body: "Write thorough tests for the given code. Include: happy path, edge cases (null/empty/zero/negative/max), error paths, race conditions if relevant. Use the framework already present in the project. No prose — just the test file content." },
+  { id: "rubber-duck", icon: "🦆", name: "Rubber duck",
+    body: "Listen to the user describe their problem. Ask exactly 3 clarifying questions, one at a time. Don't propose solutions until they confirm you've understood. After 3 rounds, summarize what they actually need in 1 paragraph." },
+];
+
+function loadPersonas() {
+  try {
+    const raw = localStorage.getItem(PERSONAS_KEY);
+    const custom = raw ? JSON.parse(raw) : [];
+    return [...PERSONAS_BUILTIN, ...custom];
+  } catch {
+    return [...PERSONAS_BUILTIN];
+  }
+}
+function saveCustomPersonas(custom) {
+  try { localStorage.setItem(PERSONAS_KEY, JSON.stringify(custom || [])); } catch {}
+}
+function getCustomPersonas() {
+  try {
+    const raw = localStorage.getItem(PERSONAS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+
+/* The slash-command catalog. Each entry can either insert text directly
+ * (`insert`) or open a sub-picker (`open`: 'personas' | 'deps' | 'vars'). */
+function slashCommands() {
+  return [
+    { key: "file",     icon: "📄", label: "/file",     hint: "Inline a file by path",
+      insert: "{{file:PATH}}" },
+    { key: "git-diff", icon: "↧",  label: "/git-diff", hint: "Inline current diff",
+      insert: "{{git:diff}}" },
+    { key: "git-log",  icon: "⏱",  label: "/git-log",  hint: "Last 5 commits",
+      insert: "{{git:log:5}}" },
+    { key: "web",      icon: "🌐", label: "/web",      hint: "Fetch a URL as markdown",
+      insert: "{{web:URL}}" },
+    { key: "web-shot", icon: "📸", label: "/web-shot", hint: "Screenshot a URL",
+      insert: "{{web-shot:URL}}" },
+    { key: "shell",    icon: ">",  label: "/shell",    hint: "Run a shell command, inline output",
+      insert: "{{shell:CMD}}" },
+    { key: "dep",      icon: "→",  label: "/dep",      hint: "Insert {{label}} from a previous agent",
+      open: "deps" },
+    { key: "var",      icon: "$",  label: "/var",      hint: "Insert ${VAR} from saved variables",
+      open: "vars" },
+    { key: "persona",  icon: "👤", label: "/persona",  hint: "Prepend a saved system-prompt persona",
+      open: "personas" },
+  ];
+}
+
+const _slashState = {
+  el: null,        // DOM root
+  active: 0,
+  items: [],
+  query: "",
+  textarea: null,
+  triggerStart: -1, // index of the "/" that opened it
+  mode: "root",    // 'root' | 'personas' | 'deps' | 'vars'
+};
+
+function ensureSlashEl() {
+  if (_slashState.el) return _slashState.el;
+  const el = document.createElement("div");
+  el.className = "slash-menu";
+  el.setAttribute("role", "listbox");
+  el.hidden = true;
+  document.body.appendChild(el);
+  _slashState.el = el;
+  return el;
+}
+
+function placeSlashMenu(textarea) {
+  const el = _slashState.el;
+  if (!el) return;
+  // Place the menu near the textarea — anchor under bottom-left corner
+  const rect = textarea.getBoundingClientRect();
+  el.style.left = `${Math.round(rect.left)}px`;
+  el.style.top  = `${Math.round(rect.bottom + 6)}px`;
+  el.style.minWidth = `${Math.max(280, Math.round(rect.width / 2))}px`;
+}
+
+function renderSlashMenu() {
+  const el = ensureSlashEl();
+  const items = _slashState.items;
+  if (!items.length) {
+    el.innerHTML = `<div class="slash-empty">No matches for <code>${escapeHtml(_slashState.query)}</code></div>`;
+    return;
+  }
+  let html = `<div class="slash-head">${escapeHtml(headerForMode(_slashState.mode))}</div>`;
+  items.forEach((it, i) => {
+    const isActive = i === _slashState.active;
+    html += `
+      <div class="slash-item ${isActive ? "is-active" : ""}" data-idx="${i}">
+        <span class="slash-icon">${escapeHtml(it.icon || "•")}</span>
+        <span class="slash-body">
+          <span class="slash-label">${escapeHtml(it.label)}</span>
+          <span class="slash-hint">${escapeHtml(it.hint || "")}</span>
+        </span>
+      </div>`;
+  });
+  el.innerHTML = html;
+  el.querySelectorAll(".slash-item").forEach(node => {
+    node.addEventListener("mousedown", (e) => {
+      e.preventDefault(); // keep textarea focused
+      _slashState.active = Number(node.dataset.idx);
+      pickSlashItem();
+    });
+  });
+}
+function headerForMode(mode) {
+  switch (mode) {
+    case "personas": return "PERSONAS — prepend system prompt";
+    case "deps":     return "DEPENDS — labels of upstream agents";
+    case "vars":     return "VARIABLES — saved ${VARS}";
+    default:         return "SLASH COMMANDS — type to filter";
+  }
+}
+
+function fuzzy(q, t) {
+  if (!q) return 1;
+  q = q.toLowerCase(); t = t.toLowerCase();
+  if (t.includes(q)) return 100 - t.indexOf(q);
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) if (t[i] === q[qi]) qi++;
+  return qi === q.length ? 30 : 0;
+}
+
+function refreshSlashItems() {
+  const q = _slashState.query.toLowerCase();
+  let pool = [];
+  if (_slashState.mode === "root") {
+    pool = slashCommands();
+  } else if (_slashState.mode === "personas") {
+    pool = loadPersonas().map(p => ({
+      key: `persona:${p.id}`, icon: p.icon || "👤",
+      label: p.name, hint: (p.body || "").slice(0, 60),
+      insertPersona: p,
+    }));
+  } else if (_slashState.mode === "deps") {
+    const labels = readSpec().map(s => s.label).filter(Boolean);
+    pool = labels.map(l => ({
+      key: `dep:${l}`, icon: "→", label: `{{${l}}}`,
+      hint: `Insert reference to "${l}"`,
+      insert: `{{${l}}}`,
+    }));
+    if (!pool.length) {
+      pool = [{ key: "dep:none", icon: "—", label: "No upstream agents",
+               hint: "Add other rows first to see them here", insert: "" }];
+    }
+  } else if (_slashState.mode === "vars") {
+    const vars = (window.__cgVars && Array.isArray(window.__cgVars))
+      ? window.__cgVars
+      : (() => {
+          try { return JSON.parse(localStorage.getItem("cg.vars") || "[]"); }
+          catch { return []; }
+        })();
+    pool = (vars || []).map(v => ({
+      key: `var:${v.key}`, icon: "$", label: `\${${v.key}}`,
+      hint: String(v.value || "").slice(0, 60),
+      insert: `\${${v.key}}`,
+    }));
+    if (!pool.length) {
+      pool = [{ key: "var:none", icon: "—", label: "No variables saved",
+               hint: "Add some in Settings → Workflow variables", insert: "" }];
+    }
+  }
+  _slashState.items = pool
+    .map(it => ({ it, score: fuzzy(q, it.label) + fuzzy(q, it.hint || "") * 0.4 }))
+    .filter(x => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .map(x => x.it)
+    .slice(0, 12);
+  if (_slashState.active >= _slashState.items.length) _slashState.active = 0;
+}
+
+function openSlashMenu(textarea, triggerStart) {
+  _slashState.textarea = textarea;
+  _slashState.triggerStart = triggerStart;
+  _slashState.query = "";
+  _slashState.active = 0;
+  _slashState.mode = "root";
+  refreshSlashItems();
+  ensureSlashEl().hidden = false;
+  placeSlashMenu(textarea);
+  renderSlashMenu();
+}
+function closeSlashMenu() {
+  if (_slashState.el) _slashState.el.hidden = true;
+  _slashState.textarea = null;
+  _slashState.triggerStart = -1;
+  _slashState.mode = "root";
+}
+
+function pickSlashItem() {
+  const it = _slashState.items[_slashState.active];
+  const ta = _slashState.textarea;
+  if (!it || !ta) return closeSlashMenu();
+
+  // Sub-picker delegation
+  if (it.key === "var" || it.key === "dep" || it.key === "persona") {
+    _slashState.mode = it.key + (it.key === "var" ? "s" : "s"); // 'vars' / 'deps' / 'personas'
+    _slashState.query = "";
+    _slashState.active = 0;
+    refreshSlashItems();
+    renderSlashMenu();
+    return;
+  }
+
+  // Persona application: prepend "[System: ...]\n\n" to current prompt
+  if (it.insertPersona) {
+    const p = it.insertPersona;
+    const v = ta.value || "";
+    const start = _slashState.triggerStart;
+    const before = v.slice(0, start);
+    const afterRaw = v.slice(start);
+    // Drop the slash-trigger fragment up to caret
+    const caretAfter = ta.selectionEnd;
+    const after = v.slice(caretAfter);
+    const personaBlock = `[System: ${p.name}]\n${p.body}\n\n`;
+    ta.value = personaBlock + before + after;
+    // Caret right after persona block + original text head
+    const newCaret = personaBlock.length + before.length;
+    ta.setSelectionRange(newCaret, newCaret);
+    ta.dispatchEvent(new Event("input"));
+    closeSlashMenu();
+    if (typeof toast === "function") toast(`Persona applied: ${p.name}`, 1500);
+    return;
+  }
+
+  // Plain insert: replace the "/<query>" trigger with the placeholder
+  const v = ta.value || "";
+  const triggerStart = _slashState.triggerStart;
+  const caret = ta.selectionEnd;
+  const before = v.slice(0, triggerStart);
+  const after = v.slice(caret);
+  const inserted = it.insert || "";
+  ta.value = before + inserted + after;
+  // Position caret inside the placeholder argument if it has one
+  const argMatches = /:[A-Z][A-Z_]*\}\}|:URL\}\}|:CMD\}\}|:PATH\}\}/.exec(inserted);
+  if (argMatches) {
+    const start = before.length + argMatches.index + 1;
+    const end = before.length + argMatches.index + argMatches[0].length - 2;
+    ta.setSelectionRange(start, end);
+  } else {
+    const newCaret = before.length + inserted.length;
+    ta.setSelectionRange(newCaret, newCaret);
+  }
+  ta.dispatchEvent(new Event("input"));
+  closeSlashMenu();
+}
+
+function isPromptTextarea(t) {
+  if (!t) return false;
+  if (t.tagName !== "TEXTAREA") return false;
+  return t.classList.contains("prompt") || t.classList.contains("vne-prompt");
+}
+
+function initSlashCommands() {
+  // Delegate keydown on document so dynamically-added rows are covered
+  document.addEventListener("keydown", (e) => {
+    const ta = e.target;
+    const open = !!_slashState.textarea;
+
+    if (open) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        _slashState.active = Math.min(_slashState.active + 1,
+          _slashState.items.length - 1);
+        renderSlashMenu();
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        _slashState.active = Math.max(_slashState.active - 1, 0);
+        renderSlashMenu();
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        pickSlashItem();
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSlashMenu();
+        return;
+      }
+    }
+
+    if (e.key === "/" && isPromptTextarea(ta) && !e.ctrlKey && !e.metaKey) {
+      // Open menu after the slash is inserted (let default keypress through)
+      setTimeout(() => {
+        const caret = ta.selectionStart;
+        const triggerStart = caret - 1;
+        if (triggerStart < 0) return;
+        if (ta.value[triggerStart] !== "/") return;
+        openSlashMenu(ta, triggerStart);
+      }, 0);
+    }
+  });
+
+  // Update query as the user types after "/"
+  document.addEventListener("input", (e) => {
+    if (!_slashState.textarea || e.target !== _slashState.textarea) return;
+    const ta = _slashState.textarea;
+    const trigger = _slashState.triggerStart;
+    const caret = ta.selectionEnd;
+    if (caret <= trigger) return closeSlashMenu();
+    const fragment = ta.value.slice(trigger + 1, caret);
+    if (/[\s\n]/.test(fragment) || ta.value[trigger] !== "/") {
+      return closeSlashMenu();
+    }
+    _slashState.query = fragment;
+    refreshSlashItems();
+    renderSlashMenu();
+  });
+
+  // Click-away closes
+  document.addEventListener("mousedown", (e) => {
+    if (!_slashState.textarea) return;
+    if (e.target === _slashState.textarea) return;
+    if (_slashState.el && _slashState.el.contains(e.target)) return;
+    closeSlashMenu();
+  });
+
+  // Reposition on resize / scroll
+  window.addEventListener("resize", () => {
+    if (_slashState.textarea) placeSlashMenu(_slashState.textarea);
+  });
+}
+
 // Tiny non-blocking toast (used by preset variable nudge).
 // Styling lives in dashboard.css (.cg-toast) so it inherits design tokens.
 function toast(msg, ms = 4500) {
@@ -2796,6 +3148,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initLayoutToggle();
   initHeaderPalette();
   initInspector();
+  initSlashCommands();
 });
 
 /* v23 — header search-bar opens the ⌘K palette */
