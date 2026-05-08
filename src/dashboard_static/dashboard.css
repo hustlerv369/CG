@@ -294,48 +294,62 @@ header h1 {
   margin-left: 6px;
 }
 
-/* v23 — Hustler Claude Gravity brand block */
+/* v23 + v31 — Brutal Hustler CLAUDEGRAVITY brand block
+ * Mark = self-contained SVG (no chrome wrapper). Wordmark = heavy
+ * black "CLAUDEGRAVITY" + spaced sub-line "HUSTLER · MULTI-AGENT · OVERKILL".
+ */
 .brand {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
   flex-shrink: 0;
+  cursor: default;
 }
 .brand-mark {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-rise);
-  border: 1px solid var(--border);
-  filter: drop-shadow(0 0 12px rgba(255, 122, 89, 0.18));
+  width: 36px;
+  height: 36px;
+  filter: drop-shadow(0 0 12px rgba(255, 122, 89, 0.28));
   transition: filter var(--motion-fast), transform var(--motion-fast);
 }
+.brand-mark svg {
+  width: 36px;
+  height: 36px;
+  display: block;
+}
 .brand:hover .brand-mark {
-  filter: drop-shadow(0 0 16px rgba(255, 122, 89, 0.4));
-  transform: rotate(8deg);
+  filter: drop-shadow(0 0 18px rgba(255, 122, 89, 0.55));
+  transform: rotate(-4deg) scale(1.04);
 }
 .brand-wordmark {
   display: inline-flex;
   flex-direction: column;
   line-height: 1;
-  gap: 3px;
+  gap: 4px;
 }
 .brand-name {
-  font: 700 var(--fs-md)/1 var(--font-sans);
+  /* Brutal heavy condensed wordmark — gradient-clipped */
+  font: 900 var(--fs-md)/1 var(--font-sans);
   letter-spacing: 0.02em;
   background: var(--accent-gradient);
   -webkit-background-clip: text;
   background-clip: text;
   -webkit-text-fill-color: transparent;
+  text-shadow: 0 0 32px rgba(255, 122, 89, 0.18);
 }
 .brand-sub {
-  font: 600 9.5px/1 var(--font-sans);
-  letter-spacing: 0.18em;
+  font: 700 9px/1 var(--font-sans);
+  letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--fg-tertiary);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+@media (max-width: 1280px) {
+  .brand-name { font-size: var(--fs-sm); }
 }
 
 /* Header palette button — keyboard-feel search-bar */

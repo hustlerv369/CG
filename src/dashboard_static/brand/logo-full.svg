@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CLAUDEGRAVITY — Hustler-brutal full wordmark
+  Mark + stacked CLAUDE / GRAVITY wordmark + tagline.
+  Designed for the dashboard header (renders well at 280×80 and up).
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 88" width="320" height="88">
+  <defs>
+    <linearGradient id="lf-stamp" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#1a0f0a"/>
+      <stop offset="100%" stop-color="#0a0908"/>
+    </linearGradient>
+    <linearGradient id="lf-orbit" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#FF7A59"/>
+      <stop offset="55%"  stop-color="#FFB87A"/>
+      <stop offset="100%" stop-color="#F5E6D3"/>
+    </linearGradient>
+    <linearGradient id="lf-text" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#F5E6D3"/>
+      <stop offset="100%" stop-color="#FFB87A"/>
+    </linearGradient>
+    <linearGradient id="lf-cg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFE0CC"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Mark stamp -->
+  <g transform="translate(8, 12)">
+    <rect x="0" y="0" width="64" height="64" rx="12" ry="12" fill="url(#lf-stamp)"/>
+    <rect x="0.5" y="0.5" width="63" height="63" rx="11.5" ry="11.5"
+          fill="none" stroke="rgba(255,184,122,0.20)" stroke-width="1"/>
+    <ellipse cx="32" cy="32" rx="24" ry="11"
+             transform="rotate(-28 32 32)"
+             fill="none" stroke="url(#lf-orbit)" stroke-width="2.4"
+             stroke-linecap="round"/>
+    <circle cx="48.5" cy="22" r="2.4" fill="#FFB87A"/>
+    <text x="32" y="42" font-family="'Inter', sans-serif"
+          font-weight="900" font-size="26" letter-spacing="-2"
+          text-anchor="middle" fill="url(#lf-cg)">CG</text>
+    <rect x="20" y="48" width="24" height="2" rx="1" fill="#FF7A59"/>
+  </g>
+
+  <!-- Coral vertical separator bar -->
+  <rect x="84" y="18" width="3" height="52" rx="1.5" fill="url(#lf-orbit)"/>
+
+  <!-- Wordmark — CLAUDE (top) -->
+  <g font-family="'Inter', -apple-system, system-ui, sans-serif"
+     font-weight="900"
+     letter-spacing="2"
+     fill="url(#lf-text)">
+    <text x="100" y="36" font-size="22">CLAUDE</text>
+    <text x="100" y="60" font-size="22">GRAVITY</text>
+  </g>
+
+  <!-- Coral horizontal accent between the two words -->
+  <rect x="100" y="42" width="78" height="2" rx="1" fill="#FF7A59" opacity="0.85"/>
+
+  <!-- Tagline at the bottom -->
+  <g font-family="'Inter', system-ui, sans-serif"
+     font-weight="600"
+     letter-spacing="3"
+     fill="rgba(245, 235, 224, 0.55)">
+    <text x="100" y="78" font-size="9">HUSTLER · MULTI-AGENT · OVERKILL</text>
+  </g>
+</svg>

@@ -2,8 +2,18 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>CG Dashboard — multi-agent orchestrator</title>
+  <title>CLAUDEGRAVITY — Hustler multi-agent dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#0a0908" />
+  <meta name="description" content="CLAUDEGRAVITY — Hustler multi-agent orchestrator on subscriptions. Claude × Gemini × Browser pilot, parallel runs, terminal + visual modes." />
+
+  <!-- v31 — Brutal Hustler favicon + app icons -->
+  <link rel="icon" type="image/x-icon" href="/static/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16.png" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png" />
+  <link rel="icon" type="image/svg+xml" href="/static/brand/logo-mark.svg" />
+
   <link rel="stylesheet" href="/static/dashboard.css?v={{CG_BUILD}}" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
@@ -22,25 +32,39 @@
 </head>
 <body>
   <header>
-    <div class="brand" aria-label="CG — Hustler Claude Gravity">
+    <div class="brand" aria-label="CLAUDEGRAVITY — Hustler multi-agent">
       <span class="brand-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+        <!-- Brutal Hustler mark: rounded stamp · coral orbital · CG · satellite · slash -->
+        <svg viewBox="0 0 64 64" width="32" height="32" fill="none">
           <defs>
-            <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0%" stop-color="#FF7A59" />
-              <stop offset="55%" stop-color="#FFB87A" />
-              <stop offset="100%" stop-color="#F5E6D3" />
+            <linearGradient id="bm-stamp" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#1a0f0a"/>
+              <stop offset="100%" stop-color="#0a0908"/>
+            </linearGradient>
+            <linearGradient id="bm-orbit" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%"   stop-color="#FF7A59"/>
+              <stop offset="55%"  stop-color="#FFB87A"/>
+              <stop offset="100%" stop-color="#F5E6D3"/>
             </linearGradient>
           </defs>
-          <circle cx="12" cy="12" r="9" stroke="url(#brand-grad)" stroke-width="1.6" />
-          <path d="M7 12 L11 12 M13 12 L17 12 M12 7 L12 11 M12 13 L12 17"
-                stroke="url(#brand-grad)" stroke-width="1.6" stroke-linecap="round" />
-          <circle cx="12" cy="12" r="2" fill="url(#brand-grad)" />
+          <rect x="2" y="2" width="60" height="60" rx="12" ry="12" fill="url(#bm-stamp)"/>
+          <rect x="2.5" y="2.5" width="59" height="59" rx="11.5" ry="11.5"
+                fill="none" stroke="rgba(255,184,122,0.20)" stroke-width="1"/>
+          <ellipse cx="32" cy="32" rx="24" ry="11"
+                   transform="rotate(-28 32 32)"
+                   fill="none" stroke="url(#bm-orbit)" stroke-width="2.6"
+                   stroke-linecap="round"/>
+          <circle cx="48.5" cy="22" r="2.6" fill="#FFB87A"/>
+          <text x="32" y="42"
+                font-family="Inter, system-ui, sans-serif"
+                font-weight="900" font-size="26" letter-spacing="-2"
+                text-anchor="middle" fill="#FFFFFF">CG</text>
+          <rect x="20" y="48" width="24" height="2" rx="1" fill="#FF7A59"/>
         </svg>
       </span>
       <span class="brand-wordmark">
-        <span class="brand-name">CG</span>
-        <span class="brand-sub">Hustler Claude Gravity</span>
+        <span class="brand-name">CLAUDEGRAVITY</span>
+        <span class="brand-sub">HUSTLER · MULTI-AGENT · OVERKILL</span>
       </span>
     </div>
     <nav class="tabs">

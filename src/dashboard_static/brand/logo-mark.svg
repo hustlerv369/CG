@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  CLAUDEGRAVITY — Hustler-brutal logo mark
+  Square 64×64, designed to read at 16px and stamp at 256px.
+  Black rounded stamp · coral orbital ring · white "CG" monogram ·
+  amber satellite dot.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <defs>
+    <linearGradient id="cg-stamp" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#1a0f0a"/>
+      <stop offset="100%" stop-color="#0a0908"/>
+    </linearGradient>
+    <linearGradient id="cg-orbit" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"   stop-color="#FF7A59"/>
+      <stop offset="55%"  stop-color="#FFB87A"/>
+      <stop offset="100%" stop-color="#F5E6D3"/>
+    </linearGradient>
+    <linearGradient id="cg-cg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFE0CC"/>
+    </linearGradient>
+    <radialGradient id="cg-glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0%"   stop-color="rgba(255,122,89,0.35)"/>
+      <stop offset="100%" stop-color="rgba(255,122,89,0)"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Stamp base — rounded square -->
+  <rect x="2" y="2" width="60" height="60" rx="12" ry="12" fill="url(#cg-stamp)"/>
+
+  <!-- Soft inner glow -->
+  <rect x="4" y="4" width="56" height="56" rx="10" ry="10" fill="url(#cg-glow)"/>
+
+  <!-- Hairline border (premium feel) -->
+  <rect x="2.5" y="2.5" width="59" height="59" rx="11.5" ry="11.5"
+        fill="none" stroke="rgba(255,184,122,0.18)" stroke-width="1"/>
+
+  <!-- Orbital ring — rotated 28°, mid-thick stroke -->
+  <ellipse cx="32" cy="32" rx="24" ry="11"
+           transform="rotate(-28 32 32)"
+           fill="none"
+           stroke="url(#cg-orbit)"
+           stroke-width="2.4"
+           stroke-linecap="round"/>
+
+  <!-- Satellite dot riding the orbit -->
+  <circle cx="48.5" cy="22" r="2.4" fill="#FFB87A"
+          filter="drop-shadow(0 0 4px #FF7A59)"/>
+
+  <!-- "CG" brutalist monogram — heavy condensed -->
+  <g font-family="'Inter', -apple-system, system-ui, sans-serif"
+     font-weight="900"
+     letter-spacing="-2"
+     text-anchor="middle"
+     fill="url(#cg-cg)">
+    <text x="32" y="42" font-size="26">CG</text>
+  </g>
+
+  <!-- Coral accent slash under the mark -->
+  <rect x="20" y="48" width="24" height="2" rx="1" fill="#FF7A59"/>
+</svg>
