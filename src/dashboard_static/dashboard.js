@@ -3209,11 +3209,14 @@ function initKeyboardSheet() {
     overlay = document.createElement("div");
     overlay.className = "kbd-sheet-overlay";
     overlay.innerHTML = `
-      <div class="kbd-sheet-backdrop"></div>
+      <div class="kbd-sheet-backdrop" title="Click to close"></div>
       <div class="kbd-sheet" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts">
         <header class="kbd-sheet-head">
           <h3>Keyboard shortcuts</h3>
-          <kbd class="kbd-hint">esc</kbd>
+          <div class="kbd-sheet-head-actions">
+            <button type="button" class="kbd-hint-btn" title="Close (Esc)">esc</button>
+            <button type="button" class="kbd-sheet-x" title="Close" aria-label="Close">×</button>
+          </div>
         </header>
         <div class="kbd-sheet-body">
           ${KEYBOARD_SHORTCUTS.map(sec => `
@@ -3230,11 +3233,14 @@ function initKeyboardSheet() {
             </section>`).join("")}
         </div>
         <footer class="kbd-sheet-foot">
-          Press <kbd>?</kbd> again or <kbd>esc</kbd> to close
+          Press <kbd>?</kbd> again, <kbd>esc</kbd>, or click outside to close
         </footer>
       </div>`;
     document.body.appendChild(overlay);
+    // v33 — wire all close affordances
     overlay.querySelector(".kbd-sheet-backdrop").addEventListener("click", close);
+    overlay.querySelector(".kbd-hint-btn").addEventListener("click", close);
+    overlay.querySelector(".kbd-sheet-x").addEventListener("click", close);
     const esc = (ev) => {
       if (ev.key === "Escape" || ev.key === "?") {
         ev.preventDefault();
@@ -3865,15 +3871,61 @@ function initCommandPalette() {
 
   backdrop.addEventListener("click", closePalette);
 
-  // v32 — explicit close affordances (esc kbd + × button)
-  const escBtn   = document.getElementById("palette-esc-btn");
-  const closeBtn = document.getElementById("palette-close-btn");
-  if (escBtn)   escBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation(); closePalette();
+  // v32 + v33 — explicit close affordances (4 buttons + capture Esc)
+  ["palette-esc-btn", "palette-close-btn", "palette-x-big"].forEach(id => {
+    const btn = document.getElementById(id);
+    if (btn) btn.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closePalette();
+    });
   });
-  if (closeBtn) closeBtn.addEventListener("click", (e) => {
-    e.preventDefault(); e.stopPropagation(); closePalette();
-  });
+
+  // v33 — drag the palette by its titlebar; double-click = recenter
+  const titlebar = document.getElementById("palette-titlebar");
+  if (titlebar) {
+    let drag = null;
+    titlebar.addEventListener("pointerdown", (e) => {
+      // Don't start drag from the × button
+      if (e.target.closest(".palette-titlebar-x")) return;
+      e.preventDefault();
+      titlebar.setPointerCapture(e.pointerId);
+      const rect = palette.getBoundingClientRect();
+      drag = {
+        startX: e.clientX,
+        startY: e.clientY,
+        origLeft: rect.left,
+        origTop:  rect.top,
+        pointerId: e.pointerId,
+      };
+      palette.classList.add("is-dragging");
+    });
+    titlebar.addEventListener("pointermove", (e) => {
+      if (!drag) return;
+      const dx = e.clientX - drag.startX;
+      const dy = e.clientY - drag.startY;
+      const newLeft = Math.max(0, Math.min(window.innerWidth - 320, drag.origLeft + dx));
+      const newTop  = Math.max(0, Math.min(window.innerHeight - 100, drag.origTop + dy));
+      palette.style.left = `${newLeft}px`;
+      palette.style.top = `${newTop}px`;
+      palette.style.transform = "none";
+    });
+    const endDrag = (e) => {
+      if (!drag) return;
+      try { titlebar.releasePointerCapture(drag.pointerId); } catch {}
+      drag = null;
+      palette.classList.remove("is-dragging");
+    };
+    titlebar.addEventListener("pointerup", endDrag);
+    titlebar.addEventListener("pointercancel", endDrag);
+    titlebar.addEventListener("dblclick", (e) => {
+      if (e.target.closest(".palette-titlebar-x")) return;
+      // Recenter
+      palette.style.left = "";
+      palette.style.top = "";
+      palette.style.transform = "";
+    });
+  }
 
   input.addEventListener("input", () => {
     _paletteState.query = input.value;
@@ -4187,6 +4239,10 @@ function openPalette() {
   const palette  = document.getElementById("palette");
   const input    = document.getElementById("palette-input");
   if (!palette) return;
+  // Reset position to center if previously dragged
+  palette.style.left = "";
+  palette.style.top = "";
+  palette.style.transform = "";
   backdrop.hidden = false;
   palette.hidden = false;
   input.value = "";
@@ -4194,12 +4250,28 @@ function openPalette() {
   setTimeout(() => input.focus(), 30);
 }
 
+/* v33 — bullet-proof close: force-hide regardless of state flag.
+ * Previously an out-of-sync _paletteState.open could early-return here
+ * and leave the palette stuck visible. */
 function closePalette() {
-  if (!_paletteState.open) return;
   _paletteState.open = false;
-  document.getElementById("palette-backdrop").hidden = true;
-  document.getElementById("palette").hidden = true;
+  const bd = document.getElementById("palette-backdrop");
+  const p  = document.getElementById("palette");
+  if (bd) bd.hidden = true;
+  if (p)  { p.hidden = true; p.style.left = ""; p.style.top = ""; p.style.transform = ""; }
 }
+
+/* v33 — capture-phase Esc listener. Runs BEFORE any other keydown
+ * handler, so even if some component swallows Escape it still closes
+ * any open overlay. */
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const bd = document.getElementById("palette-backdrop");
+  if (bd && !bd.hidden) {
+    e.preventDefault();
+    closePalette();
+  }
+}, true);
 
 function activateTab(name) {
   const tab = document.querySelector(`.tab[data-tab="${name}"]`);

@@ -2520,6 +2520,53 @@ select optgroup {
   backdrop-filter: blur(8px) saturate(140%);
   -webkit-backdrop-filter: blur(8px) saturate(140%);
   animation: fadeIn 180ms var(--ease);
+  cursor: pointer;
+}
+.kbd-sheet-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+.kbd-hint-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px var(--space-2);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  font: 600 10px/1 var(--font-mono);
+  color: var(--fg-tertiary);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background var(--motion-micro), color var(--motion-micro),
+              border-color var(--motion-micro);
+}
+.kbd-hint-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+.kbd-sheet-x {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font: 700 18px/1 var(--font-sans);
+  cursor: pointer;
+  transition: background var(--motion-micro), color var(--motion-micro),
+              border-color var(--motion-micro), transform var(--motion-micro);
+}
+.kbd-sheet-x:hover {
+  background: var(--error);
+  color: var(--fg);
+  border-color: var(--error);
+  transform: rotate(90deg);
 }
 .kbd-sheet {
   position: relative;
@@ -3385,6 +3432,7 @@ body.status-bar-hidden .status-bar { display: none; }
   -webkit-backdrop-filter: blur(8px) saturate(140%);
   z-index: var(--z-palette);
   animation: fadeIn 180ms var(--ease);
+  cursor: pointer;  /* v33 — signal that backdrop is clickable to close */
 }
 @keyframes fadeIn {
   from { opacity: 0; }
@@ -3409,6 +3457,61 @@ body.status-bar-hidden .status-bar { display: none; }
   overflow: hidden;
   animation: scaleFadeIn 220ms var(--ease-out);
 }
+/* v33 — palette titlebar (drag handle + always-visible × close) */
+.palette-titlebar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px var(--space-3) 8px var(--space-4);
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg,
+              rgba(255, 122, 89, 0.10) 0%,
+              rgba(255, 122, 89, 0.02) 100%);
+  cursor: grab;
+  user-select: none;
+}
+.palette.is-dragging .palette-titlebar { cursor: grabbing; }
+.palette.is-dragging {
+  box-shadow: var(--shadow-overlay),
+              0 0 0 2px var(--accent);
+}
+.palette-titlebar-grip {
+  font: 700 14px/1 var(--font-mono);
+  color: var(--fg-tertiary);
+  letter-spacing: -2px;
+  pointer-events: none;
+}
+.palette-titlebar-text {
+  flex: 1;
+  font: 700 9.5px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  pointer-events: none;
+}
+.palette-titlebar-x {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  font: 700 18px/1 var(--font-sans);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--motion-micro), color var(--motion-micro),
+              border-color var(--motion-micro), transform var(--motion-micro);
+}
+.palette-titlebar-x:hover {
+  background: var(--error);
+  color: var(--fg);
+  border-color: var(--error);
+  transform: rotate(90deg);
+}
+
 .palette-search {
   display: flex;
   align-items: center;

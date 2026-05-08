@@ -586,12 +586,21 @@
   </footer>
 
   <!-- ==========================================================
-       v19 — ⌘K Command palette
-       Linear/Warp-style fuzzy launcher.
+       v19 + v33 — ⌘K Command palette
+       Linear/Warp-style fuzzy launcher with draggable header
+       and bullet-proof close affordances.
        ========================================================== -->
-  <div class="palette-backdrop" id="palette-backdrop" hidden></div>
+  <div class="palette-backdrop" id="palette-backdrop" hidden
+       title="Click to close palette"></div>
   <div class="palette" id="palette" role="dialog" aria-modal="true"
        aria-label="Command palette" hidden>
+    <header class="palette-titlebar" id="palette-titlebar"
+            title="Drag to move · Double-click to recenter">
+      <span class="palette-titlebar-grip" aria-hidden="true">⋮⋮</span>
+      <span class="palette-titlebar-text">Command palette</span>
+      <button type="button" class="palette-titlebar-x" id="palette-x-big"
+              title="Close (Esc)" aria-label="Close palette">×</button>
+    </header>
     <div class="palette-search">
       <span class="palette-search-icon">⌘</span>
       <input type="text" id="palette-input" autocomplete="off"
