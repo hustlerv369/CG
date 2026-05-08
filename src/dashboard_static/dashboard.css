@@ -1421,6 +1421,56 @@ body.visual-fullscreen .visual-canvas-wrap {
   cursor: pointer;
   pointer-events: stroke;
 }
+/* v37 — Right-click context menu for visual nodes */
+.vis-ctx-menu {
+  position: fixed;
+  z-index: var(--z-overlay);
+  min-width: 200px;
+  padding: 4px;
+  background: var(--bg-elevated);
+  backdrop-filter: blur(28px) saturate(180%);
+  -webkit-backdrop-filter: blur(28px) saturate(180%);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-overlay);
+  animation: scaleFadeIn 140ms var(--ease-out);
+  user-select: none;
+}
+.vis-ctx-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font: 500 var(--fs-sm)/1 var(--font-sans);
+  color: var(--fg);
+  transition: background var(--motion-micro), color var(--motion-micro);
+}
+.vis-ctx-item:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.vis-ctx-item.is-danger:hover {
+  background: var(--error-soft);
+  color: var(--error);
+}
+.vis-ctx-icon {
+  width: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: 600 13px/1 var(--font-mono);
+  color: var(--accent);
+}
+.vis-ctx-item.is-danger .vis-ctx-icon { color: var(--error); }
+.vis-ctx-item:hover .vis-ctx-icon { color: inherit; }
+.vis-ctx-sep {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
 /* v27 — drag-to-connect ports + ghost wire */
 .vis-port {
   fill: var(--bg-rise);
@@ -1469,10 +1519,16 @@ body.visual-fullscreen .visual-canvas-wrap {
   stroke: var(--error);
   stroke-width: 2.4;
 }
+/* v37 — flowing connection: animated dashes traveling toward target */
 .connections-layer path.flowing {
   stroke: var(--accent);
-  stroke-width: 2.6;
-  filter: drop-shadow(0 0 4px var(--accent));
+  stroke-width: 2.8;
+  filter: drop-shadow(0 0 6px var(--accent));
+  stroke-dasharray: 8 4;
+  animation: conn-flow 800ms linear infinite;
+}
+@keyframes conn-flow {
+  to { stroke-dashoffset: -12; }
 }
 .nodes-layer foreignObject { overflow: visible; }
 .vis-node {

@@ -486,6 +486,13 @@ function renderVisualCanvas() {
       node.classList.remove("dragging");
     });
 
+    // v37 — right-click context menu (Make/n8n style)
+    node.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      e.stopPropagation();
+      showVisContextMenu(e.clientX, e.clientY, s, spec, positions);
+    });
+
     fo.appendChild(node);
     nodesLayer.appendChild(fo);
   });
@@ -574,6 +581,107 @@ function visualUpdateAgentStatus(label, status, lastLine) {
   }
 }
 
+/* v37 — Right-click context menu for visual nodes */
+function showVisContextMenu(x, y, s, spec, positions) {
+  // Close any existing menu
+  document.querySelectorAll(".vis-ctx-menu").forEach(m => m.remove());
+
+  const menu = document.createElement("div");
+  menu.className = "vis-ctx-menu";
+  const items = [
+    { icon: "✎", label: "Edit", run: () => {
+      const node = document.querySelector(`.vis-node[data-label="${CSS.escape(s.label)}"]`);
+      if (node) node.classList.add("editing");
+    }},
+    { icon: "▶", label: "Run from here", run: () => {
+      // Pre-flight: filter spec to s + downstream
+      if (typeof toast === "function") toast("Run-from-node: not yet implemented (full Run runs all)", 3000);
+    }},
+    { icon: "⎘", label: "Clone", run: () => {
+      const base = s.label.replace(/-\d+$/, "");
+      let i = 2, label = `${base}-${i}`;
+      while (spec.find(x => x.label === label)) { i++; label = `${base}-${i}`; }
+      addAgentRow({
+        agent: s.agent, label,
+        prompt: s.prompt || "",
+        depends_on: s.depends_on ? [...s.depends_on] : [],
+        streaming: s.streaming,
+      });
+      // Position the clone offset from the original
+      if (positions[s.label]) {
+        positions[label] = {
+          x: positions[s.label].x + 32,
+          y: positions[s.label].y + 32,
+        };
+      }
+      renderVisualCanvas();
+      if (typeof toast === "function") toast(`Cloned ${s.label} → ${label}`, 1500);
+    }},
+    { icon: "→", label: "Copy {{label}} ref", run: () => {
+      navigator.clipboard?.writeText(`{{${s.label}}}`);
+      if (typeof toast === "function") toast(`Copied {{${s.label}}}`, 1200);
+    }},
+    { sep: true },
+    { icon: "🗑", label: "Delete", danger: true, run: () => {
+      if (!confirm(`Remove node "${s.label}"?`)) return;
+      const row = document.querySelectorAll("#agent-rows .agent-row");
+      row.forEach((r, i) => {
+        const lbl = (r.querySelector(".label").value.trim()) || `agent-${i + 1}`;
+        if (lbl === s.label) r.remove();
+      });
+      delete positions[s.label];
+      renderVisualCanvas();
+    }},
+  ];
+
+  menu.innerHTML = items.map(it =>
+    it.sep
+      ? '<div class="vis-ctx-sep"></div>'
+      : `<div class="vis-ctx-item ${it.danger ? "is-danger" : ""}" data-key="${escapeHtml(it.label)}">
+           <span class="vis-ctx-icon">${escapeHtml(it.icon)}</span>
+           <span class="vis-ctx-label">${escapeHtml(it.label)}</span>
+         </div>`
+  ).join("");
+
+  // Position with viewport clamping
+  const w = 200, h = items.length * 30 + 12;
+  const px = Math.min(x, window.innerWidth - w - 8);
+  const py = Math.min(y, window.innerHeight - h - 8);
+  menu.style.left = px + "px";
+  menu.style.top  = py + "px";
+  document.body.appendChild(menu);
+
+  // Wire item clicks
+  menu.querySelectorAll(".vis-ctx-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const key = el.dataset.key;
+      const item = items.find(i => i.label === key);
+      if (item && item.run) item.run();
+      menu.remove();
+    });
+  });
+
+  // Auto-close on outside click or Escape
+  setTimeout(() => {
+    const close = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener("mousedown", close);
+        document.removeEventListener("keydown", esc);
+      }
+    };
+    const esc = (e) => {
+      if (e.key === "Escape") {
+        menu.remove();
+        document.removeEventListener("mousedown", close);
+        document.removeEventListener("keydown", esc);
+      }
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", esc);
+  }, 0);
+}
+
 function openNodePalette() {
   const back = document.createElement("div");
   back.className = "vis-palette-backdrop";
@@ -600,9 +708,15 @@ function openNodePalette() {
       const base = a.family || "agent";
       let i = 1, label = base;
       while (spec.find(s => s.label === label)) { i++; label = `${base}-${i}`; }
-      addAgentRow({ agent: a.id, label, prompt: "" });
+      // v37 — auto-connect: depend on last existing agent (Make/n8n behavior)
+      const lastLabel = spec.length > 0 ? spec[spec.length - 1].label : null;
+      const depends_on = lastLabel ? [lastLabel] : [];
+      addAgentRow({ agent: a.id, label, prompt: "", depends_on });
       back.remove();
       renderVisualCanvas();
+      if (lastLabel && typeof toast === "function") {
+        toast(`Added ${label} · auto-connected from ${lastLabel}`, 1500);
+      }
     };
     list.appendChild(card);
   });
