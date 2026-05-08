@@ -3500,23 +3500,91 @@ const QUICK_START_VAR_FOR_PRESET = {
   "idea-to-pitch-deck":   "IDEA",
 };
 
+/* v42 — Sample idea chips per mode. Click any chip to autofill the
+ * textarea and pre-select the matching mode. Lowers the cold-start
+ * barrier from "what do I write?" to "click → tweak → ✨". */
+const QUICK_START_SAMPLES = {
+  app: [
+    { icon: "📷", label: "Photo gallery", text: "A photo gallery web app where photographers upload albums, clients comment + approve, with magic-link auth (no passwords). Stripe per-project pricing. Mobile-first PWA." },
+    { icon: "📝", label: "Markdown blog", text: "A self-hosted markdown blog engine. Write posts in `.md` files, deploy as a static site. Syntax highlighting, RSS, dark mode, comments via Giscus." },
+    { icon: "💰", label: "Freelancer invoicing", text: "An app for solo freelancers to track billable hours and auto-generate PDF invoices. Mobile-first. Stripe payments. Dark mode. CZ + EN." },
+    { icon: "📚", label: "Bookmark manager", text: "A bookmarking app that auto-summarizes pages with AI, tags them, and surfaces a weekly digest of unread links. Browser extension + web." },
+    { icon: "🎯", label: "Habit tracker", text: "A minimalist habit tracker with streaks, weekly review, and Apple Health import. Dark mode default. iOS-only PWA." },
+  ],
+  content: [
+    { icon: "🚀", label: "Multi-agent dev tools", text: "Practical multi-agent AI for small dev teams that already pay for Claude + Gemini and want to stop renting Make / Zapier monthly." },
+    { icon: "🇨🇿", label: "Czech freelance economy", text: "How the Czech solo-freelancer economy is changing: tax rules in 2026, where the work comes from, what tools to learn." },
+    { icon: "🛠", label: "Self-hosted SaaS", text: "How to ship a self-hosted SaaS in 2026 — open-source stacks, deploy options, when to NOT host yourself." },
+    { icon: "🎬", label: "AI video production", text: "Practical AI for indie video creators: Runway / Pika / Stable Video — what's actually usable in production today." },
+  ],
+  pitch: [
+    { icon: "💼", label: "Bookkeeping AI", text: "AI-native bookkeeping for solo freelancers — auto-imports invoices from email, categorizes, files VAT in CZ + DE in one click. Subscription €19/mo." },
+    { icon: "🎓", label: "Learning platform", text: "A senior-engineer learning platform that turns any open-source repo into a guided 90-minute course with AI-graded exercises. €29/mo for individuals, €299/seat enterprise." },
+    { icon: "🏥", label: "Telehealth tool", text: "A telehealth scheduling + billing tool for indie therapists in CZ/SK, with built-in insurance forms automation. €39/mo per provider." },
+  ],
+};
+
+const QUICK_START_IDEA_DRAFT_KEY = "cg.quickStart.idea.v1";
+const QUICK_START_MODE_KEY = "cg.quickStart.mode.v1";
+
 function initQuickStart() {
   const hero  = document.getElementById("quick-start");
   const adv   = document.getElementById("advanced-block");
   const goBtn = document.getElementById("quick-start-go-btn");
   const toggleBtn = document.getElementById("quick-start-toggle-advanced");
   const ideaTa = document.getElementById("quick-start-idea");
+  const samplesRow = document.getElementById("quick-start-samples-row");
   if (!hero || !goBtn || !ideaTa) return;
 
-  // Default mode: app (covers most "I have an idea" cases)
-  let activeMode = "app";
+  // v42 — restore WIP idea draft so refresh doesn't lose it
+  try {
+    const draft = localStorage.getItem(QUICK_START_IDEA_DRAFT_KEY);
+    if (draft) ideaTa.value = draft;
+  } catch {}
+  ideaTa.addEventListener("input", () => {
+    try { localStorage.setItem(QUICK_START_IDEA_DRAFT_KEY, ideaTa.value); } catch {}
+  });
+
+  // v42 — render sample chips for current mode
+  const renderSamples = (mode) => {
+    if (!samplesRow) return;
+    const samples = QUICK_START_SAMPLES[mode] || [];
+    samplesRow.innerHTML = samples.map((s, i) => `
+      <button type="button" class="quick-start-sample" data-idx="${i}"
+              title="Click to fill the idea above with this sample">
+        <span class="quick-start-sample-icon">${escapeHtml(s.icon)}</span>
+        <span class="quick-start-sample-label">${escapeHtml(s.label)}</span>
+      </button>
+    `).join("");
+    samplesRow.querySelectorAll(".quick-start-sample").forEach(el => {
+      el.addEventListener("click", () => {
+        const idx = Number(el.dataset.idx);
+        const sample = samples[idx];
+        if (!sample) return;
+        ideaTa.value = sample.text;
+        ideaTa.dispatchEvent(new Event("input"));
+        ideaTa.focus();
+        // Scroll the textarea into view in case the chip was clicked
+        // from a partially-scrolled position
+        ideaTa.scrollIntoView({ behavior: "smooth", block: "center" });
+      });
+    });
+  };
+
+  // Default mode: persisted or "app"
+  let activeMode = (() => {
+    try { return localStorage.getItem(QUICK_START_MODE_KEY) || "app"; }
+    catch { return "app"; }
+  })();
   const setMode = (m) => {
     activeMode = m;
+    try { localStorage.setItem(QUICK_START_MODE_KEY, m); } catch {}
     document.querySelectorAll(".quick-start-mode-btn").forEach(b => {
       b.classList.toggle("active", b.dataset.quickMode === m);
     });
+    renderSamples(m);
   };
-  setMode("app");
+  setMode(activeMode);
   document.querySelectorAll(".quick-start-mode-btn").forEach(btn => {
     btn.addEventListener("click", () => setMode(btn.dataset.quickMode));
   });
@@ -3564,6 +3632,8 @@ function initQuickStart() {
       const modeLabel = { app: "app", content: "content plan", pitch: "pitch deck" }[activeMode] || "project";
       toast(`Loaded the "${modeLabel}" build team. Hit ▶ Run workflow when ready.`, 4000);
     }
+    // v42 — clear WIP draft (idea is now stored in the proper variable)
+    try { localStorage.removeItem(QUICK_START_IDEA_DRAFT_KEY); } catch {}
   });
 
   // Toggle advanced block — for power users who want to see templates / steps
