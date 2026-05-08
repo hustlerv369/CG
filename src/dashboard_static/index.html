@@ -102,36 +102,44 @@
       <h2>Workflow</h2>
 
       <div class="row">
-        <label>Preset</label>
+        <label>Start from a template
+          <span class="row-hint">— pick a ready-made workflow you can edit</span>
+        </label>
         <select id="preset-select">
-          <option value="">— pick a preset —</option>
+          <option value="">— pick a template —</option>
         </select>
       </div>
 
       <div class="row">
-        <label>Saved workflows</label>
+        <label>Your saved workflows
+          <span class="row-hint">— load, save, or delete workflows you've kept</span>
+        </label>
         <div class="workflows-row">
           <select id="workflow-select">
-            <option value="">— load saved —</option>
+            <option value="">— load a saved workflow —</option>
           </select>
-          <button class="ghost" id="save-workflow-btn" title="Save current workflow (Ctrl+S)">💾</button>
-          <button class="ghost" id="save-disk-btn" title="Save to disk (D:\CG\workflows\)">📁</button>
-          <button class="ghost" id="del-workflow-btn" title="Delete selected workflow">🗑</button>
+          <button class="ghost" id="save-workflow-btn" title="Save this workflow to your browser (Ctrl+S)">💾</button>
+          <button class="ghost" id="save-disk-btn" title="Save this workflow as a JSON file on disk (D:\CG\workflows\)">📁</button>
+          <button class="ghost" id="del-workflow-btn" title="Delete the saved workflow currently selected above">🗑</button>
         </div>
       </div>
 
       <div class="row">
-        <label>Import workflow JSON</label>
+        <label>Or import a workflow from JSON
+          <span class="row-hint">— paste from clipboard or load a <code>.json</code> file</span>
+        </label>
         <div class="workflows-row">
-          <button class="ghost" id="import-paste-btn" title="Paste a JSON workflow (e.g. one Claude Code generated)">📋 paste</button>
+          <button class="ghost" id="import-paste-btn" title="Paste a JSON workflow definition from your clipboard">📋 paste</button>
           <input type="file" id="import-file" accept=".json,application/json" style="display:none" />
-          <button class="ghost" id="import-file-btn" title="Import from a .json file on disk">📂 file</button>
+          <button class="ghost" id="import-file-btn" title="Pick a .json workflow file from disk">📂 file</button>
         </div>
       </div>
 
       <div class="row">
-        <label>Title</label>
-        <input id="run-title" type="text" placeholder="What is this run for?" />
+        <label>Run title
+          <span class="row-hint">— what is this run for? appears in the History list</span>
+        </label>
+        <input id="run-title" type="text" placeholder="e.g. Blog post about AI agents" />
       </div>
 
       <!-- v39 — Inputs panel: surfaces every ${VAR} the current preset
@@ -159,20 +167,20 @@
       <div id="classic-pane">
         <div id="agent-rows"></div>
         <div class="agent-controls">
-          <button class="ghost" id="add-agent">+ add agent</button>
+          <button class="ghost" id="add-agent" title="Add another step to this workflow">+ add another step</button>
         </div>
       </div>
 
       <div id="visual-pane" class="visual-pane" style="display:none">
         <div class="visual-toolbar">
-          <button class="ghost" id="visual-add-node" title="Add a node">+ node</button>
-          <button class="ghost" id="visual-auto-layout" title="Re-layout all nodes">⚡ auto-layout</button>
+          <button class="ghost" id="visual-add-node" title="Add a new step (agent) to the workflow">+ add step</button>
+          <button class="ghost" id="visual-auto-layout" title="Re-arrange all steps neatly from left to right">⚡ tidy up</button>
           <button class="ghost" id="visual-zoom-out" title="Zoom out (or Ctrl+wheel)">−</button>
-          <button class="ghost" id="visual-zoom-reset" title="Reset zoom (or press 0)">100%</button>
+          <button class="ghost" id="visual-zoom-reset" title="Reset zoom to 100% (or press 0)">100%</button>
           <button class="ghost" id="visual-zoom-in" title="Zoom in (or Ctrl+wheel)">+</button>
-          <button class="ghost" id="visual-fit" title="Fit graph to viewport">⤧ fit</button>
+          <button class="ghost" id="visual-fit" title="Fit the whole workflow into view">⤧ fit</button>
           <button class="ghost" id="visual-fullscreen" title="Toggle fullscreen canvas (F)">⛶</button>
-          <span class="visual-hint">drag node · drag canvas to pan · Ctrl+wheel zoom · 0 reset · F fullscreen</span>
+          <span class="visual-hint">drag a step to move · drag from one step's right circle to another's left circle to connect · right-click for menu · Ctrl+wheel to zoom</span>
         </div>
         <div class="visual-canvas-wrap" id="visual-canvas-wrap">
           <svg id="visual-canvas" class="visual-canvas">
@@ -188,18 +196,18 @@
             </g>
           </svg>
           <div class="visual-empty" id="visual-empty">
-            Empty — click <strong>+ node</strong> to add an agent.
+            <strong>No steps yet.</strong> Click <strong>+ add step</strong> in the toolbar above to start building your workflow.
           </div>
           <div class="zoom-readout" id="zoom-readout">100%</div>
         </div>
       </div>
 
       <div class="actions">
-        <button class="primary" id="run-btn">▶ Run</button>
-        <button class="ghost" id="clear-btn">Clear</button>
+        <button class="primary" id="run-btn" title="Start running all steps in order">▶ Run workflow</button>
+        <button class="ghost" id="clear-btn" title="Empty all steps and start fresh">Clear all steps</button>
       </div>
 
-      <h2 class="section">History</h2>
+      <h2 class="section">Past runs</h2>
       <ul id="history"></ul>
     </section>
 
@@ -237,8 +245,8 @@
       </div>
       <div id="agent-grid" class="agent-grid">
         <div class="empty-state">
-          ← define a workflow on the left, then hit Run.<br />
-          Each agent's live stdout will appear here in its own panel.
+          <strong>← Build your workflow on the left, then hit Run workflow.</strong><br />
+          Each step (agent) gets its own live panel here — you'll see what it's writing in real time.
         </div>
       </div>
     </section>

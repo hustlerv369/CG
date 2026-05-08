@@ -1906,18 +1906,37 @@ function addAgentRow(spec = {}) {
   const tpl = document.createElement("div");
   tpl.className = "agent-row";
   tpl.innerHTML = `
+    <div class="agent-row-step-num">Step ${$$(".agent-row").length + 1}</div>
     <div class="agent-row-head">
-      <select class="agent-select" title="Pick a model">
-        ${buildAgentSelectOptions()}
-      </select>
-      <input type="text" class="label" placeholder="label (e.g. design)" />
-      <label class="streaming-toggle" title="Stream token-by-token (claude/gemini stream-json)">
-        <input type="checkbox" class="streaming" /> stream
+      <div class="agent-row-field">
+        <label class="agent-row-label">Which AI runs this step</label>
+        <select class="agent-select" title="Pick the model that will do the work">
+          ${buildAgentSelectOptions()}
+        </select>
+      </div>
+      <div class="agent-row-field agent-row-field--label">
+        <label class="agent-row-label">Step name <span class="agent-row-label-hint">— short, like <code>design</code></span></label>
+        <input type="text" class="label" placeholder="design" />
+      </div>
+      <label class="streaming-toggle" title="Show output token-by-token while the model thinks (claude / gemini only)">
+        <input type="checkbox" class="streaming" /> <span>show live tokens</span>
       </label>
-      <button type="button" class="remove" title="Remove">×</button>
+      <button type="button" class="remove" title="Remove this step">× remove</button>
     </div>
-    <input type="text" class="depends_on" placeholder="depends_on (comma-separated labels)" />
-    <textarea class="prompt" placeholder="Prompt — use {{label}} to inject a dependency's output"></textarea>
+    <div class="agent-row-field">
+      <label class="agent-row-label">
+        Wait for these earlier steps first
+        <span class="agent-row-label-hint">— optional · names from above, comma-separated · their outputs become available as <code>{{name}}</code></span>
+      </label>
+      <input type="text" class="depends_on" placeholder="leave empty if this step doesn't need any earlier output" />
+    </div>
+    <div class="agent-row-field">
+      <label class="agent-row-label">
+        What this AI should do <span class="agent-row-label-required">*</span>
+        <span class="agent-row-label-hint">— write your instructions · use <code>\${VAR}</code> for inputs from above · use <code>{{step}}</code> to paste an earlier step's output</span>
+      </label>
+      <textarea class="prompt" placeholder="Example: Write a 200-word LinkedIn post from this article: \${SOURCE}"></textarea>
+    </div>
   `;
   const sel = tpl.querySelector(".agent-select");
   if (spec.agent) {
