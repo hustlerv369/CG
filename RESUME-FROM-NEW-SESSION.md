@@ -4,11 +4,12 @@
 
 ---
 
-## ✨ Hot — co bylo poslední sprint (v18-v27, 2026-05-08)
+## ✨ Hot — co bylo poslední sprint (v18-v30, 2026-05-08)
 
-**Hustler Claude Gravity redesign** — kompletní UI/UX upgrade dashboardu
-z "experimental custom" na premium produkt. 10 commitů, 0 backend změn,
-0 API contract změn, 167/167 testů zelená po každém kroku.
+**Hustler Claude Gravity redesign — overkill** — kompletní UI/UX upgrade
+dashboardu z "experimental custom" na premium produkt s power-user
+features. **13 commitů**, 0 backend změn, 0 API contract změn,
+167/167 testů zelená po každém kroku.
 
 | Tag | Commit | Feature |
 |---|---|---|
@@ -22,6 +23,9 @@ z "experimental custom" na premium produkt. 10 commitů, 0 backend změn,
 | v25 | `066e602` | Inspector rail — 340px right column, click agent → live context, prompt + actions |
 | v26 | `d1b3845` | ANSI escape parser in raw view (8 colors + 256-color + bold/dim/underline) + Terminal rebrand |
 | v27 | `14b07b8` | Drag-to-connect — SVG ports + ghost wire bezier, drop creates depends_on |
+| v28 | `4ce4e61` | Slash commands (`/`) + 8 personas — code reviewer, security auditor, summarizer, devil's advocate, pair buddy, CZ translator, test writer, rubber duck |
+| v29 | `1316fe8` | Light mode (Ctrl+Shift+L) + mobile responsive skin (≤900px stacks vertical, ≤600px phone) |
+| v30 | `dfd2b7e` | Keyboard cheat sheet (?) covering 23 shortcuts in 5 sections + drag-drop file upload onto agent rows |
 
 **Driving research artifacts** (in `notes/`):
 - `redesign-competitor-analysis.md` — CMUX, Claude Squad, n8n, Linear, Mac, Warp, Charm patterns

@@ -6,7 +6,42 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
-## v18–v27 — 2026-05-08 — Hustler Claude Gravity redesign
+## v18–v30 — 2026-05-08 — Hustler Claude Gravity redesign
+
+### v30 — 2026-05-08 — Keyboard cheat sheet + drag-drop file upload (`dfd2b7e`)
+- Press `?` anywhere outside an input → modal sheet with all 23 shortcuts
+  in 5 sections; `esc` or `?` again closes
+- Drag any OS file onto an agent row → row highlights with dashed coral
+  outline + "↓ drop file here · {{file:…}}" overlay + placeholder inserted
+  at the caret
+- Multi-file drops insert as newline-joined placeholders
+- Surfaced via ⌘K palette ("Keyboard shortcuts" → HELP)
+
+### v29 — 2026-05-08 — Light mode + mobile responsive (`1316fe8`)
+- New `body[data-theme="light"]` cream-paper palette (only surface /
+  fg / border / shadow tiers override; accent + status + family stay
+  theme-neutral)
+- Toggle via Ctrl+Shift+L (Cmd+Shift+L on Mac) or ⌘K palette item;
+  persisted to localStorage[cg.theme]
+- ≤900px: orchestrator stacks vertically (rail top scroll → designer
+  → monitor), gutters hidden, inspector forced hidden, single-column
+  agent grid regardless of layout-toggle, status bar drops kbd hint +
+  version, touch-friendly button heights
+- ≤600px: brand wordmark hidden, palette 96vw
+
+### v28 — 2026-05-08 — Slash commands + 8 personas (`4ce4e61`)
+- Type "/" in any prompt textarea → fuzzy command picker
+- Commands: /file /git-diff /git-log /web /web-shot /shell /dep /var
+  /persona — insert CG placeholder syntax with caret in arg position
+- Sub-pickers: /dep lists upstream agent labels, /var lists saved
+  Settings vars, /persona opens persona library
+- 8 built-in personas: Senior code reviewer · Security auditor ·
+  Concise summarizer · Devil's advocate · Pair-programming buddy ·
+  Czech translator · Test writer · Rubber duck
+- Custom personas extensible via localStorage[cg.personas.v1]
+- Keyboard: ↑↓ navigate, Enter/Tab pick, Esc close, click-away closes
+
+
 
 ### v27 — 2026-05-08 — Drag-to-connect (`14b07b8`)
 - SVG ports on each Visual canvas node (output right · input left)
