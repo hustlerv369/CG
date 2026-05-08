@@ -233,6 +233,14 @@ body[data-theme="light"] {
 
 * { box-sizing: border-box; }
 
+/* v35 — CRITICAL FIX: HTML `hidden` attribute always wins.
+ * Without this, any rule like `.palette { display: flex }` overrides the
+ * UA stylesheet's `[hidden] { display: none }` and the palette stays
+ * permanently visible. Same root cause for any overlay that toggles
+ * visibility via `el.hidden = true/false`. This single rule is the
+ * fix for "palette won't close" reported in v32, v33, v34. */
+[hidden] { display: none !important; }
+
 html {
   font-feature-settings: 'cv11', 'ss01', 'ss03';
   -webkit-font-smoothing: antialiased;
