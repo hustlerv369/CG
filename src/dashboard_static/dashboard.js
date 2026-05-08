@@ -312,14 +312,16 @@ function renderVisualCanvas() {
   svg.style.width = Math.max(800, maxX) + "px";
   svg.style.height = Math.max(460, maxY) + "px";
 
-  // Draw connections first (under nodes)
+  // Draw connections first (under nodes).
+  // v34 — endpoints match port positions (body edge ± 6) so the
+  // bezier visually connects to the draggable port, not the body edge.
   spec.forEach(s => {
     (s.depends_on || []).forEach(dep => {
       const from = positions[dep], to = positions[s.label];
       if (!from || !to) return;
-      const x1 = from.x + VIS_NODE_W;
+      const x1 = from.x + VIS_NODE_W + 6;  // out port
       const y1 = from.y + VIS_NODE_H / 2;
-      const x2 = to.x;
+      const x2 = to.x - 6;                  // in port
       const y2 = to.y + VIS_NODE_H / 2;
       const dx = Math.max(40, (x2 - x1) / 2);
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -345,34 +347,9 @@ function renderVisualCanvas() {
     });
   });
 
-  // v27 — drag-to-connect: native SVG ports (output right, input left)
-  spec.forEach(s => {
-    const pos = positions[s.label];
-    if (!pos) return;
-    const NS = "http://www.w3.org/2000/svg";
-    const outPort = document.createElementNS(NS, "circle");
-    outPort.setAttribute("cx", pos.x + VIS_NODE_W);
-    outPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
-    outPort.setAttribute("r", 5);
-    outPort.classList.add("vis-port", "vis-port--out");
-    outPort.dataset.label = s.label;
-    outPort.dataset.kind = "out";
-    nodesLayer.appendChild(outPort);
-
-    const inPort = document.createElementNS(NS, "circle");
-    inPort.setAttribute("cx", pos.x);
-    inPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
-    inPort.setAttribute("r", 5);
-    inPort.classList.add("vis-port", "vis-port--in");
-    inPort.dataset.label = s.label;
-    inPort.dataset.kind = "in";
-    nodesLayer.appendChild(inPort);
-  });
-
-  // Wire ports → drag-to-connect on the svg root (single delegated handler)
-  attachWireDragHandlers(svg, spec, positions);
-
-  // Draw nodes (foreignObject so we get full HTML+CSS inside SVG)
+  // Draw nodes (foreignObject so we get full HTML+CSS inside SVG).
+  // v34 — ports moved AFTER node bodies (was before, foreignObjects
+  // covered them and stole pointerdown). Drag-to-connect now works.
   spec.forEach(s => {
     const pos = positions[s.label];
     if (!pos) return;
@@ -478,12 +455,24 @@ function renderVisualCanvas() {
       // Account for current zoom: 1 px on screen = 1/zoom in canvas
       // coords (the .zoom-group transform handles the scaling).
       const z = (window.__visView && window.__visView.zoom) || 1;
-      positions[s.label] = {
+      const newPos = {
         x: Math.max(0, dragState.origX + dx / z),
         y: Math.max(0, dragState.origY + dy / z),
       };
-      fo.setAttribute("x", positions[s.label].x);
-      fo.setAttribute("y", positions[s.label].y);
+      positions[s.label] = newPos;
+      fo.setAttribute("x", newPos.x);
+      fo.setAttribute("y", newPos.y);
+      // v34 — also move the ports that belong to this node
+      const out = svg.querySelector(`.vis-port--out[data-label="${s.label}"]`);
+      if (out) {
+        out.setAttribute("cx", newPos.x + VIS_NODE_W + 6);
+        out.setAttribute("cy", newPos.y + VIS_NODE_H / 2);
+      }
+      const inp = svg.querySelector(`.vis-port--in[data-label="${s.label}"]`);
+      if (inp) {
+        inp.setAttribute("cx", newPos.x - 6);
+        inp.setAttribute("cy", newPos.y + VIS_NODE_H / 2);
+      }
       drawConnectionsOnly(svg, spec, positions);
     });
     node.addEventListener("pointerup", e => {
@@ -495,6 +484,36 @@ function renderVisualCanvas() {
     fo.appendChild(node);
     nodesLayer.appendChild(fo);
   });
+
+  // v34 — Drag-to-connect ports rendered LAST so they sit above
+  // foreignObjects and receive pointer events. We position them
+  // slightly outside node bounds (cx +/- 4) for unambiguous targeting.
+  spec.forEach(s => {
+    const pos = positions[s.label];
+    if (!pos) return;
+    const NS = "http://www.w3.org/2000/svg";
+
+    const outPort = document.createElementNS(NS, "circle");
+    outPort.setAttribute("cx", pos.x + VIS_NODE_W + 6);  // +6 outside body
+    outPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
+    outPort.setAttribute("r", 6);
+    outPort.classList.add("vis-port", "vis-port--out");
+    outPort.dataset.label = s.label;
+    outPort.dataset.kind = "out";
+    nodesLayer.appendChild(outPort);
+
+    const inPort = document.createElementNS(NS, "circle");
+    inPort.setAttribute("cx", pos.x - 6);  // -6 outside body
+    inPort.setAttribute("cy", pos.y + VIS_NODE_H / 2);
+    inPort.setAttribute("r", 6);
+    inPort.classList.add("vis-port", "vis-port--in");
+    inPort.dataset.label = s.label;
+    inPort.dataset.kind = "in";
+    nodesLayer.appendChild(inPort);
+  });
+
+  // Wire ports → drag-to-connect on the svg root (delegated, idempotent)
+  attachWireDragHandlers(svg, spec, positions);
 
   // Re-apply current zoom/pan transform — we replaced layer children
   // but the .zoom-group itself survives renderVisualCanvas calls.
@@ -508,9 +527,9 @@ function drawConnectionsOnly(svg, spec, positions) {
     (s.depends_on || []).forEach(dep => {
       const from = positions[dep], to = positions[s.label];
       if (!from || !to) return;
-      const x1 = from.x + VIS_NODE_W;
+      const x1 = from.x + VIS_NODE_W + 6;  // v34 — port-aligned
       const y1 = from.y + VIS_NODE_H / 2;
-      const x2 = to.x;
+      const x2 = to.x - 6;
       const y2 = to.y + VIS_NODE_H / 2;
       const dx = Math.max(40, (x2 - x1) / 2);
       const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
@@ -3072,6 +3091,25 @@ document.addEventListener("DOMContentLoaded", () => {
   }
   // Settings handlers
   if ($("#settings-save-btn")) $("#settings-save-btn").onclick = saveSettingsForm;
+  // v34 — per-section "Save API keys" button with inline status feedback
+  if ($("#ss-save-keys-btn")) $("#ss-save-keys-btn").onclick = () => {
+    saveSettingsForm();
+    const status = document.getElementById("ss-save-keys-status");
+    if (status) {
+      const keys = [
+        $("#setting-openrouter").value,
+        $("#setting-zhipu").value,
+        $("#setting-anthropic").value,
+        $("#setting-gemini").value,
+      ].filter(Boolean).length;
+      status.textContent = keys
+        ? `✓ Saved · ${keys} key${keys === 1 ? "" : "s"} active`
+        : "✓ Saved (no keys configured yet)";
+      status.className = "ss-save-status ss-save-status--ok";
+      setTimeout(() => { status.className = "ss-save-status"; status.textContent = ""; }, 4000);
+    }
+    if (typeof toast === "function") toast("API keys saved to browser storage", 2000);
+  };
   if ($("#settings-clear-btn")) $("#settings-clear-btn").onclick = clearSettings;
   if ($("#var-add-btn")) $("#var-add-btn").onclick = addVariable;
   // Tunnel + notifications

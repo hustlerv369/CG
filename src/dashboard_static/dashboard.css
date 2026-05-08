@@ -447,7 +447,11 @@ nav.tabs .tab.active {
 main {
   display: grid;
   grid-template-columns: 380px 1fr;
-  height: calc(100vh - 53px);
+  /* v34 — height accounts for header (53px) + status bar (28px).
+   * Without subtracting the status bar, the bottom 28px of every column
+   * (designer, monitor, settings, editor) was hidden behind the fixed
+   * status bar, so users couldn't scroll to the bottom of long lists. */
+  height: calc(100vh - 53px - 28px);
   gap: 0;
 }
 
@@ -529,7 +533,8 @@ body.visual-mode-active #classic-pane {
   display: none !important;
 }
 body.visual-mode-active .visual-canvas-wrap {
-  height: calc(100vh - 200px);
+  /* v34 — also subtract status bar height (28px) */
+  height: calc(100vh - 200px - 28px);
 }
 .workspaces-rail {
   border-right: 1px solid var(--border);
@@ -3143,6 +3148,24 @@ body.cg-inspector-shown .inspector-toggle {
   padding-top: var(--space-4);
   margin-top: 0;
 }
+
+/* v34 — per-section save action + inline status feedback */
+.ss-section-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  margin-top: var(--space-3);
+  border-top: 1px dashed var(--border);
+}
+.ss-save-status {
+  font: 500 var(--fs-sm)/1 var(--font-sans);
+  color: var(--fg-tertiary);
+  letter-spacing: var(--tracking-tight);
+  transition: color var(--motion-fast);
+}
+.ss-save-status--ok { color: var(--success); }
+.ss-save-status--err { color: var(--error); }
 @media (max-width: 720px) {
   .ss-hint { display: none; }
   .settings-pane .settings-area { padding: var(--space-3); }

@@ -350,14 +350,19 @@
         <div class="ss-body">
           <p class="settings-hint">
             Set in your shell environment (recommended) <em>or</em> paste here
-            for browser-only override. Restart the dashboard server to pick up
-            env-var changes; browser-stored keys take effect immediately.
+            for browser-only override. Browser-stored keys take effect immediately
+            (saved to <code>localStorage</code>); env-var changes need a dashboard
+            server restart.
           </p>
           <div class="settings-grid">
             <label>OpenRouter (GLM, DeepSeek, Qwen) <input type="password" id="setting-openrouter" placeholder="sk-or-..." /></label>
             <label>Z.ai / Zhipu (GLM direct) <input type="password" id="setting-zhipu" placeholder="..." /></label>
             <label>Anthropic API <input type="password" id="setting-anthropic" placeholder="sk-ant-..." /></label>
             <label>Google AI (Gemini) <input type="password" id="setting-gemini" placeholder="..." /></label>
+          </div>
+          <div class="ss-section-actions">
+            <button class="primary" id="ss-save-keys-btn">💾 Save API keys</button>
+            <span id="ss-save-keys-status" class="ss-save-status"></span>
           </div>
         </div>
       </details>
