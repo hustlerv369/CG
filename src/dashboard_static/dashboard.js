@@ -3149,7 +3149,51 @@ document.addEventListener("DOMContentLoaded", () => {
   initHeaderPalette();
   initInspector();
   initSlashCommands();
+  initThemeToggle();
 });
+
+/* ----------------------------------------------------------
+ * v29 — Theme toggle (dark / light)
+ * Persists to localStorage[cg.theme]; default = dark.
+ * Exposed via the ⌘K palette and Ctrl+Shift+L shortcut.
+ * ---------------------------------------------------------- */
+const CG_THEME_KEY = "cg.theme";
+
+function applyTheme(theme) {
+  if (theme === "light") {
+    document.body.setAttribute("data-theme", "light");
+  } else {
+    document.body.removeAttribute("data-theme");
+  }
+}
+function getTheme() {
+  try { return localStorage.getItem(CG_THEME_KEY) || "dark"; }
+  catch { return "dark"; }
+}
+function setTheme(theme) {
+  applyTheme(theme);
+  try { localStorage.setItem(CG_THEME_KEY, theme); } catch {}
+  if (typeof toast === "function") {
+    toast(`Theme: ${theme}`, 1200);
+  }
+}
+function toggleTheme() {
+  const cur = getTheme();
+  setTheme(cur === "light" ? "dark" : "light");
+}
+
+function initThemeToggle() {
+  applyTheme(getTheme());
+  // Ctrl+Shift+L (Windows/Linux) and Cmd+Shift+L (Mac)
+  document.addEventListener("keydown", (e) => {
+    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && e.shiftKey && (e.key === "L" || e.key === "l")) {
+      e.preventDefault();
+      toggleTheme();
+    }
+  });
+}
 
 /* v23 — header search-bar opens the ⌘K palette */
 function initHeaderPalette() {
@@ -3782,6 +3826,14 @@ function buildPaletteItems() {
   }
 
   // Settings actions
+  items.push({
+    section: "Settings",
+    icon: "🌓",
+    label: getTheme() === "light" ? "Switch to dark mode" : "Switch to light mode",
+    hint: "Ctrl+Shift+L · cream paper ↔ warm-black",
+    meta: "THEME",
+    run: () => toggleTheme(),
+  });
   items.push({
     section: "Settings",
     icon: "🌐",
