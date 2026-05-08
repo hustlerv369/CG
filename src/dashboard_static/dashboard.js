@@ -2667,4 +2667,441 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   init();
+
+  /* ============================================================
+   * v19 — Status bar live wiring + ⌘K command palette
+   * ============================================================ */
+  initStatusBar();
+  initCommandPalette();
 });
+
+/* ----------------------------------------------------------
+ * Status bar — backend connection + live run/queue counters
+ * ---------------------------------------------------------- */
+function initStatusBar() {
+  const dot     = document.getElementById("sb-backend-dot");
+  const lbl     = document.getElementById("sb-backend-label");
+  const runsEl  = document.getElementById("sb-runs");
+  const qEl     = document.getElementById("sb-queued");
+  const tDot    = document.getElementById("sb-tunnel-dot");
+  const tLbl    = document.getElementById("sb-tunnel-label");
+  const elapsedBtn = document.getElementById("sb-elapsed-btn");
+  const elapsedEl  = document.getElementById("sb-elapsed");
+  const elapsedLbl = document.getElementById("sb-elapsed-label");
+  if (!dot) return;
+
+  // Hide redundant header status pill — status-bar is the source of truth now
+  const headerStatus = document.getElementById("server-status");
+  if (headerStatus) headerStatus.style.display = "none";
+
+  const setBackend = (state, text) => {
+    dot.className = "sb-dot sb-dot--" + state;
+    lbl.textContent = text;
+  };
+  setBackend("connecting", "connecting…");
+
+  // Click-to-jump segments
+  document.querySelectorAll(".status-bar .sb-seg[data-target]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.target;
+      if (target === "tunnel") activateTab("settings");
+      else if (target === "palette") openPalette();
+      else if (target === "runs") activateTab("orchestrator");
+      else if (target === "elapsed") {
+        // Scroll to live monitor
+        const grid = document.getElementById("agent-grid");
+        if (grid) grid.scrollIntoView({ behavior: "smooth" });
+      }
+    });
+  });
+
+  // Poll backend state every 4s
+  let elapsedStart = null;
+  let elapsedTimer = null;
+
+  async function poll() {
+    try {
+      const r = await fetch("/api/runs?limit=20", { cache: "no-store" });
+      if (!r.ok) throw new Error(r.status);
+      const j = await r.json();
+      const runs = (j.runs || []);
+      const running = runs.filter(x => x.state === "running").length;
+      const queued  = runs.filter(x => x.state === "queued" || x.state === "pending").length;
+      setBackend("connected", "online");
+      runsEl.textContent = `${running} run${running === 1 ? "" : "s"}`;
+      qEl.textContent = `· ${queued} queued`;
+
+      // Active-run elapsed timer
+      const activeRun = runs.find(x => x.state === "running");
+      if (activeRun) {
+        const startMs = activeRun.started_at
+          ? Date.parse(activeRun.started_at)
+          : Date.now();
+        if (elapsedStart !== startMs) {
+          elapsedStart = startMs;
+          if (elapsedLbl) elapsedLbl.textContent = activeRun.title || activeRun.id || "";
+          if (elapsedTimer) clearInterval(elapsedTimer);
+          elapsedTimer = setInterval(() => {
+            if (!elapsedStart) return;
+            const s = Math.floor((Date.now() - elapsedStart) / 1000);
+            const mm = String(Math.floor(s / 60)).padStart(2, "0");
+            const ss = String(s % 60).padStart(2, "0");
+            elapsedEl.textContent = `${mm}:${ss}`;
+          }, 1000);
+        }
+        elapsedBtn.hidden = false;
+      } else {
+        elapsedStart = null;
+        if (elapsedTimer) clearInterval(elapsedTimer);
+        elapsedTimer = null;
+        elapsedBtn.hidden = true;
+      }
+
+      // Tunnel state (best-effort; endpoint may not be ready)
+      try {
+        const tr = await fetch("/api/tunnel/status", { cache: "no-store" });
+        if (tr.ok) {
+          const tj = await tr.json();
+          if (tj.running) {
+            tDot.className = "sb-dot sb-dot--connected";
+            tLbl.textContent = "tunnel ✓";
+          } else {
+            tDot.className = "sb-dot";
+            tLbl.textContent = "tunnel";
+          }
+        }
+      } catch {}
+    } catch (e) {
+      setBackend("error", "offline");
+    }
+  }
+
+  poll();
+  setInterval(poll, 4000);
+}
+
+/* ----------------------------------------------------------
+ * ⌘K Command palette — fuzzy launcher
+ * ---------------------------------------------------------- */
+let _paletteState = {
+  open: false,
+  items: [],
+  filtered: [],
+  active: 0,
+  query: "",
+};
+
+function initCommandPalette() {
+  const backdrop = document.getElementById("palette-backdrop");
+  const palette  = document.getElementById("palette");
+  const input    = document.getElementById("palette-input");
+  const results  = document.getElementById("palette-results");
+  if (!palette || !input) return;
+
+  // Global keyboard shortcut ⌘K / Ctrl+K
+  document.addEventListener("keydown", (e) => {
+    const isMac = navigator.platform.toUpperCase().includes("MAC");
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && (e.key === "k" || e.key === "K")) {
+      e.preventDefault();
+      if (_paletteState.open) closePalette();
+      else openPalette();
+    } else if (e.key === "Escape" && _paletteState.open) {
+      e.preventDefault();
+      closePalette();
+    }
+  });
+
+  backdrop.addEventListener("click", closePalette);
+
+  input.addEventListener("input", () => {
+    _paletteState.query = input.value;
+    _paletteState.active = 0;
+    renderPalette();
+  });
+
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      _paletteState.active = Math.min(
+        _paletteState.active + 1,
+        _paletteState.filtered.length - 1
+      );
+      renderPalette({ keepFiltered: true });
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      _paletteState.active = Math.max(_paletteState.active - 1, 0);
+      renderPalette({ keepFiltered: true });
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      const item = _paletteState.filtered[_paletteState.active];
+      if (item) executePaletteItem(item);
+    }
+  });
+}
+
+function buildPaletteItems() {
+  const items = [];
+
+  // Tabs / navigation
+  ["orchestrator", "editor", "notes", "settings"].forEach(t => {
+    items.push({
+      section: "Jump to",
+      icon: { orchestrator: "▶", editor: "✎", notes: "✦", settings: "⚙" }[t] || "•",
+      label: t.charAt(0).toUpperCase() + t.slice(1),
+      hint: `Switch to ${t} tab`,
+      meta: "TAB",
+      run: () => activateTab(t),
+    });
+  });
+
+  // Presets
+  const presetSelect = document.getElementById("preset-select");
+  if (presetSelect) {
+    Array.from(presetSelect.options).forEach(opt => {
+      if (!opt.value) return;
+      items.push({
+        section: "Run",
+        icon: "▶",
+        label: opt.textContent,
+        hint: `Load preset and run`,
+        meta: "PRESET",
+        run: () => {
+          presetSelect.value = opt.value;
+          presetSelect.dispatchEvent(new Event("change"));
+          const runBtn = document.getElementById("run-btn");
+          if (runBtn) setTimeout(() => runBtn.click(), 300);
+        },
+      });
+    });
+  }
+
+  // Saved workflows
+  const wfSelect = document.getElementById("workflow-select");
+  if (wfSelect) {
+    Array.from(wfSelect.options).forEach(opt => {
+      if (!opt.value) return;
+      items.push({
+        section: "Run",
+        icon: "📁",
+        label: opt.textContent,
+        hint: `Load saved workflow`,
+        meta: "WORKFLOW",
+        run: () => {
+          wfSelect.value = opt.value;
+          wfSelect.dispatchEvent(new Event("change"));
+          activateTab("orchestrator");
+        },
+      });
+    });
+  }
+
+  // Active runs
+  const histList = document.getElementById("history");
+  if (histList) {
+    Array.from(histList.querySelectorAll("li")).slice(0, 12).forEach((li, i) => {
+      const txt = (li.textContent || "").trim().slice(0, 70);
+      if (!txt) return;
+      items.push({
+        section: "Recent runs",
+        icon: "⏱",
+        label: txt,
+        hint: "Open this run",
+        meta: "RUN",
+        run: () => {
+          li.click();
+          activateTab("orchestrator");
+        },
+      });
+    });
+  }
+
+  // Settings actions
+  items.push({
+    section: "Settings",
+    icon: "🌐",
+    label: "Toggle Cloudflare Tunnel",
+    hint: "Phone dispatch on/off",
+    meta: "ACTION",
+    run: () => {
+      activateTab("settings");
+      setTimeout(() => {
+        const btn = document.getElementById("tunnel-start-btn");
+        if (btn) btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 100);
+    },
+  });
+  items.push({
+    section: "Settings",
+    icon: "🔑",
+    label: "API keys",
+    hint: "Configure provider credentials",
+    meta: "ACTION",
+    run: () => {
+      activateTab("settings");
+      setTimeout(() => {
+        const el = document.getElementById("setting-openrouter");
+        if (el) el.focus();
+      }, 100);
+    },
+  });
+  items.push({
+    section: "Actions",
+    icon: "↻",
+    label: "Re-run last workflow",
+    hint: "Runs whatever is currently in the designer",
+    meta: "ACTION",
+    run: () => {
+      activateTab("orchestrator");
+      const btn = document.getElementById("run-btn");
+      if (btn) btn.click();
+    },
+  });
+  items.push({
+    section: "Actions",
+    icon: "💾",
+    label: "Save current workflow",
+    hint: "Ctrl+S",
+    meta: "ACTION",
+    run: () => {
+      const btn = document.getElementById("save-workflow-btn");
+      if (btn) btn.click();
+    },
+  });
+
+  return items;
+}
+
+function fuzzyScore(query, text) {
+  if (!query) return 1;
+  const q = query.toLowerCase();
+  const t = text.toLowerCase();
+  if (t.includes(q)) return 100 - t.indexOf(q);
+  // letter-skip fuzzy
+  let qi = 0;
+  for (let i = 0; i < t.length && qi < q.length; i++) {
+    if (t[i] === q[qi]) qi++;
+  }
+  return qi === q.length ? 50 - (t.length - q.length) * 0.1 : 0;
+}
+
+function renderPalette(opts = {}) {
+  const results = document.getElementById("palette-results");
+  if (!results) return;
+
+  if (!opts.keepFiltered) {
+    const q = _paletteState.query;
+    _paletteState.filtered = _paletteState.items
+      .map(item => ({
+        item,
+        score: fuzzyScore(q, item.label) + fuzzyScore(q, item.hint || "") * 0.3,
+      }))
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 30)
+      .map(x => x.item);
+
+    if (_paletteState.active >= _paletteState.filtered.length) {
+      _paletteState.active = 0;
+    }
+  }
+
+  if (_paletteState.filtered.length === 0) {
+    results.innerHTML =
+      '<div class="palette-empty">No matches. Try a different query.</div>';
+    return;
+  }
+
+  // Group by section, preserve relative order
+  const sections = [];
+  const seen = new Set();
+  _paletteState.filtered.forEach(it => {
+    if (!seen.has(it.section)) {
+      sections.push({ name: it.section, items: [] });
+      seen.add(it.section);
+    }
+    sections.find(s => s.name === it.section).items.push(it);
+  });
+
+  let html = "";
+  let absIdx = 0;
+  sections.forEach(sec => {
+    html += `<div class="palette-section-head">${escapeHtml(sec.name)}</div>`;
+    sec.items.forEach(it => {
+      const isActive = absIdx === _paletteState.active;
+      html += `
+        <div class="palette-item ${isActive ? "is-active" : ""}"
+             data-idx="${absIdx}">
+          <span class="palette-item-icon">${escapeHtml(it.icon || "•")}</span>
+          <div class="palette-item-body">
+            <div class="palette-item-label">${escapeHtml(it.label)}</div>
+            ${it.hint ? `<div class="palette-item-hint">${escapeHtml(it.hint)}</div>` : ""}
+          </div>
+          <span class="palette-item-meta">${escapeHtml(it.meta || "")}</span>
+        </div>`;
+      absIdx++;
+    });
+  });
+  results.innerHTML = html;
+
+  // Wire click handlers
+  results.querySelectorAll(".palette-item").forEach(el => {
+    el.addEventListener("click", () => {
+      const idx = Number(el.dataset.idx);
+      const it = _paletteState.filtered[idx];
+      if (it) executePaletteItem(it);
+    });
+  });
+
+  // Scroll active into view
+  const activeEl = results.querySelector(".palette-item.is-active");
+  if (activeEl) {
+    activeEl.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function executePaletteItem(item) {
+  closePalette();
+  try { item.run(); }
+  catch (e) {
+    if (typeof toast === "function") toast(`Failed: ${e.message || e}`);
+  }
+}
+
+function openPalette() {
+  if (_paletteState.open) return;
+  _paletteState.open = true;
+  _paletteState.items = buildPaletteItems();
+  _paletteState.filtered = _paletteState.items;
+  _paletteState.active = 0;
+  _paletteState.query = "";
+  const backdrop = document.getElementById("palette-backdrop");
+  const palette  = document.getElementById("palette");
+  const input    = document.getElementById("palette-input");
+  if (!palette) return;
+  backdrop.hidden = false;
+  palette.hidden = false;
+  input.value = "";
+  renderPalette();
+  setTimeout(() => input.focus(), 30);
+}
+
+function closePalette() {
+  if (!_paletteState.open) return;
+  _paletteState.open = false;
+  document.getElementById("palette-backdrop").hidden = true;
+  document.getElementById("palette").hidden = true;
+}
+
+function activateTab(name) {
+  const tab = document.querySelector(`.tab[data-tab="${name}"]`);
+  if (tab) tab.click();
+}
+
+function escapeHtml(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
