@@ -1528,38 +1528,96 @@ function shortAgentLabel(agentId) {
 
 function buildPanel(agent) {
   const root = document.createElement("div");
-  root.className = "agent-panel";
+  root.className = `agent-panel agent-panel--block status-${agent.status}`;
   const depsHtml = (agent.depends_on && agent.depends_on.length)
     ? `<span class="deps">← ${agent.depends_on.map(escapeHtml).join(", ")}</span>` : "";
   const fam = familyOf(agent.agent);
   const modelLabel = shortAgentLabel(agent.agent);
   root.innerHTML = `
     <div class="agent-panel-head">
-      <div class="title">${escapeHtml(agent.label)} ${depsHtml}</div>
+      <div class="title">
+        <span class="agent-family-dot agent-family-${fam}" aria-hidden="true"></span>
+        <span class="agent-label">${escapeHtml(agent.label)}</span>
+        ${depsHtml}
+      </div>
       <div class="badges">
         <span class="badge ${fam}" title="${escapeHtml(agent.agent)}">${escapeHtml(modelLabel)}</span>
-        <span class="badge status ${agent.status}">${agent.status}</span>
+        <span class="badge status ${agent.status}">
+          <span class="badge-dot" aria-hidden="true"></span>
+          <span class="badge-text">${agent.status}</span>
+        </span>
+        <span class="agent-elapsed" data-elapsed hidden>--:--</span>
+        <span class="agent-tokens" data-tokens hidden>0 tok</span>
+      </div>
+      <div class="agent-panel-actions" aria-label="Panel actions">
+        <button class="ap-action ap-copy" title="Copy log (C)" aria-label="Copy log">
+          <span class="ap-icon">⧉</span>
+        </button>
+        <button class="ap-action ap-fullscreen" title="Fullscreen (F)" aria-label="Fullscreen">
+          <span class="ap-icon">⛶</span>
+        </button>
       </div>
     </div>
-    <div class="agent-panel-log"></div>
+    <div class="agent-panel-log" tabindex="0"></div>
     <div class="agent-panel-foot">
       <span class="bytes">0 chars</span>
-      <button class="copy-btn" title="Copy log to clipboard">copy</button>
       <span class="exit"></span>
     </div>
   `;
   const logEl = root.querySelector(".agent-panel-log");
-  root.querySelector(".copy-btn").onclick = () => {
+  const elapsedEl = root.querySelector("[data-elapsed]");
+  const tokensEl  = root.querySelector("[data-tokens]");
+
+  // Action buttons
+  root.querySelector(".ap-copy").onclick = () => {
     navigator.clipboard.writeText(logEl.textContent || "");
-    const btn = root.querySelector(".copy-btn");
-    btn.textContent = "✓"; setTimeout(() => btn.textContent = "copy", 1200);
+    if (typeof toast === "function") toast(`Copied ${agent.label}`, 1500);
   };
+  root.querySelector(".ap-fullscreen").onclick = () => {
+    root.classList.toggle("agent-panel--fullscreen");
+  };
+
+  // Sticky-bottom auto-scroll: pin to bottom while user hasn't scrolled up.
+  // 32px threshold so accidental wheel movements don't unpin.
+  const stickyState = { pinned: true };
+  logEl.addEventListener("scroll", () => {
+    const dist = logEl.scrollHeight - logEl.scrollTop - logEl.clientHeight;
+    stickyState.pinned = dist < 32;
+  });
+
+  // Track elapsed time
+  let elapsedStart = null;
+  let elapsedTimer = null;
+  function startElapsed() {
+    if (elapsedTimer) return;
+    elapsedStart = Date.now();
+    elapsedEl.hidden = false;
+    elapsedTimer = setInterval(() => {
+      const s = Math.floor((Date.now() - elapsedStart) / 1000);
+      const mm = String(Math.floor(s / 60)).padStart(2, "0");
+      const ss = String(s % 60).padStart(2, "0");
+      elapsedEl.textContent = `${mm}:${ss}`;
+    }, 500);
+  }
+  function stopElapsed() {
+    if (elapsedTimer) {
+      clearInterval(elapsedTimer);
+      elapsedTimer = null;
+    }
+  }
+  if (agent.status === "running") startElapsed();
+
   return {
     root,
     log: logEl,
     statusBadge: root.querySelector(".badge.status"),
     bytesEl: root.querySelector(".bytes"),
     exitEl: root.querySelector(".exit"),
+    elapsedEl,
+    tokensEl,
+    sticky: stickyState,
+    startElapsed,
+    stopElapsed,
   };
 }
 
@@ -1570,8 +1628,20 @@ function handleStatus(d) {
   }
   const p = state.panels[d.label];
   if (!p) return;
-  p.statusBadge.textContent = d.status;
+  // Update badge: dot+text structure (v21)
   p.statusBadge.className = `badge status ${d.status}`;
+  const txt = p.statusBadge.querySelector(".badge-text");
+  if (txt) txt.textContent = d.status;
+  else p.statusBadge.textContent = d.status;
+  // Mirror status onto the panel root for state-driven styling
+  if (p.root) {
+    p.root.className = p.root.className.replace(/\bstatus-[a-z]+\b/g, "");
+    p.root.classList.add(`status-${d.status}`);
+  }
+  // Drive elapsed timer lifecycle from real status events
+  if (d.status === "running" && p.startElapsed) p.startElapsed();
+  if ((d.status === "done" || d.status === "failed" || d.status === "cancelled")
+      && p.stopElapsed) p.stopElapsed();
   if (d.exit_code !== null && d.exit_code !== undefined) {
     p.exitEl.textContent = `exit ${d.exit_code}`;
   }
@@ -1599,7 +1669,16 @@ function handleLog(d) {
 function rerenderPanel(p) {
   const text = p.rawBuffer || "";
   p.bytesEl.textContent = `${text.length} chars`;
-  const nearBottom = (p.log.scrollHeight - p.log.scrollTop - p.log.clientHeight) < 40;
+  // v21 — token approximation surfaced in panel header (~4 chars per token)
+  if (p.tokensEl) {
+    const approxTok = Math.round(text.length / 4);
+    if (approxTok > 0) {
+      p.tokensEl.hidden = false;
+      p.tokensEl.textContent = `~${formatCount(approxTok)} tok`;
+    }
+  }
+  // v21 — sticky-bottom auto-scroll: defer to the panel's tracked state
+  const stickToBottom = (p.sticky && p.sticky.pinned !== false);
   if (state.viewMode === "md" && window.marked) {
     p.log.classList.add("md-rendered");
     p.log.classList.remove("diff-rendered", "preview-rendered");
@@ -1618,7 +1697,7 @@ function rerenderPanel(p) {
     p.log.classList.remove("md-rendered", "diff-rendered", "preview-rendered");
     p.log.textContent = text;
   }
-  if (nearBottom) p.log.scrollTop = p.log.scrollHeight;
+  if (stickToBottom) p.log.scrollTop = p.log.scrollHeight;
 }
 
 // Artifact-style preview — pulls the most useful renderable chunk from
@@ -3245,4 +3324,13 @@ function escapeHtml(s) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+/* v21 — compact integer formatter (1234 → 1.2k, 1234567 → 1.2M) */
+function formatCount(n) {
+  if (n == null || isNaN(n)) return "0";
+  n = Math.abs(Number(n));
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return (n / 1000).toFixed(n >= 9999 ? 0 : 1).replace(/\.0$/, "") + "k";
+  return (n / 1_000_000).toFixed(n >= 9_999_999 ? 0 : 1).replace(/\.0$/, "") + "M";
 }

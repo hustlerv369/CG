@@ -2007,6 +2007,158 @@ select optgroup {
 }
 .agent-panel { animation: fadeInUp 300ms var(--ease-out); }
 
+/* ============================================================
+ * v21 — Warp-style block agent panes
+ * Layered upgrades on top of the existing .agent-panel scaffold:
+ *  - State-driven left border & subtle glow per status
+ *  - Family dot in title (claude / gemini / browser / opencode color)
+ *  - Inline elapsed mm:ss + token count chips in head
+ *  - Hover-revealed action buttons (copy / fullscreen)
+ *  - Explicit dot inside status badge (replaces ::before)
+ *  - Fullscreen-locked mode for one panel at a time
+ * ============================================================ */
+
+.agent-panel--block {
+  border-left: 3px solid transparent;
+  transition: border-color var(--motion-fast),
+              box-shadow var(--motion-fast),
+              transform var(--motion-fast);
+  position: relative;
+}
+.agent-panel--block.status-queued    { border-left-color: var(--fg-quaternary); }
+.agent-panel--block.status-waiting   { border-left-color: var(--warning); }
+.agent-panel--block.status-running {
+  border-left-color: var(--accent);
+  box-shadow: var(--shadow-card),
+              -2px 0 28px rgba(255, 122, 89, 0.18);
+}
+.agent-panel--block.status-done      { border-left-color: var(--success); }
+.agent-panel--block.status-failed    { border-left-color: var(--error); }
+.agent-panel--block.status-cancelled { border-left-color: var(--fg-tertiary); opacity: 0.74; }
+
+.agent-family-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--fg-tertiary);
+  box-shadow: 0 0 6px transparent;
+}
+.agent-family-claude   { background: var(--claude);   box-shadow: 0 0 8px var(--claude-soft); }
+.agent-family-gemini   { background: var(--gemini);   box-shadow: 0 0 8px var(--gemini-soft); }
+.agent-family-browser  { background: var(--browser);  box-shadow: 0 0 8px var(--browser-soft); }
+.agent-family-opencode { background: var(--opencode); box-shadow: 0 0 8px var(--opencode-soft); }
+.agent-family-other    { background: var(--gold);     box-shadow: 0 0 8px var(--gold-soft); }
+
+.agent-label {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.agent-elapsed,
+.agent-tokens {
+  font: 600 var(--fs-micro)/1 var(--font-mono);
+  color: var(--fg-secondary);
+  letter-spacing: 0.04em;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  font-variant-numeric: tabular-nums;
+  text-transform: uppercase;
+}
+.agent-panel--block.status-running .agent-elapsed {
+  color: var(--accent);
+  border-color: var(--accent-strong);
+}
+.agent-tokens { color: var(--fg-tertiary); }
+
+/* Action buttons revealed on hover (top-right of header) */
+.agent-panel-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: 6px;
+  opacity: 0;
+  transform: translateX(4px);
+  transition: opacity var(--motion-fast), transform var(--motion-fast);
+}
+.agent-panel--block:hover .agent-panel-actions,
+.agent-panel--block:focus-within .agent-panel-actions,
+.agent-panel--block.agent-panel--fullscreen .agent-panel-actions {
+  opacity: 1;
+  transform: translateX(0);
+}
+.ap-action {
+  width: 26px;
+  height: 26px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--motion-micro), color var(--motion-micro),
+              border-color var(--motion-micro);
+}
+.ap-action:hover {
+  background: var(--accent-soft);
+  border-color: var(--accent-strong);
+  color: var(--accent);
+}
+.ap-action:active { transform: scale(0.95); }
+.ap-icon { font: 600 13px/1 var(--font-sans); }
+
+/* Status badge: explicit dot replaces the legacy ::before */
+.badge.status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px 4px 7px;
+}
+.badge-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 6px currentColor;
+  flex-shrink: 0;
+}
+.badge.status.queued .badge-dot   { background: var(--fg-tertiary); box-shadow: none; }
+.badge.status.waiting .badge-dot  { background: var(--warning); }
+.badge.status.running .badge-dot  { animation: pulse 1.6s ease-in-out infinite; }
+.badge.status.done .badge-dot     { background: var(--success); }
+.badge.status.failed .badge-dot   { background: var(--error); }
+.badge.status.cancelled .badge-dot{ background: var(--fg-tertiary); box-shadow: none; }
+/* Disable the legacy ::before dot — explicit DOM dot is now the source */
+.badge.running::before { display: none !important; }
+
+/* Fullscreen-locked panel: stretch to viewport, dim siblings */
+.agent-panel--fullscreen {
+  position: fixed !important;
+  inset: 80px var(--space-5) calc(28px + var(--space-3)) var(--space-5);
+  z-index: var(--z-overlay);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-overlay);
+  animation: scaleFadeIn 220ms var(--ease-out);
+}
+.agent-panel--fullscreen .agent-panel-log {
+  font-size: var(--fs-base);
+  line-height: 1.65;
+}
+
+/* Visible scrollbar in monitor logs (slimmer + token-driven) */
+.agent-panel-log::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-pill);
+}
+.agent-panel-log::-webkit-scrollbar-thumb:hover {
+  background: var(--accent-strong);
+}
+
 /* Soft entrance for modal-style overlays (palette, sheets) */
 @keyframes scaleFadeIn {
   from { opacity: 0; transform: scale(0.96) translateY(6px); }
