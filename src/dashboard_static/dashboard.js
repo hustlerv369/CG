@@ -2167,6 +2167,13 @@ async function openRun(runId) {
   const grid = $("#agent-grid");
   grid.innerHTML = "";
   state.panels = {};
+
+  // v42.1 — hide "Save project" button until this run finishes
+  const exportBtnReset = document.getElementById("export-project-btn");
+  if (exportBtnReset) {
+    exportBtnReset.hidden = true;
+    delete exportBtnReset.dataset.runId;
+  }
   meta.agents.forEach(a => {
     const panel = buildPanel(a);
     grid.appendChild(panel.root);
@@ -2194,6 +2201,12 @@ async function openRun(runId) {
       failed === 0 ? "✅ CG run complete" : `⚠️ CG run finished (${failed}/${total} failed)`,
       meta.title
     );
+    // v42.1 — reveal "Save project" button when run completes
+    const exportBtn = document.getElementById("export-project-btn");
+    if (exportBtn) {
+      exportBtn.hidden = false;
+      exportBtn.dataset.runId = runId;
+    }
   });
   es.onerror = () => { /* ignore — server may close stream when run done */ };
 }
@@ -3481,7 +3494,66 @@ document.addEventListener("DOMContentLoaded", () => {
   initKeyboardSheet();
   initDragDropUpload();
   initQuickStart();
+  initExportProject();
 });
+
+/* ----------------------------------------------------------
+ * v42.1 — Export project to disk
+ * Scan finished run's outputs for fenced code blocks with
+ * file-path comments, write them as a real project folder
+ * under outputs/dashboard-runs/<run_id>/project/.
+ * ---------------------------------------------------------- */
+function initExportProject() {
+  const btn = document.getElementById("export-project-btn");
+  if (!btn) return;
+
+  btn.addEventListener("click", async () => {
+    const runId = btn.dataset.runId;
+    if (!runId) {
+      if (typeof toast === "function") toast("No completed run to export.", 2500);
+      return;
+    }
+    btn.disabled = true;
+    const originalLabel = btn.querySelector(".export-project-label");
+    const labelText = originalLabel ? originalLabel.textContent : null;
+    if (originalLabel) originalLabel.textContent = "saving…";
+
+    try {
+      const r = await fetch(`/api/runs/${runId}/export-project`, { method: "POST" });
+      if (!r.ok) {
+        const err = await r.text();
+        if (typeof toast === "function") toast(`Export failed: ${err}`, 5000);
+        return;
+      }
+      const j = await r.json();
+      if (j.written === 0) {
+        if (typeof toast === "function") {
+          toast(
+            `No code blocks with file paths found. Implementer agents must start ` +
+            `each block with a comment like \`// path/to/file.ts\``,
+            6000
+          );
+        }
+      } else {
+        if (typeof toast === "function") {
+          toast(
+            `📦 ${j.written} file${j.written === 1 ? "" : "s"} written to ${j.project_dir}`,
+            8000
+          );
+        }
+        // Show the project tree in the inspector if it's open + this run is selected
+        if (typeof renderInspectorProjectTree === "function") {
+          renderInspectorProjectTree(j);
+        }
+      }
+    } catch (e) {
+      if (typeof toast === "function") toast(`Export error: ${e.message || e}`, 5000);
+    } finally {
+      btn.disabled = false;
+      if (originalLabel && labelText) originalLabel.textContent = labelText;
+    }
+  });
+}
 
 /* ----------------------------------------------------------
  * v41 — Quick Start hero

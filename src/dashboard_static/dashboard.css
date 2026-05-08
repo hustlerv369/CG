@@ -3496,6 +3496,33 @@ body.cg-inspector-shown .inspector-toggle {
   .inspector-toggle-label { display: none; }
 }
 
+/* v42.1 — "Save project" button (visible only after run completes) */
+.export-project-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  font: 600 var(--fs-xs)/1 var(--font-sans);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-strong);
+  letter-spacing: var(--tracking-tight);
+  animation: scaleFadeIn 220ms var(--ease-out);
+}
+.export-project-btn:hover {
+  background: var(--accent);
+  color: var(--bg-base);
+  border-color: var(--accent);
+  box-shadow: 0 4px 14px rgba(255, 122, 89, 0.4);
+}
+.export-project-btn:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+@media (max-width: 1280px) {
+  .export-project-label { display: none; }
+}
+
 /* Pulse the gutter when inspector first opens */
 .resize-gutter--inspector::before {
   background: var(--accent-strong);

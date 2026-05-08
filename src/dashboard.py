@@ -4403,6 +4403,108 @@ def create_app() -> FastAPI:
         raise HTTPException(404,
             "no renderable HTML/SVG found in this agent's output")
 
+    @app.post("/api/runs/{run_id}/export-project")
+    async def export_project(run_id: str) -> Any:
+        """v42.1 — scan a finished run's outputs for fenced code blocks
+        whose first line is a comment with a file path, and write them
+        as real files under outputs/<run_id>/project/.
+
+        Closes the "Idea → finished" loop: agents output code blocks,
+        we materialize them into a working project folder the user can
+        cd into, run, and ship.
+
+        Recognized path comments (case-insensitive, leading `// # /* <!--`):
+          // path/to/file.ts      → JS / TS / Java / C / Go / Rust
+          # path/to/file.py        → Python / shell / YAML / Make
+          /* path/to/file.css */  → CSS / SCSS
+          <!-- path/to/file.html -->  → HTML / XML / JSX-as-text
+
+        Returns: {written: int, files: [...absolute paths...], skipped: int}
+        """
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+
+        # Gather all agent outputs into one big text blob to scan
+        chunks: list[str] = []
+        for label, agent in run.agents.items():
+            chunks.append(f"\n\n# === Agent: {label} ===\n\n")
+            chunks.append("\n".join(agent.log_lines or []))
+        full_text = "".join(chunks)
+
+        # Find every ``` ... ``` fenced block
+        # Then peel off a path-comment first line if present.
+        import re
+        fence_re = re.compile(
+            r"```[a-zA-Z0-9_+\-]*\n(.*?)\n```",
+            re.DOTALL,
+        )
+        # Match 1st-line path comments. Path can contain letters, digits,
+        # underscores, dashes, dots, slashes, spaces. We trust the agent
+        # gave us a sane relative path. Reject anything with ".." or
+        # absolute paths for safety.
+        path_re = re.compile(
+            r"""
+            ^
+            (?:
+              //\s*(?P<a>[\w./\- ]+\.[\w]+)        # // path/to.ext
+              | \#\s*(?P<b>[\w./\- ]+\.[\w]+)       # # path/to.ext
+              | /\*\s*(?P<c>[\w./\- ]+\.[\w]+)\s*\*/  # /* ... */
+              | <!--\s*(?P<d>[\w./\- ]+\.[\w]+)\s*-->  # <!-- ... -->
+            )
+            \s*$
+            """,
+            re.VERBOSE,
+        )
+
+        project_dir = RUNS_DIR / run.id / "project"
+        project_dir.mkdir(parents=True, exist_ok=True)
+
+        written: list[str] = []
+        skipped = 0
+        seen_paths: set[str] = set()
+
+        for m in fence_re.finditer(full_text):
+            body = m.group(1)
+            if not body.strip():
+                continue
+            first_nl = body.find("\n")
+            if first_nl == -1:
+                continue
+            first_line = body[:first_nl].strip()
+            pm = path_re.match(first_line)
+            if not pm:
+                skipped += 1
+                continue
+            rel_path = (
+                pm.group("a") or pm.group("b")
+                or pm.group("c") or pm.group("d") or ""
+            ).strip()
+            # Safety: reject absolute, parent-traversal, or empty
+            if (not rel_path
+                    or rel_path.startswith("/")
+                    or rel_path.startswith("\\")
+                    or ".." in Path(rel_path).parts
+                    or len(rel_path) > 240):
+                skipped += 1
+                continue
+            # Last writer wins if multiple agents emit the same path
+            content = body[first_nl + 1:]
+            target = project_dir / rel_path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content, encoding="utf-8")
+            key = str(target)
+            if key not in seen_paths:
+                seen_paths.add(key)
+                written.append(key)
+
+        return {
+            "written": len(written),
+            "files": written,
+            "skipped": skipped,
+            "project_dir": str(project_dir),
+        }
+
     @app.post("/api/runs/{run_id}/export-to-open-design")
     async def export_to_open_design(run_id: str) -> Any:
         """Drop a Markdown bundle of this run into Open Design's
