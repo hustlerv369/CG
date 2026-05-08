@@ -2755,7 +2755,14 @@ document.addEventListener("DOMContentLoaded", () => {
   initCommandPalette();
   initResizeGutters();
   initLayoutToggle();
+  initHeaderPalette();
 });
+
+/* v23 — header search-bar opens the ⌘K palette */
+function initHeaderPalette() {
+  const btn = document.getElementById("header-palette-btn");
+  if (btn) btn.addEventListener("click", openPalette);
+}
 
 /* ----------------------------------------------------------
  * v22 — Agent grid layout selector (CMUX-style tiled mode)

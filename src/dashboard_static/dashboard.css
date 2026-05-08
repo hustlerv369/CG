@@ -253,6 +253,91 @@ header h1 {
   margin-left: 6px;
 }
 
+/* v23 — Hustler Claude Gravity brand block */
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+}
+.brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-rise);
+  border: 1px solid var(--border);
+  filter: drop-shadow(0 0 12px rgba(255, 122, 89, 0.18));
+  transition: filter var(--motion-fast), transform var(--motion-fast);
+}
+.brand:hover .brand-mark {
+  filter: drop-shadow(0 0 16px rgba(255, 122, 89, 0.4));
+  transform: rotate(8deg);
+}
+.brand-wordmark {
+  display: inline-flex;
+  flex-direction: column;
+  line-height: 1;
+  gap: 3px;
+}
+.brand-name {
+  font: 700 var(--fs-md)/1 var(--font-sans);
+  letter-spacing: 0.02em;
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.brand-sub {
+  font: 600 9.5px/1 var(--font-sans);
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--fg-tertiary);
+}
+
+/* Header palette button — keyboard-feel search-bar */
+.header-palette-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 6px var(--space-3);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--fg-tertiary);
+  font: 500 var(--fs-sm)/1 var(--font-sans);
+  cursor: pointer;
+  transition: border-color var(--motion-fast), color var(--motion-fast),
+              background var(--motion-fast);
+  min-width: 240px;
+}
+.header-palette-btn:hover {
+  border-color: var(--accent-strong);
+  color: var(--fg);
+  background: var(--bg-card);
+}
+.hp-icon {
+  font: 700 13px/1 var(--font-mono);
+  color: var(--accent);
+}
+.hp-text { flex: 1; text-align: left; }
+.hp-kbd {
+  font: 600 9.5px/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--bg-rise);
+  border: 1px solid var(--border);
+  color: var(--fg-secondary);
+}
+@media (max-width: 1180px) {
+  .brand-sub { display: none; }
+  .header-palette-btn .hp-text { display: none; }
+  .header-palette-btn { min-width: 0; padding: 6px 10px; }
+}
+
 .status {
   font: 11px/1 var(--font-mono);
   color: var(--fg-tertiary);
@@ -2211,6 +2296,172 @@ select optgroup {
 }
 .agent-panel-log::-webkit-scrollbar-thumb:hover {
   background: var(--accent-strong);
+}
+
+/* ============================================================
+ * v23 — Settings as accordion sections
+ * Native <details>/<summary> with custom chrome.
+ * ============================================================ */
+.settings-pane .settings-area {
+  max-width: 880px;
+  margin: 0 auto;
+  padding: var(--space-5) var(--space-5) var(--space-7);
+}
+.settings-header {
+  margin-bottom: var(--space-5);
+}
+.settings-header h2 {
+  font: 600 var(--fs-2xl)/1.2 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  margin: 0 0 var(--space-2);
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.settings-header-actions {
+  margin-top: var(--space-4);
+}
+.settings-section {
+  background: var(--bg-card);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  margin-bottom: var(--space-3);
+  overflow: hidden;
+  transition: border-color var(--motion-fast),
+              box-shadow var(--motion-fast);
+}
+.settings-section:hover {
+  border-color: var(--border-strong);
+}
+.settings-section[open] {
+  border-color: var(--accent-strong);
+  box-shadow: var(--shadow-card);
+}
+.settings-section > summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+  transition: background var(--motion-micro);
+}
+.settings-section > summary::-webkit-details-marker { display: none; }
+.settings-section > summary:hover { background: var(--bg-hover); }
+.ss-icon {
+  width: 28px;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-rise);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 600 14px/1 var(--font-sans);
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.ss-title {
+  font: 600 var(--fs-md)/1.2 var(--font-sans);
+  letter-spacing: var(--tracking-tight);
+  color: var(--fg);
+}
+.ss-hint {
+  flex: 1;
+  font: 400 var(--fs-sm)/1.3 var(--font-sans);
+  color: var(--fg-tertiary);
+  letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-left: var(--space-2);
+}
+.ss-chev {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--fg-tertiary);
+  font: 400 18px/1 var(--font-sans);
+  transition: transform var(--motion-fast), color var(--motion-fast);
+  flex-shrink: 0;
+}
+.settings-section[open] .ss-chev {
+  transform: rotate(90deg);
+  color: var(--accent);
+}
+.ss-body {
+  padding: 0 var(--space-5) var(--space-5);
+  border-top: 1px solid var(--border);
+  animation: ssBodyIn 220ms var(--ease-out);
+}
+@keyframes ssBodyIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ss-body > .settings-hint:first-child {
+  padding-top: var(--space-4);
+  margin-top: 0;
+}
+@media (max-width: 720px) {
+  .ss-hint { display: none; }
+  .settings-pane .settings-area { padding: var(--space-3); }
+}
+
+/* ============================================================
+ * v23 — History list polish (orchestrator left rail)
+ * ============================================================ */
+#history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+#history li {
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font: 500 var(--fs-sm)/1.3 var(--font-sans);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  transition: background var(--motion-micro), border-color var(--motion-micro),
+              color var(--motion-micro), transform var(--motion-micro);
+}
+#history li:hover {
+  background: var(--bg-card);
+  border-color: var(--accent-strong);
+  color: var(--fg);
+}
+#history li.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ============================================================
+ * v23 — Empty-state refresh in monitor
+ * ============================================================ */
+.monitor .empty-state {
+  font: 400 var(--fs-md)/1.7 var(--font-sans);
+  color: var(--fg-tertiary);
+  letter-spacing: var(--tracking-normal);
+}
+.monitor .empty-state::before {
+  background: var(--accent-gradient);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-size: 48px;
+  margin-bottom: var(--space-4);
+  filter: drop-shadow(0 0 24px rgba(255, 122, 89, 0.4));
 }
 
 /* Soft entrance for modal-style overlays (palette, sheets) */

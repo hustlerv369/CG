@@ -22,13 +22,39 @@
 </head>
 <body>
   <header>
-    <h1>CG <span class="dim">— multi-agent</span></h1>
+    <div class="brand" aria-label="CG — Hustler Claude Gravity">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none">
+          <defs>
+            <linearGradient id="brand-grad" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0%" stop-color="#FF7A59" />
+              <stop offset="55%" stop-color="#FFB87A" />
+              <stop offset="100%" stop-color="#F5E6D3" />
+            </linearGradient>
+          </defs>
+          <circle cx="12" cy="12" r="9" stroke="url(#brand-grad)" stroke-width="1.6" />
+          <path d="M7 12 L11 12 M13 12 L17 12 M12 7 L12 11 M12 13 L12 17"
+                stroke="url(#brand-grad)" stroke-width="1.6" stroke-linecap="round" />
+          <circle cx="12" cy="12" r="2" fill="url(#brand-grad)" />
+        </svg>
+      </span>
+      <span class="brand-wordmark">
+        <span class="brand-name">CG</span>
+        <span class="brand-sub">Hustler Claude Gravity</span>
+      </span>
+    </div>
     <nav class="tabs">
       <button class="tab active" data-tab="orchestrator">Orchestrator</button>
       <button class="tab" data-tab="editor">Editor</button>
       <button class="tab" data-tab="notes">Notes</button>
       <button class="tab" data-tab="settings">Settings</button>
     </nav>
+    <button class="header-palette-btn" id="header-palette-btn"
+            title="Open command palette (⌘K)" aria-label="Command palette">
+      <span class="hp-icon">⌘</span>
+      <span class="hp-text">Search · run · jump</span>
+      <span class="hp-kbd">⌘K</span>
+    </button>
     <div class="status" id="server-status">connecting…</div>
   </header>
 
@@ -238,143 +264,216 @@
 
   <main id="tab-settings" class="tab-pane settings-pane">
     <section class="settings-area">
-      <h2>Settings</h2>
-      <p class="settings-hint">
-        Settings live only in this browser (localStorage). API keys here
-        are sent to the dashboard backend on each call <em>via headers</em>;
-        they're never written to disk by the browser.
-      </p>
-
-      <h3>API keys (opt-in providers)</h3>
-      <p class="settings-hint">
-        Set in your shell environment (recommended) <em>or</em> paste here
-        for browser-only override. Restart the dashboard server to pick up
-        env-var changes; browser-stored keys take effect immediately.
-      </p>
-
-      <div class="settings-grid">
-        <label>OpenRouter (GLM, DeepSeek, Qwen) <input type="password" id="setting-openrouter" placeholder="sk-or-..." /></label>
-        <label>Z.ai / Zhipu (GLM direct) <input type="password" id="setting-zhipu" placeholder="..." /></label>
-        <label>Anthropic API <input type="password" id="setting-anthropic" placeholder="sk-ant-..." /></label>
-        <label>Google AI (Gemini) <input type="password" id="setting-gemini" placeholder="..." /></label>
-      </div>
-
-      <h3>Project root override</h3>
-      <p class="settings-hint">
-        Lets the file tree + <code>{{file:}}</code> placeholder pull from
-        a sibling project. Empty = use D:\CG.
-      </p>
-      <div class="settings-row">
-        <input type="text" id="setting-project-root" placeholder="D:\CLAUDE\TEAMIDAS" />
-      </div>
-
-      <h3>Defaults</h3>
-      <div class="settings-row">
-        <label>Default view mode
-          <select id="setting-default-view">
-            <option value="raw">raw</option>
-            <option value="md">markdown</option>
-          </select>
-        </label>
-      </div>
-
-      <h3>Workflow variables — ${VAR} substitution</h3>
-      <p class="settings-hint">
-        Reference these in any prompt as <code>${NAME}</code>. Useful for
-        per-project values (target site URL, repo path, default branch).
-        Auto-injected on every run.
-      </p>
-      <ul class="vars-list" id="vars-list"></ul>
-      <div class="settings-row" style="flex-direction: row; gap: 8px;">
-        <input type="text" id="var-key-input" placeholder="VAR_NAME" />
-        <input type="text" id="var-value-input" placeholder="value" />
-        <button class="ghost" id="var-add-btn">+ add</button>
-      </div>
-
-      <div class="actions">
-        <button class="primary" id="settings-save-btn">Save settings</button>
-        <button class="ghost" id="settings-clear-btn">Clear all</button>
-      </div>
-
-      <h3>🔐 Browser auth states</h3>
-      <p class="settings-hint">
-        Login once in a real (non-headless) Chromium window, save the
-        cookies + localStorage as a named auth state. Then any browser
-        agent step can include <code>{"session": {"load_auth_state": "&lt;slug&gt;"}}</code>
-        to scrape behind the login.
-      </p>
-      <ul class="vars-list" id="auth-list"></ul>
-      <div class="settings-row" style="flex-direction: row; gap: 8px;">
-        <input type="text" id="auth-slug-input" placeholder="auth name (e.g. github-login)" />
-        <input type="text" id="auth-url-input" placeholder="login URL (e.g. https://github.com/login)" />
-        <button class="ghost" id="auth-start-btn">▶ Start login</button>
-      </div>
-      <div id="auth-active-row" hidden>
-        <p class="settings-hint" id="auth-active-msg"></p>
-        <div class="settings-row" style="flex-direction: row; gap: 8px;">
-          <button class="primary" id="auth-save-btn">💾 Save & Close</button>
-          <button class="ghost" id="auth-cancel-btn">⨯ Cancel</button>
-        </div>
-      </div>
-
-      <h3>📱 Phone Dispatch — Cloudflare Tunnel</h3>
-      <p class="settings-hint">
-        Spustí <code>cloudflared tunnel</code> co exposuje tvůj lokální
-        dashboard na <em>random.trycloudflare.com</em> URL — pro mobile
-        Shortcuts. Žádný Cloudflare účet potřeba; zdarma a anonymní.
-        Po stop URL přestane fungovat. <strong>Nikdy nesdílej URL veřejně</strong> —
-        kdokoli s URL může spouštět workflows + číst notes.
-      </p>
-      <div class="tunnel-row">
-        <button class="primary" id="tunnel-start-btn">▶ Start tunnel</button>
-        <button class="ghost" id="tunnel-stop-btn">⏹ Stop tunnel</button>
-        <span class="tunnel-status" id="tunnel-status">stopped</span>
-      </div>
-      <div class="tunnel-url-row" id="tunnel-url-row" hidden>
-        <label>Public URL:</label>
-        <input type="text" id="tunnel-url-display" readonly />
-        <button class="ghost" id="tunnel-copy-btn" title="Copy URL">📋</button>
-      </div>
-      <div class="tunnel-shortcut" id="tunnel-shortcut" hidden>
+      <header class="settings-header">
+        <h2>Settings</h2>
         <p class="settings-hint">
-          ✨ Pro iOS Shortcuts: vytvoř shortcut "Get Contents of URL" s POST
-          na <code id="tunnel-shortcut-url"></code><br />
-          Headers: <code>Content-Type: application/json</code><br />
-          Body (JSON): <code>{"message": "Shortcut Input", "agent": "gemini-flash"}</code>
+          Browser-local (localStorage). API keys are sent to the dashboard
+          backend per request <em>via headers</em>; they're never written
+          to disk by the browser.
         </p>
-      </div>
+        <div class="actions settings-header-actions">
+          <button class="primary" id="settings-save-btn">Save settings</button>
+          <button class="ghost" id="settings-clear-btn">Clear all</button>
+        </div>
+      </header>
 
-      <h3>🔔 Run-finished notifications</h3>
-      <p class="settings-hint">
-        Když workflow doběhne, CG ti pingne. Podporované: <strong>ntfy.sh</strong>
-        (free push to phone), <strong>Discord</strong> webhook,
-        <strong>Slack</strong> webhook, nebo libovolná <strong>generic</strong>
-        URL co přijme JSON POST.
-      </p>
-      <div class="settings-row">
-        <label>Webhook URL
-          <input type="text" id="notif-url" placeholder="https://ntfy.sh/your-topic OR Discord webhook URL" />
-        </label>
-        <label>Service kind
-          <select id="notif-kind">
-            <option value="ntfy">ntfy.sh (push to phone — free)</option>
-            <option value="discord">Discord webhook</option>
-            <option value="slack">Slack incoming webhook</option>
-            <option value="generic">Generic JSON POST</option>
-          </select>
-        </label>
-        <label style="flex-direction: row; gap: 6px; align-items: center;">
-          <input type="checkbox" id="notif-on-complete" /> Notify on success
-        </label>
-        <label style="flex-direction: row; gap: 6px; align-items: center;">
-          <input type="checkbox" id="notif-on-failed" /> Notify on failure
-        </label>
-        <button class="ghost" id="notif-save-btn">Save notification config</button>
-        <button class="ghost" id="notif-test-btn">Send test ping</button>
-      </div>
+      <!-- v23 — accordion sections (native <details>/<summary>) -->
+      <details class="settings-section" open>
+        <summary>
+          <span class="ss-icon">🔑</span>
+          <span class="ss-title">API keys</span>
+          <span class="ss-hint">Opt-in providers: OpenRouter · Z.ai · Anthropic · Google</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Set in your shell environment (recommended) <em>or</em> paste here
+            for browser-only override. Restart the dashboard server to pick up
+            env-var changes; browser-stored keys take effect immediately.
+          </p>
+          <div class="settings-grid">
+            <label>OpenRouter (GLM, DeepSeek, Qwen) <input type="password" id="setting-openrouter" placeholder="sk-or-..." /></label>
+            <label>Z.ai / Zhipu (GLM direct) <input type="password" id="setting-zhipu" placeholder="..." /></label>
+            <label>Anthropic API <input type="password" id="setting-anthropic" placeholder="sk-ant-..." /></label>
+            <label>Google AI (Gemini) <input type="password" id="setting-gemini" placeholder="..." /></label>
+          </div>
+        </div>
+      </details>
 
-      <h3>Currently active</h3>
-      <ul id="settings-active" class="settings-active"></ul>
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">📁</span>
+          <span class="ss-title">Project root</span>
+          <span class="ss-hint">Override the directory the file tree + {{file:}} placeholder reads from</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Lets the file tree + <code>{{file:}}</code> placeholder pull from
+            a sibling project. Empty = use D:\CG.
+          </p>
+          <div class="settings-row">
+            <input type="text" id="setting-project-root" placeholder="D:\CLAUDE\TEAMIDAS" />
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">⚙</span>
+          <span class="ss-title">Defaults</span>
+          <span class="ss-hint">View mode for new runs</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <div class="settings-row">
+            <label>Default view mode
+              <select id="setting-default-view">
+                <option value="raw">raw</option>
+                <option value="md">markdown</option>
+              </select>
+            </label>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">$</span>
+          <span class="ss-title">Workflow variables</span>
+          <span class="ss-hint">${VAR} substitution — auto-injected per run</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Reference these in any prompt as <code>${NAME}</code>. Useful for
+            per-project values (target site URL, repo path, default branch).
+            Auto-injected on every run.
+          </p>
+          <ul class="vars-list" id="vars-list"></ul>
+          <div class="settings-row" style="flex-direction: row; gap: 8px;">
+            <input type="text" id="var-key-input" placeholder="VAR_NAME" />
+            <input type="text" id="var-value-input" placeholder="value" />
+            <button class="ghost" id="var-add-btn">+ add</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">🔐</span>
+          <span class="ss-title">Browser auth states</span>
+          <span class="ss-hint">Save Chromium login sessions for authenticated scraping</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Login once in a real (non-headless) Chromium window, save the
+            cookies + localStorage as a named auth state. Then any browser
+            agent step can include <code>{"session": {"load_auth_state": "&lt;slug&gt;"}}</code>
+            to scrape behind the login.
+          </p>
+          <ul class="vars-list" id="auth-list"></ul>
+          <div class="settings-row" style="flex-direction: row; gap: 8px;">
+            <input type="text" id="auth-slug-input" placeholder="auth name (e.g. github-login)" />
+            <input type="text" id="auth-url-input" placeholder="login URL (e.g. https://github.com/login)" />
+            <button class="ghost" id="auth-start-btn">▶ Start login</button>
+          </div>
+          <div id="auth-active-row" hidden>
+            <p class="settings-hint" id="auth-active-msg"></p>
+            <div class="settings-row" style="flex-direction: row; gap: 8px;">
+              <button class="primary" id="auth-save-btn">💾 Save & Close</button>
+              <button class="ghost" id="auth-cancel-btn">⨯ Cancel</button>
+            </div>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">📱</span>
+          <span class="ss-title">Phone Dispatch</span>
+          <span class="ss-hint">Cloudflare Tunnel — public URL for iOS Shortcuts</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Spustí <code>cloudflared tunnel</code> co exposuje tvůj lokální
+            dashboard na <em>random.trycloudflare.com</em> URL — pro mobile
+            Shortcuts. Žádný Cloudflare účet potřeba; zdarma a anonymní.
+            Po stop URL přestane fungovat. <strong>Nikdy nesdílej URL veřejně</strong> —
+            kdokoli s URL může spouštět workflows + číst notes.
+          </p>
+          <div class="tunnel-row">
+            <button class="primary" id="tunnel-start-btn">▶ Start tunnel</button>
+            <button class="ghost" id="tunnel-stop-btn">⏹ Stop tunnel</button>
+            <span class="tunnel-status" id="tunnel-status">stopped</span>
+          </div>
+          <div class="tunnel-url-row" id="tunnel-url-row" hidden>
+            <label>Public URL:</label>
+            <input type="text" id="tunnel-url-display" readonly />
+            <button class="ghost" id="tunnel-copy-btn" title="Copy URL">📋</button>
+          </div>
+          <div class="tunnel-shortcut" id="tunnel-shortcut" hidden>
+            <p class="settings-hint">
+              ✨ Pro iOS Shortcuts: vytvoř shortcut "Get Contents of URL" s POST
+              na <code id="tunnel-shortcut-url"></code><br />
+              Headers: <code>Content-Type: application/json</code><br />
+              Body (JSON): <code>{"message": "Shortcut Input", "agent": "gemini-flash"}</code>
+            </p>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">🔔</span>
+          <span class="ss-title">Notifications</span>
+          <span class="ss-hint">ntfy.sh · Discord · Slack · generic webhook</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <p class="settings-hint">
+            Když workflow doběhne, CG ti pingne. Podporované: <strong>ntfy.sh</strong>
+            (free push to phone), <strong>Discord</strong> webhook,
+            <strong>Slack</strong> webhook, nebo libovolná <strong>generic</strong>
+            URL co přijme JSON POST.
+          </p>
+          <div class="settings-row">
+            <label>Webhook URL
+              <input type="text" id="notif-url" placeholder="https://ntfy.sh/your-topic OR Discord webhook URL" />
+            </label>
+            <label>Service kind
+              <select id="notif-kind">
+                <option value="ntfy">ntfy.sh (push to phone — free)</option>
+                <option value="discord">Discord webhook</option>
+                <option value="slack">Slack incoming webhook</option>
+                <option value="generic">Generic JSON POST</option>
+              </select>
+            </label>
+            <label style="flex-direction: row; gap: 6px; align-items: center;">
+              <input type="checkbox" id="notif-on-complete" /> Notify on success
+            </label>
+            <label style="flex-direction: row; gap: 6px; align-items: center;">
+              <input type="checkbox" id="notif-on-failed" /> Notify on failure
+            </label>
+            <button class="ghost" id="notif-save-btn">Save notification config</button>
+            <button class="ghost" id="notif-test-btn">Send test ping</button>
+          </div>
+        </div>
+      </details>
+
+      <details class="settings-section">
+        <summary>
+          <span class="ss-icon">✓</span>
+          <span class="ss-title">Currently active</span>
+          <span class="ss-hint">Live summary of effective settings</span>
+          <span class="ss-chev" aria-hidden="true">›</span>
+        </summary>
+        <div class="ss-body">
+          <ul id="settings-active" class="settings-active"></ul>
+        </div>
+      </details>
     </section>
   </main>
 
