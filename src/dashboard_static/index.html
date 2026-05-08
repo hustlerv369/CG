@@ -134,6 +134,18 @@
         <input id="run-title" type="text" placeholder="What is this run for?" />
       </div>
 
+      <!-- v39 — Inputs panel: surfaces every ${VAR} the current preset
+           uses, right under Title where users actually look first.
+           Replaces the "where do I type my brief?" gap reported by user. -->
+      <section class="inputs-panel" id="inputs-panel" hidden>
+        <header class="inputs-panel-head">
+          <span class="inputs-panel-icon">📝</span>
+          <span class="inputs-panel-title">Your inputs</span>
+          <span class="inputs-panel-hint">edit and the agents pick up via <code>${VAR}</code></span>
+        </header>
+        <div class="inputs-panel-body" id="inputs-panel-body"></div>
+      </section>
+
       <div class="view-mode-toggle" id="view-mode-toggle"
            title="Editor mode — Terminal (linear rows, CMUX-style) ↔ Visual (n8n graph)">
         <button class="vm-seg active" data-vm="classic">

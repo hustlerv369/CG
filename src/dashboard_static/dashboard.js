@@ -39,6 +39,8 @@ async function init() {
   requestNotificationPermission();
   // CLI auto-load: cg dashboard --workflow <name>
   await autoLoadFromUrl();
+  // v39 — paint the Inputs panel after the initial spec is in place
+  if (typeof renderInputsPanel === "function") renderInputsPanel();
 
   setInterval(refreshHistory, 5000);
 }
@@ -1153,9 +1155,9 @@ function populatePresets() {
       if (added > 0) {
         saveSettings(settings);
         if (typeof renderVariables === "function") renderVariables();
-        // Friendly nudge in the run title hint
+        // v39 — point the user at the Inputs panel above (not Settings far away)
         const ks = Object.keys(preset.variables).join(", ");
-        toast(`Preset added ${added} variable(s): ${ks}. Edit them in Settings → Variables before Run.`);
+        toast(`Preset added ${added} input(s): ${ks}. Fill them in 📝 Your inputs above.`);
       }
     }
     // Repaint visual canvas if active
@@ -1163,7 +1165,128 @@ function populatePresets() {
         $("#visual-pane")?.style.display !== "none") {
       renderVisualCanvas();
     }
+    // v39 — re-render the prominent Inputs panel with the new spec's vars
+    if (typeof renderInputsPanel === "function") renderInputsPanel();
   };
+}
+
+/* ============================================================
+ * v39 — Inputs panel
+ * Detects every ${VAR} referenced in the current spec's prompts and
+ * renders a prominent edit panel right below Title. Solves the
+ * "where do I write my brief?" UX gap where preset variables were
+ * hidden in Settings → Workflow variables.
+ * ============================================================ */
+
+function detectSpecVariables() {
+  // Gather text from all prompts (.prompt textareas in classic + visual)
+  const texts = [];
+  document.querySelectorAll("#agent-rows textarea.prompt").forEach(t => texts.push(t.value || ""));
+  document.querySelectorAll(".vne-prompt").forEach(t => texts.push(t.value || ""));
+  // Title and any extra-hidden inputs may also reference vars
+  const titleEl = document.getElementById("run-title");
+  if (titleEl) texts.push(titleEl.value || "");
+
+  const re = /\$\{([A-Z][A-Z0-9_]*)\}/g;
+  const found = new Map();  // varName → list of agent labels using it
+  let m;
+
+  // Per-agent attribution (which row uses which var)
+  const rows = document.querySelectorAll("#agent-rows .agent-row");
+  rows.forEach((row, i) => {
+    const label = (row.querySelector(".label")?.value.trim()) || `agent-${i + 1}`;
+    const txt = row.querySelector("textarea.prompt")?.value || "";
+    const seen = new Set();
+    while ((m = re.exec(txt)) !== null) {
+      const name = m[1];
+      if (!found.has(name)) found.set(name, []);
+      if (!seen.has(name)) {
+        found.get(name).push(label);
+        seen.add(name);
+      }
+    }
+    re.lastIndex = 0;
+  });
+
+  // Also catch vars only present in title or visual edit textareas
+  texts.forEach(t => {
+    while ((m = re.exec(t)) !== null) {
+      if (!found.has(m[1])) found.set(m[1], []);
+    }
+    re.lastIndex = 0;
+  });
+
+  return found;
+}
+
+function renderInputsPanel() {
+  const panel = document.getElementById("inputs-panel");
+  const body  = document.getElementById("inputs-panel-body");
+  if (!panel || !body) return;
+
+  const vars = detectSpecVariables();
+  if (vars.size === 0) {
+    panel.hidden = true;
+    body.innerHTML = "";
+    return;
+  }
+
+  const settings = loadSettings();
+  const stored = settings.variables || {};
+  panel.hidden = false;
+
+  body.innerHTML = "";
+  for (const [name, agents] of vars) {
+    const value = stored[name] != null ? String(stored[name]) : "";
+    // Long values → textarea, short → input
+    const useTextarea = value.length > 60 || value.includes("\n");
+    const usedBy = agents.length > 0
+      ? `used by <strong>${agents.map(escapeHtml).join("</strong>, <strong>")}</strong>`
+      : "no agent references it yet";
+
+    const row = document.createElement("div");
+    row.className = "input-row";
+    row.innerHTML = `
+      <div class="input-row-head">
+        <span class="input-row-name">$\{${escapeHtml(name)}\}</span>
+        <span class="input-row-meta">${usedBy}</span>
+      </div>
+      ${useTextarea
+        ? `<textarea class="input-row-field" data-var="${escapeHtml(name)}"
+            placeholder="Write your ${escapeHtml(name).toLowerCase()} here…"
+            spellcheck="false">${escapeHtml(value)}</textarea>`
+        : `<input type="text" class="input-row-field" data-var="${escapeHtml(name)}"
+            placeholder="Write your ${escapeHtml(name).toLowerCase()} here…"
+            value="${escapeHtml(value)}" />`}
+    `;
+    body.appendChild(row);
+  }
+
+  // Wire change handlers — auto-save to localStorage on every keystroke
+  body.querySelectorAll(".input-row-field").forEach(el => {
+    let timer = null;
+    const onInput = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const settings = loadSettings();
+        settings.variables = settings.variables || {};
+        const name = el.dataset.var;
+        settings.variables[name] = el.value;
+        saveSettings(settings);
+        // Mirror into the Settings tab vars list if rendered there
+        if (typeof renderVariables === "function") renderVariables();
+      }, 250);
+    };
+    el.addEventListener("input", onInput);
+    el.addEventListener("change", onInput);
+    // Auto-resize textarea to content
+    if (el.tagName === "TEXTAREA") {
+      const grow = () => { el.style.height = "auto"; el.style.height = (el.scrollHeight + 2) + "px"; };
+      el.addEventListener("input", grow);
+      // Initial sizing
+      requestAnimationFrame(grow);
+    }
+  });
 }
 
 /* ============================================================
@@ -1815,12 +1938,33 @@ function addAgentRow(spec = {}) {
   tpl.querySelector(".streaming").checked = (spec.streaming !== undefined)
     ? !!spec.streaming
     : streamDefault;
-  tpl.querySelector(".remove").onclick = () => tpl.remove();
+  tpl.querySelector(".remove").onclick = () => {
+    tpl.remove();
+    if (typeof renderInputsPanel === "function") renderInputsPanel();
+  };
   $("#agent-rows").appendChild(tpl);
 
   // K4 — toggle step builder on agent change + on initial render
   applyBrowserMode(tpl, spec);
   sel.addEventListener("change", () => applyBrowserMode(tpl, { prompt: tpl.querySelector(".prompt").value }));
+
+  // v39 — re-detect variables when user edits the prompt or label
+  const promptEl = tpl.querySelector(".prompt");
+  const labelEl  = tpl.querySelector(".label");
+  let varTimer = null;
+  const onPromptChange = () => {
+    clearTimeout(varTimer);
+    varTimer = setTimeout(() => {
+      if (typeof renderInputsPanel === "function") renderInputsPanel();
+    }, 400);
+  };
+  if (promptEl) promptEl.addEventListener("input", onPromptChange);
+  if (labelEl)  labelEl.addEventListener("input", onPromptChange);
+
+  // First-paint refresh after this row is added
+  if (typeof renderInputsPanel === "function") {
+    requestAnimationFrame(() => renderInputsPanel());
+  }
 }
 
 function ensureOneAgentRow() {
