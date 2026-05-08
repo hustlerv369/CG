@@ -2670,10 +2670,151 @@ document.addEventListener("DOMContentLoaded", () => {
 
   /* ============================================================
    * v19 — Status bar live wiring + ⌘K command palette
+   * v20 — Resizable layout gutters
    * ============================================================ */
   initStatusBar();
   initCommandPalette();
+  initResizeGutters();
 });
+
+/* ----------------------------------------------------------
+ * v20 — Resizable layout gutters
+ * Drag to resize columns, double-click to collapse, persist to
+ * localStorage[cg.layout.v1]. Keyboard: Ctrl+\ collapses rail,
+ * Ctrl+Shift+\ collapses designer.
+ * ---------------------------------------------------------- */
+const CG_LAYOUT_KEY = "cg.layout.v1";
+const CG_LAYOUT_DEFAULTS = {
+  col1: 56,    // workspaces rail (px)
+  col2: 380,   // designer (px)
+  col2v: null, // designer in visual mode (null = 1fr)
+  railCollapsed: false,
+  designerCollapsed: false,
+};
+const CG_LAYOUT_BOUNDS = {
+  col1: { min: 0, max: 240, snap: 56 },
+  col2: { min: 240, max: 720, snap: 380 },
+};
+
+function cgLoadLayout() {
+  try {
+    const raw = localStorage.getItem(CG_LAYOUT_KEY);
+    if (!raw) return { ...CG_LAYOUT_DEFAULTS };
+    return { ...CG_LAYOUT_DEFAULTS, ...JSON.parse(raw) };
+  } catch {
+    return { ...CG_LAYOUT_DEFAULTS };
+  }
+}
+function cgSaveLayout(layout) {
+  try {
+    localStorage.setItem(CG_LAYOUT_KEY, JSON.stringify(layout));
+  } catch {}
+}
+function cgApplyLayout(layout) {
+  const root = document.documentElement;
+  root.style.setProperty("--cg-col-1", `${layout.col1}px`);
+  root.style.setProperty("--cg-col-2", `${layout.col2}px`);
+  if (layout.col2v != null) {
+    root.style.setProperty("--cg-col-2-visual", `${layout.col2v}px`);
+  } else {
+    root.style.setProperty("--cg-col-2-visual", "1fr");
+  }
+  document.body.classList.toggle("cg-rail-collapsed", !!layout.railCollapsed);
+  document.body.classList.toggle("cg-designer-collapsed", !!layout.designerCollapsed);
+}
+
+function initResizeGutters() {
+  const layout = cgLoadLayout();
+  cgApplyLayout(layout);
+
+  const gutters = document.querySelectorAll(".resize-gutter");
+  if (!gutters.length) return;
+
+  let drag = null;
+
+  gutters.forEach(g => {
+    g.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      g.setPointerCapture(e.pointerId);
+      g.classList.add("is-dragging");
+      document.body.classList.add("cg-resizing");
+      const which = g.dataset.gutter;
+      const startX = e.clientX;
+      const startLayout = cgLoadLayout();
+      drag = { which, startX, startLayout, gutter: g };
+    });
+
+    g.addEventListener("pointermove", (e) => {
+      if (!drag || drag.gutter !== g) return;
+      const dx = e.clientX - drag.startX;
+      const layout = { ...drag.startLayout };
+      const visualMode = document.body.classList.contains("visual-mode-active");
+
+      if (drag.which === "ws-designer") {
+        const next = drag.startLayout.col1 + dx;
+        const b = CG_LAYOUT_BOUNDS.col1;
+        layout.col1 = Math.max(b.min, Math.min(b.max, next));
+        layout.railCollapsed = layout.col1 < 12;
+      } else if (drag.which === "designer-monitor") {
+        const next = drag.startLayout.col2 + dx;
+        const b = CG_LAYOUT_BOUNDS.col2;
+        const max = window.innerWidth - drag.startLayout.col1 - 280;
+        layout.col2 = Math.max(b.min, Math.min(Math.min(b.max, max), next));
+        // In visual mode also drive col2v (proportional designer pane)
+        if (visualMode) {
+          layout.col2v = layout.col2;
+        }
+      }
+      cgApplyLayout(layout);
+      drag.startLayout._latest = layout;
+    });
+
+    const finishDrag = (e) => {
+      if (!drag || drag.gutter !== g) return;
+      g.classList.remove("is-dragging");
+      document.body.classList.remove("cg-resizing");
+      try { g.releasePointerCapture(e.pointerId); } catch {}
+      const final = drag.startLayout._latest || drag.startLayout;
+      cgSaveLayout(final);
+      drag = null;
+    };
+    g.addEventListener("pointerup", finishDrag);
+    g.addEventListener("pointercancel", finishDrag);
+
+    // Double-click — toggle collapse of the column on the appropriate side.
+    g.addEventListener("dblclick", () => {
+      const layout = cgLoadLayout();
+      if (g.dataset.gutter === "ws-designer") {
+        layout.railCollapsed = !layout.railCollapsed;
+        if (!layout.railCollapsed && layout.col1 < 12) {
+          layout.col1 = CG_LAYOUT_BOUNDS.col1.snap;
+        }
+      } else if (g.dataset.gutter === "designer-monitor") {
+        layout.designerCollapsed = !layout.designerCollapsed;
+        if (!layout.designerCollapsed && layout.col2 < 240) {
+          layout.col2 = CG_LAYOUT_BOUNDS.col2.snap;
+        }
+      }
+      cgApplyLayout(layout);
+      cgSaveLayout(layout);
+    });
+  });
+
+  // Keyboard shortcuts: Ctrl+\ / Ctrl+Shift+\
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key === "\\") {
+      e.preventDefault();
+      const layout = cgLoadLayout();
+      if (e.shiftKey) {
+        layout.designerCollapsed = !layout.designerCollapsed;
+      } else {
+        layout.railCollapsed = !layout.railCollapsed;
+      }
+      cgApplyLayout(layout);
+      cgSaveLayout(layout);
+    }
+  });
+}
 
 /* ----------------------------------------------------------
  * Status bar — backend connection + live run/queue counters

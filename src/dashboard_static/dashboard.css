@@ -311,19 +311,42 @@ main {
   gap: 0;
 }
 
-/* K5 — orchestrator gets a workspace rail before the designer */
+/* K5 + v20 — orchestrator: workspaces rail | gutter | designer | gutter | monitor
+ * Column widths controlled by --cg-col-* CSS vars (set by JS, persisted to
+ * localStorage). Gutters are 5px draggable handles between every pair.
+ */
 main#tab-orchestrator.tab-pane.active {
-  grid-template-columns: 56px 380px 1fr;
+  grid-template-columns:
+    var(--cg-col-1, 56px)
+    5px
+    var(--cg-col-2, 380px)
+    5px
+    1fr;
 }
 /* v16/visual: when Visual mode is active, expand the designer column
  * to share the page 50/50 with the monitor (instead of being capped
- * at 380px). Without this, a 5-agent pipeline (5 cols × 280px =
- * 1400px wide canvas) clips inside the 380px designer panel and only
- * the first node is visible.
- *
- * Layout: rail (56px) | canvas (1fr) | monitor (1fr) */
+ * at 380px). Layout: rail (56px) | gutter | canvas (1fr) | gutter | monitor (1fr) */
 body.visual-mode-active main#tab-orchestrator.tab-pane.active {
-  grid-template-columns: 56px 1fr 1fr;
+  grid-template-columns:
+    var(--cg-col-1, 56px)
+    5px
+    var(--cg-col-2-visual, 1fr)
+    5px
+    1fr;
+}
+/* Collapsed-rail state */
+body.cg-rail-collapsed main#tab-orchestrator.tab-pane.active {
+  grid-template-columns: 0px 5px var(--cg-col-2, 380px) 5px 1fr;
+}
+body.cg-rail-collapsed .workspaces-rail {
+  display: none;
+}
+/* Collapsed-designer state */
+body.cg-designer-collapsed main#tab-orchestrator.tab-pane.active {
+  grid-template-columns: var(--cg-col-1, 56px) 5px 0px 5px 1fr;
+}
+body.cg-designer-collapsed .designer {
+  display: none;
 }
 body.visual-mode-active #classic-pane {
   display: none !important;
@@ -1988,6 +2011,69 @@ select optgroup {
 @keyframes scaleFadeIn {
   from { opacity: 0; transform: scale(0.96) translateY(6px); }
   to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* ============================================================
+ * v20 — Resize gutters
+ * 5px-wide draggable handles between layout columns.
+ * Hairline at rest, accent line on hover/drag, double-click collapses.
+ * ============================================================ */
+.resize-gutter {
+  position: relative;
+  cursor: col-resize;
+  background: transparent;
+  user-select: none;
+  z-index: var(--z-rail);
+  touch-action: none;
+}
+.resize-gutter::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 2px;
+  right: 2px;
+  background: var(--border);
+  transition: background var(--motion-fast),
+              left var(--motion-fast),
+              right var(--motion-fast);
+}
+.resize-gutter:hover::before {
+  background: var(--accent);
+  left: 1px;
+  right: 1px;
+  box-shadow: 0 0 12px var(--accent-strong);
+}
+.resize-gutter.is-dragging::before {
+  background: var(--accent);
+  left: 0;
+  right: 0;
+  box-shadow: 0 0 16px var(--accent);
+}
+/* Visible grip dots in the middle on hover */
+.resize-gutter::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 3px;
+  height: 32px;
+  margin-left: -1.5px;
+  margin-top: -16px;
+  background: radial-gradient(circle at 50% 12%, currentColor 1px, transparent 1.5px) 0 0/3px 6px;
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity var(--motion-fast);
+  pointer-events: none;
+}
+.resize-gutter:hover::after,
+.resize-gutter.is-dragging::after {
+  opacity: 0.6;
+}
+body.cg-resizing,
+body.cg-resizing * {
+  cursor: col-resize !important;
+  user-select: none !important;
 }
 
 /* Universal focus ring — accent-warm, accessible contrast */
