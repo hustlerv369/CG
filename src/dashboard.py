@@ -1155,6 +1155,25 @@ class RunManager:
                 # gemini -p ...   →  gemini --output-format stream-json -p ...
                 cmd = cmd + ["--output-format", "stream-json"]
 
+        # v44 — Gemini CLI runs an agentic loop with built-in tools
+        # (write_file, run_shell_command, …). When our prompt asks for
+        # text output ("write the spec" / "output Markdown"), Gemini
+        # often tries to call write_file → tool not available in this
+        # workspace → loops forever waiting for delegate-able sub-agent
+        # → process hangs at ~1KB output.
+        # Mitigation: prepend a global "TEXT ONLY, no tools" preamble
+        # to every Gemini prompt. Claude --print is one-shot generative
+        # already, so it doesn't need this preamble.
+        if family == "gemini":
+            preamble = (
+                "OUTPUT MODE: TEXT ONLY. Do not call any tools — no "
+                "write_file, no read_file, no run_shell_command, no "
+                "grep_search, no sub-agent delegation. Respond with "
+                "raw text in the format the user asks for. Nothing "
+                "else.\n\n---\n\n"
+            )
+            prompt = preamble + prompt
+
         if cfg["stdin_prompt"]:
             stdin_input: str | None = prompt
         else:
@@ -1238,7 +1257,42 @@ class RunManager:
                 self._emit(run.id, label, {"event": "log", "data": {
                     "label": label, "line": line_clean}})
 
-        proc.wait()
+        # v44 — hard wall-clock timeout per agent. Without it, an agent
+        # CLI that hangs (e.g. Gemini stuck in a missing-tool loop, or
+        # any subprocess waiting on stdin) blocks the run forever.
+        # Default 720s (12 min) — Opus 1M with big code outputs needs
+        # the headroom; faster Gemini Flash steps finish in <60s.
+        # Override per-step via env CG_AGENT_TIMEOUT or per-agent in
+        # AGENT_KINDS cfg.
+        agent_timeout = float(
+            cfg.get("timeout")
+            or os.environ.get("CG_AGENT_TIMEOUT")
+            or 720
+        )
+        try:
+            proc.wait(timeout=agent_timeout)
+        except subprocess.TimeoutExpired:
+            agent_state.log_lines.append(
+                f"[error] agent timed out after {agent_timeout:.0f}s — killing subprocess"
+            )
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": agent_state.log_lines[-1]}})
+            try:
+                proc.kill()
+            except Exception:
+                pass
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                pass
+            agent_state.exit_code = -9
+            agent_state.status = "failed"
+            agent_state.finished = time.time()
+            stderr_thread.join(timeout=2)
+            out_fp.close()
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "failed", "exit_code": -9}})
+            return
         stderr_thread.join(timeout=2)
         agent_state.exit_code = proc.returncode
         if agent_state.status == "cancelled":
@@ -2160,7 +2214,11 @@ PRESETS: list[dict[str, Any]] = [
             {
                 "agent": "gemini-pro", "label": "designer",
                 "depends_on": ["director"],
-                "prompt": "You are the lead designer (different vendor than the "
+                "prompt": "OUTPUT MODE: TEXT ONLY. Do not call any tools. Do not "
+                          "invoke write_file, read_file, run_shell_command, "
+                          "or any sub-agent. Do not delegate. Respond with "
+                          "raw text in the requested format — nothing else.\n\n"
+                          "You are the lead designer (different vendor than the "
                           "director, so bring fresh visual judgment). From the spec, output:\n\n"
                           "## Design tokens\nCSS custom properties block — colors (hex), type scale, spacing scale, radii, shadows.\n\n"
                           "## Component inventory\n10-15 components needed (Button, Input, DataTable, …) with one-line spec each.\n\n"
@@ -2201,10 +2259,14 @@ PRESETS: list[dict[str, Any]] = [
                           "## Design tokens + components\n{{designer}}",
             },
             {
-                "agent": "gemini-pro", "label": "tests",
+                # v44 — tests moved Gemini→Sonnet. Gemini Pro hung in
+                # missing-tool loops on the previous run when asked to
+                # output many fenced code blocks with file paths;
+                # Sonnet is one-shot generative and reliably finishes
+                # the same task. See docs/MODEL-LIMITS.md.
+                "agent": "claude-sonnet-4-6", "label": "tests",
                 "depends_on": ["director", "implementation"],
-                "prompt": "You are the test author (different vendor than the "
-                          "implementer, so you'll catch what they missed). "
+                "prompt": "You are the test author. "
                           "Write thorough tests for this implementation. Cover:\n"
                           "- Happy path for every endpoint in the API contract\n"
                           "- Each acceptance-criterion bullet\n"
@@ -2234,7 +2296,10 @@ PRESETS: list[dict[str, Any]] = [
             {
                 "agent": "gemini-flash", "label": "readme-deploy",
                 "depends_on": ["director", "architect", "implementation"],
-                "prompt": "Write the project's complete README + deploy guide:\n\n"
+                "prompt": "OUTPUT MODE: TEXT ONLY. Do not call any tools. Do not "
+                          "invoke write_file, read_file, or any sub-agent. "
+                          "Respond with raw Markdown text only.\n\n"
+                          "Write the project's complete README + deploy guide:\n\n"
                           "## README.md\n- Title + tagline (≤12 words)\n- Hero "
                           "screenshot placeholder\n- Feature list (from MVP "
                           "scope)\n- Quickstart (copy-pasteable)\n- Project "
@@ -4430,12 +4495,21 @@ def create_app() -> FastAPI:
         if not run:
             raise HTTPException(404, "run not found")
 
-        # Gather all agent outputs into one big text blob to scan
-        chunks: list[str] = []
-        for label, agent in run.agents.items():
-            chunks.append(f"\n\n# === Agent: {label} ===\n\n")
-            chunks.append("\n".join(agent.log_lines or []))
-        full_text = "".join(chunks)
+        # v44 — read each agent's full output from disk instead of
+        # in-memory log_lines. Files are authoritative (full content),
+        # log_lines may be partial after cancellation or filtered for
+        # streaming. Process each file separately so a fenced block in
+        # one agent's output never accidentally consumes a closing
+        # fence from another agent's output.
+        agent_texts: list[str] = []
+        run_dir = RUNS_DIR / run.id
+        for label in run.agents:
+            out_md = run_dir / f"{label}.out.md"
+            if out_md.exists():
+                try:
+                    agent_texts.append(out_md.read_text(encoding="utf-8", errors="replace"))
+                except (OSError, UnicodeError):
+                    pass
 
         # Find every ``` ... ``` fenced block
         # Then peel off a path-comment first line if present.
@@ -4469,39 +4543,40 @@ def create_app() -> FastAPI:
         skipped = 0
         seen_paths: set[str] = set()
 
-        for m in fence_re.finditer(full_text):
-            body = m.group(1)
-            if not body.strip():
-                continue
-            first_nl = body.find("\n")
-            if first_nl == -1:
-                continue
-            first_line = body[:first_nl].strip()
-            pm = path_re.match(first_line)
-            if not pm:
-                skipped += 1
-                continue
-            rel_path = (
-                pm.group("a") or pm.group("b")
-                or pm.group("c") or pm.group("d") or ""
-            ).strip()
-            # Safety: reject absolute, parent-traversal, or empty
-            if (not rel_path
-                    or rel_path.startswith("/")
-                    or rel_path.startswith("\\")
-                    or ".." in Path(rel_path).parts
-                    or len(rel_path) > 240):
-                skipped += 1
-                continue
-            # Last writer wins if multiple agents emit the same path
-            content = body[first_nl + 1:]
-            target = project_dir / rel_path
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8")
-            key = str(target)
-            if key not in seen_paths:
-                seen_paths.add(key)
-                written.append(key)
+        for full_text in agent_texts:
+            for m in fence_re.finditer(full_text):
+                body = m.group(1)
+                if not body.strip():
+                    continue
+                first_nl = body.find("\n")
+                if first_nl == -1:
+                    continue
+                first_line = body[:first_nl].strip()
+                pm = path_re.match(first_line)
+                if not pm:
+                    skipped += 1
+                    continue
+                rel_path = (
+                    pm.group("a") or pm.group("b")
+                    or pm.group("c") or pm.group("d") or ""
+                ).strip()
+                # Safety: reject absolute, parent-traversal, or empty
+                if (not rel_path
+                        or rel_path.startswith("/")
+                        or rel_path.startswith("\\")
+                        or ".." in Path(rel_path).parts
+                        or len(rel_path) > 240):
+                    skipped += 1
+                    continue
+                # Last writer wins if multiple agents emit the same path
+                content = body[first_nl + 1:]
+                target = project_dir / rel_path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+                key = str(target)
+                if key not in seen_paths:
+                    seen_paths.add(key)
+                    written.append(key)
 
         return {
             "written": len(written),
