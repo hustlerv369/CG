@@ -4,12 +4,12 @@
 
 ---
 
-## ✨ Hot — co bylo poslední sprint (v18-v30, 2026-05-08)
+## ✨ Hot — co bylo poslední sprint (v18-v31, 2026-05-08)
 
-**Hustler Claude Gravity redesign — overkill** — kompletní UI/UX upgrade
-dashboardu z "experimental custom" na premium produkt s power-user
-features. **13 commitů**, 0 backend změn, 0 API contract změn,
-167/167 testů zelená po každém kroku.
+**Hustler Claude Gravity redesign — overkill + brand identity** —
+kompletní UI/UX upgrade dashboardu z "experimental custom" na premium
+produkt s power-user features a vlastní brutal značkou. **15 commitů**,
+0 backend změn, 0 API contract změn, 167/167 testů zelená po každém kroku.
 
 | Tag | Commit | Feature |
 |---|---|---|
@@ -26,6 +26,7 @@ features. **13 commitů**, 0 backend změn, 0 API contract změn,
 | v28 | `4ce4e61` | Slash commands (`/`) + 8 personas — code reviewer, security auditor, summarizer, devil's advocate, pair buddy, CZ translator, test writer, rubber duck |
 | v29 | `1316fe8` | Light mode (Ctrl+Shift+L) + mobile responsive skin (≤900px stacks vertical, ≤600px phone) |
 | v30 | `dfd2b7e` | Keyboard cheat sheet (?) covering 23 shortcuts in 5 sections + drag-drop file upload onto agent rows |
+| v31 | `dacabf4` | **Brutal Hustler logo + desktop icon** — SVG mark + full wordmark, multi-res `.ico`, Apple touch icon, `make-icons.py` Pillow generator, `install-desktop-shortcut.ps1` drops CLAUDEGRAVITY.lnk |
 
 **Driving research artifacts** (in `notes/`):
 - `redesign-competitor-analysis.md` — CMUX, Claude Squad, n8n, Linear, Mac, Warp, Charm patterns

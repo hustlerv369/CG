@@ -6,7 +6,26 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
-## v18–v30 — 2026-05-08 — Hustler Claude Gravity redesign
+## v18–v31 — 2026-05-08 — Hustler Claude Gravity redesign
+
+### v31 — 2026-05-08 — Brutal logo + desktop icon (`dacabf4`)
+- New brand mark: rounded warm-black stamp + coral-to-cream orbital
+  ring + 900-weight white "CG" monogram + amber satellite + coral slash
+- Two SVG files: `brand/logo-mark.svg` (square 64×64) +
+  `brand/logo-full.svg` (mark + stacked "CLAUDE / GRAVITY" wordmark +
+  "HUSTLER MULTI-AGENT OVERKILL" tagline)
+- Multi-res Windows `.ico` (16/32/48/64/128/256), 180×180 Apple
+  touch icon, full PNG ladder (16-512px)
+- `scripts/make-icons.py` — Pillow-only rasteriser, 4× supersampled,
+  no SVG render dep
+- `scripts/install-desktop-shortcut.ps1` — drops CLAUDEGRAVITY.lnk
+  on desktop with icon embedded, removes legacy CG Dashboard.lnk
+- Dashboard `<head>` now ships favicon + theme-color + apple-touch-icon
+- Header brand: 36px stamp + bold 900 "CLAUDEGRAVITY" wordmark, hover
+  rotates -4° + 1.04 scale
+- Page title: "CLAUDEGRAVITY — Hustler multi-agent dashboard"
+
+
 
 ### v30 — 2026-05-08 — Keyboard cheat sheet + drag-drop file upload (`dfd2b7e`)
 - Press `?` anywhere outside an input → modal sheet with all 23 shortcuts
