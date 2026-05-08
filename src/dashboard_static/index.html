@@ -153,6 +153,15 @@
           <button class="seg" data-view="diff" title="Side-by-side diff (best for compare preset)">diff</button>
           <button class="seg" data-view="preview" title="Render HTML / SVG / JSX / image inline (sandboxed)">🎨 preview</button>
         </div>
+        <!-- v22 — CMUX-style grid layout selector -->
+        <div class="layout-toggle" id="layout-toggle"
+             title="Pane layout · auto · single · 2-col · 2×2 · compact">
+          <button class="seg active" data-layout="auto" title="Auto-fit (default)">⊞</button>
+          <button class="seg" data-layout="1" title="Single pane (maximized)">▢</button>
+          <button class="seg" data-layout="2" title="Side-by-side (2 columns)">⊟</button>
+          <button class="seg" data-layout="4" title="2×2 grid (4 panes)">⊠</button>
+          <button class="seg" data-layout="n" title="Compact grid (auto, smaller min)">▦</button>
+        </div>
       </div>
       <div id="agent-grid" class="agent-grid">
         <div class="empty-state">

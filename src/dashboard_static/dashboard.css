@@ -1630,6 +1630,36 @@ button:disabled {
   box-shadow: 0 0 0 1px var(--accent-strong);
 }
 
+/* v22 — layout-toggle inherits view-toggle styling but uses larger
+ * monospace glyphs for the layout icons */
+.layout-toggle {
+  display: inline-flex;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 2px;
+  gap: 0;
+  flex: 0 0 auto;
+  margin-left: var(--space-2);
+}
+.layout-toggle .seg {
+  padding: 5px 9px;
+  font: 600 14px/1 var(--font-mono);
+  background: transparent;
+  border: none;
+  color: var(--fg-tertiary);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--transition);
+  min-width: 28px;
+}
+.layout-toggle .seg:hover { color: var(--fg); }
+.layout-toggle .seg.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent-strong);
+}
+
 /* Artifact-style preview (HTML / SVG / JSX / image rendered inline) */
 .agent-panel-log.preview-rendered {
   padding: 0;
@@ -1765,11 +1795,35 @@ button:disabled {
 .agent-grid {
   flex: 1;
   display: grid;
-  gap: 12px;
-  padding: 12px;
+  gap: var(--space-3);
+  padding: var(--space-3);
   overflow: hidden;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
   grid-auto-rows: minmax(240px, 1fr);
+}
+
+/* v22 — explicit layout variants (CMUX-style tiled grid) */
+.agent-grid.layout-1 {
+  grid-template-columns: 1fr;
+  grid-auto-rows: 1fr;
+}
+.agent-grid.layout-2 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(280px, 1fr);
+}
+.agent-grid.layout-4 {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+}
+.agent-grid.layout-n {
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  grid-auto-rows: minmax(200px, 1fr);
+  gap: var(--space-2);
+}
+/* When in layout-1, hide siblings beyond the first agent (focus mode) */
+.agent-grid.layout-1 > .agent-panel:not(:first-child) {
+  display: none;
 }
 
 .empty-state {

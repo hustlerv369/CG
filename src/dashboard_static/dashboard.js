@@ -2754,7 +2754,40 @@ document.addEventListener("DOMContentLoaded", () => {
   initStatusBar();
   initCommandPalette();
   initResizeGutters();
+  initLayoutToggle();
 });
+
+/* ----------------------------------------------------------
+ * v22 — Agent grid layout selector (CMUX-style tiled mode)
+ * Modes: auto (default) | 1 (single) | 2 (cols) | 4 (2x2) | n (compact)
+ * ---------------------------------------------------------- */
+const CG_LAYOUT_MODE_KEY = "cg.layoutMode.v1";
+
+function initLayoutToggle() {
+  const toggle = document.getElementById("layout-toggle");
+  const grid   = document.getElementById("agent-grid");
+  if (!toggle || !grid) return;
+
+  const stored = (() => {
+    try { return localStorage.getItem(CG_LAYOUT_MODE_KEY) || "auto"; }
+    catch { return "auto"; }
+  })();
+
+  const apply = (mode) => {
+    grid.classList.remove("layout-auto", "layout-1", "layout-2", "layout-4", "layout-n");
+    if (mode && mode !== "auto") grid.classList.add(`layout-${mode}`);
+    toggle.querySelectorAll(".seg").forEach(b => {
+      b.classList.toggle("active", b.dataset.layout === mode);
+    });
+    try { localStorage.setItem(CG_LAYOUT_MODE_KEY, mode); } catch {}
+  };
+
+  toggle.querySelectorAll(".seg").forEach(btn => {
+    btn.addEventListener("click", () => apply(btn.dataset.layout));
+  });
+
+  apply(stored);
+}
 
 /* ----------------------------------------------------------
  * v20 — Resizable layout gutters
