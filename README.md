@@ -4,6 +4,11 @@ CG dispatches coding tasks to Claude Code and Google Gemini in parallel,
 using the user's existing **Claude Pro** and **Google** subscriptions —
 no API keys, no per-token billing.
 
+> **🎩 Conductor (v48):** Type a 1–3 sentence idea. Opus 4.7 designs a
+> *custom* multi-agent team for it on the fly — no fixed template.
+> Tick **🚀 Auto mode** to ship end-to-end without approval gates.
+> See `docs/CONDUCTOR.md` and `docs/VIDEO-DEMO-SCRIPT.md`.
+
 This is the successor to CLAUDEGRAVITY (archived). The earlier design
 assumed AI chat agents in IDEs (Antigravity, Claude Code chat) could be
 treated as autonomous workers driven by a filesystem inbox/outbox
@@ -11,7 +16,9 @@ protocol. That assumption was wrong: chat agents don't loop, their
 workspace context drifts, and protocol overhead drowned out any benefit.
 
 CG replaces it with the simplest thing that works: **headless CLI
-subprocesses, called in parallel from a Python orchestrator**.
+subprocesses, called in parallel from a Python orchestrator**, plus a
+web dashboard for designing + watching multi-agent runs and a
+**Conductor** that auto-designs them from a raw idea.
 
 ```
 ┌─────────────────────────────────────────┐

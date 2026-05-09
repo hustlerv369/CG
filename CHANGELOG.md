@@ -6,6 +6,108 @@ Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 Versioning is the dashboard's `vN` tag in commit messages — there is no
 separate semver release; the GitHub master branch is the source of truth.
 
+## v46–v50 — 2026-05-09 — Conductor sprint (idea → custom team → live run)
+
+Strategic upgrade driven by market analysis (Zapier/Make/n8n/CrewAI/
+LangGraph/Gumloop alternatives). The headline feature is the
+**Conductor** — Opus 4.7 reads a raw idea and *designs* a custom
+multi-agent workflow on the fly, no fixed template. See
+`docs/CONDUCTOR.md` for the full 2-phase flow.
+
+Tests grew from 167 → 212 (+27%). All passing stably at ~20 s.
+
+### v50 — Mission Library tiles (`46318d9`)
+- 5 category tiles (🚀 App / 🔍 Audit / 🎨 Content / 🤖 Automation /
+  🌐 Browser) replace the flat 30-item preset dropdown as the primary
+  onboarding surface
+- `MISSION_CATEGORIES` + `PRESET_CATEGORIES` map (29/30 categorized,
+  no edits to dict literals required)
+- `/api/presets` returns `{presets, categories}` with each preset
+  enriched
+- Click a tile → filters dropdown + highlights the tile
+- `docs/CONDUCTOR.md` + `docs/PRESETS.md` updated with the table
+
+### v49 — Replay-from-here (`e38b4c1`)
+- 🔁 button in every agent panel toolbar — re-runs that step + every
+  downstream dependent. Earlier steps stay intact on disk so
+  upstream `{{label}}` substitution still resolves
+- `RunManager._compute_downstream` (BFS reverse graph) +
+  `RunManager.replay_from` (kill subprocess, reset state, delete
+  on-disk output, re-spawn threads, re-arm watcher)
+- `POST /api/runs/<id>/replay-from/<label>` endpoint
+- 6 new tests (linear chain, leaf, root, diamond graph, 404s)
+
+### v48 — Conductor (`0235f51` + integration tests `0366a4b`)
+- **THE killer feature.** Opus designs a custom multi-agent team for
+  the user's specific idea, no fixed template
+- Two-phase generation:
+  - Phase 1: streaming Markdown Project Brief (Persona / Use-cases /
+    Scope / Milestones / Stack / Pricing / Risks)
+  - Phase 2: validated JSON workflow spec with role-named labels
+- `src/conductor.py` — system prompts + JSON schema validator + role
+  table + JSON extractor (handles fenced + naked JSON)
+- 4 endpoints: `/api/conductor/{brief, compose, launch, roles}`
+- Frontend: 🎩 Conductor button + 🚀 Auto mode toggle + three-step
+  inline live panel (Brief / Compose / Launch) with SSE streaming
+- Auto mode (W0.3): plumbed UI → API, skips approval gates between phases
+- Validator: 4-12 agent cap, model whitelist (claude-* + gemini-*),
+  canonical role whitelist, no cycles, max_rounds [1,10]
+- 23 unit tests (validator) + 11 integration tests (HTTP surface)
+
+### v47.1 — iterate_with refinement loops (`812ddb7` + UI `713c9b2`)
+- Engine executes Designer ↔ Critic refinement loops
+- Step B with `iterate_with: A` and `max_rounds: N` runs for N rounds:
+  round 1 normally, then partner re-runs with B's previous output
+  appended as critique, then B re-runs, repeat. `accept_when` regex
+  short-circuits the loop early
+- Last round's output overwrites `<label>.out.md` so downstream refs
+  see the final result. Both agents stay in `running` status across
+  rounds (UI never sees a transient mid-flight `done`)
+- "🔁 round 2/3" badge in agent panel header, live-updated via SSE
+- `RunState._watcher_threads` track + fixture teardown joins them
+  (caught a test-isolation leak where `_persist_index()` from a stale
+  `_watch_run` thread wrote to the next test's monkeypatched
+  INDEX_PATH)
+
+### v46 — Role rebranding + Mission Library prep (`74d6789`)
+- Optional `role` field on every spec step. 11 canonical roles:
+  🔭 Visionary · 🧭 Strategist · 🔬 Researcher · 🏛 Architect ·
+  🎨 Designer · 🛠 Engineer · ✍ Writer · 🧪 QA · ⚖ Critic ·
+  📡 Operator · 🎬 Director
+- Coral × amber pill badge before the agent slug. Backward compat:
+  empty role → no badge
+- 3 flagship idea→ presets tagged with roles (19 agents total)
+- `docs/MODEL-LIMITS.md` gains "Role vocabulary" section: default
+  model per role + cross-vendor pairing rules for Conductor
+
+### CLI — `cg conductor "..."` (`235a68c`)
+- Power-user shortcut for the 🎩 button: runs the 3-phase flow from
+  the terminal against a running dashboard
+- Flags: `--auto`, `--show-brief`, `--show-spec`, `--no-wait`,
+  `--brief-timeout`, `--compose-timeout`, `--run-timeout`,
+  `--host`, `--port`
+- Streams brief + spec + per-agent run status to stdout
+
+### Docs
+- `docs/CONDUCTOR.md` — full 2-phase flow, validator rules, endpoint
+  map, refinement-loop semantics, CLI shortcut, what's not shipped
+- `docs/VIDEO-DEMO-SCRIPT.md` — 3-min beat-by-beat recording plan,
+  pre-flight checklist, two takes (manual + Auto mode)
+- `notes/2026-05-09-strategic-roadmap-from-market-analysis.md` — the
+  W0–W5 + overkill roadmap that drove the sprint
+- `docs/PRESETS.md` — 27 → 30 preset count + Mission Library tile
+  table + Conductor cross-reference
+
+### Deferred to next sprint
+- **W0.1 `tool:<mcp-name>` agent kind** — Open Design / Stitch /
+  Canva / Figma dispatched by orchestrator (not via `claude --print`
+  which would re-introduce Gemini-style tool-loop hangs). Needs MCP
+  client research.
+- **W3 Mission Mode timeline UI rewrite** — current vertical agent
+  panels with role badges + replay buttons are already
+  Mission-Mode-ish; full timeline connector lines + per-step ETA is
+  a polish session.
+
 ## v32–v37 — 2026-05-08 — Audit + Make/n8n-grade visual UX
 
 A full hands-on audit pass (live in Chromium via MCP) found and fixed
