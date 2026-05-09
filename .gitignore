@@ -37,8 +37,13 @@ node_modules/
 
 # Local deploy staging directories (rsynced into the gh-pages branch
 # manually; the orphan branch lives separately and we don't want
-# its contents shadowed in master)
-deploy/
+# its contents shadowed in master).
+# Exception: deploy/vps + deploy/windows are versioned templates
+# for the claudegravity.space production tunnel (see DEPLOY-LIVE.md).
+deploy/*
+!deploy/vps/
+!deploy/windows/
+!deploy/README.md
 
 # Cloudflare Tunnel binary + log (downloaded on first launch, not source)
 tunnel/cloudflared.exe

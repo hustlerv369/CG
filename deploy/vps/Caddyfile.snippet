@@ -1,0 +1,23 @@
+# Append this block to /etc/caddy/Caddyfile on the VPS, then
+# `systemctl reload caddy`. Caddy obtains a Let's Encrypt cert
+# automatically on first request.
+#
+# 127.0.0.1:7080 is where SSH reverse tunnel from the dashboard
+# host (Hustler's PC) terminates — see deploy/windows/cg-tunnel.ps1.
+
+claudegravity.space, www.claudegravity.space {
+    reverse_proxy 127.0.0.1:7080 {
+        # Long-lived SSE streams from /api/runs/<id>/stream
+        flush_interval -1
+        transport http {
+            read_timeout 30m
+            write_timeout 30m
+        }
+    }
+    encode gzip
+    header {
+        X-Frame-Options "DENY"
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "strict-origin-when-cross-origin"
+    }
+}

@@ -1,0 +1,30 @@
+# frpc — EXAMPLE ONLY (kept in repo for reference).
+#
+# CG's live deployment uses SSH reverse tunnel instead (see
+# deploy/windows/cg-tunnel.ps1) because the VPS provider firewalls
+# inbound port 7000. This file is included so future setups that
+# need real frp can copy + edit it.
+#
+# Replace <VPS_IP> with your VPS address and <FRP_TOKEN> with the
+# value matching /etc/frp/frps.toml on the server.
+
+serverAddr = "<VPS_IP>"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "<FRP_TOKEN>"
+
+log.to = "C:\\Users\\Hustler\\frp\\frpc.log"
+log.level = "info"
+log.maxDays = 7
+
+transport.heartbeatInterval = 30
+transport.heartbeatTimeout = 90
+
+[[proxies]]
+name = "cg-dashboard"
+type = "http"
+localIP = "127.0.0.1"
+localPort = 8765
+customDomains = ["claudegravity.space", "www.claudegravity.space"]
+hostHeaderRewrite = ""
