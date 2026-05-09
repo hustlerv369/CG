@@ -195,6 +195,43 @@ critic   | gemini-pro                        | cross-vendor diversity (small inp
 parallel | mix vendors                       | catch each other's blind spots
 ```
 
+---
+
+## v46 W2 — Role vocabulary (the Conductor's lexicon)
+
+CG specs now accept an optional `role` field per step. Pure display — the
+`label` slug stays the machine identifier used in `depends_on` and
+`{{label}}` substitution. When Conductor (W0) generates a workflow, it
+labels each step with one of these canonical roles so the user reads a
+coherent team narrative ("Visionary defines scope → Architect designs
+the system → Engineer ships the code") instead of step-function jargon.
+
+Conductor's heuristic: **role drives model pick.** This table is the
+default model assignment Conductor follows when composing a spec:
+
+```
+role         | icon | default model            | why
+─────────────┼──────┼──────────────────────────┼────────────────────────────────
+Visionary    |  🔭  | claude-opus-4-7          | scope + intent → strongest reasoning
+Strategist   |  🧭  | claude-opus-4-7          | positioning, narrative, KPIs
+Researcher   |  🔬  | gemini-pro               | broad reading, market lens, cross-check
+Architect    |  🏛  | claude-opus-4-7 (1M)     | system design + huge specs
+Designer     |  🎨  | gemini-pro               | independent creative eye, SVG output
+Engineer     |  🛠  | claude-opus-4-7 (1M)     | huge code output, no tool-loop hangs
+Writer       |  ✍   | claude-sonnet-4-6        | long-form prose, fast, cheap
+QA           |  🧪  | claude-sonnet-4-6        | tests from spec, focused
+Critic       |  ⚖   | claude-sonnet-4-6        | code critique excellence
+Operator     |  📡  | claude-sonnet-4-6        | docs + deploy + runbooks (no Flash — _recoverFromLoop)
+```
+
+**Cross-vendor pairing rules for Conductor refinement loops (W0.2):**
+- Designer (gemini) ↔ Critic (claude) — visual judgment vs structural rigor
+- Engineer (claude) ↔ Reviewer (gemini) — implementation vs alternative pattern
+- Researcher (gemini) ↔ Architect (claude) — breadth vs synthesis
+
+When `iterate_with` is set in a Conductor-generated spec, prefer pairing
+across vendors — the diversity is the whole point.
+
 > **Rule of thumb:** if the agent's job is to OUTPUT TEXT WITH FENCED
 > CODE BLOCKS containing actual file content (and the next agent will
 > parse those blocks), prefer Claude. Gemini will sometimes try to

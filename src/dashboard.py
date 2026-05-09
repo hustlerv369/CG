@@ -861,6 +861,11 @@ class AgentRunState:
     # output and each assistant text delta is emitted as its own log
     # event so the UI can show token-by-token output.
     streaming: bool = False
+    # v46 W2: optional role tag (Visionary / Architect / Designer / Engineer
+    # / QA / Critic / Operator / Researcher / Strategist). Pure display —
+    # `label` stays the slug used in depends_on + {{label}} substitution.
+    # Empty string = no badge rendered (backward compat for older presets).
+    role: str = ""
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -875,6 +880,7 @@ class AgentRunState:
             "log_tail": "\n".join(self.log_lines[-200:]),
             "stderr_chars": sum(len(l) for l in self.stderr_lines),
             "streaming": self.streaming,
+            "role": self.role,
         }
 
 
@@ -986,6 +992,7 @@ class RunManager:
                 depends_on=list(item.get("depends_on", []) or []),
                 status="queued" if not item.get("depends_on") else "waiting",
                 streaming=bool(item.get("streaming", False)),
+                role=str(item.get("role", "") or ""),
             )
         self.runs[run_id] = run
         self._persist_index()
@@ -2179,6 +2186,7 @@ class RunManager:
                         finished=a.get("finished"),
                         exit_code=a.get("exit_code"),
                         streaming=bool(a.get("streaming", False)),
+                        role=str(a.get("role", "") or ""),
                     )
                     # Refill log_lines from on-disk capture file
                     out_path = RUNS_DIR / rid / f"{label}.out.md"
@@ -2233,7 +2241,7 @@ PRESETS: list[dict[str, Any]] = [
         },
         "spec": [
             {
-                "agent": "claude-opus-4-7", "label": "director",
+                "agent": "claude-opus-4-7", "label": "director", "role": "Visionary",
                 "prompt": "You are the project director. Turn this idea into a "
                           "precise build spec a team can execute today. Output "
                           "Markdown with these sections, in order:\n\n"
@@ -2250,7 +2258,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Idea\n${IDEA}",
             },
             {
-                "agent": "gemini-pro", "label": "designer",
+                "agent": "gemini-pro", "label": "designer", "role": "Designer",
                 "depends_on": ["director"],
                 "prompt": "OUTPUT MODE: TEXT ONLY. Do not call any tools. Do not "
                           "invoke write_file, read_file, run_shell_command, "
@@ -2265,7 +2273,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Spec\n{{director}}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "architect",
+                "agent": "claude-opus-4-7", "label": "architect", "role": "Architect",
                 "depends_on": ["director"],
                 "prompt": "You are the architect. From the spec, output the "
                           "COMPLETE project scaffold:\n\n"
@@ -2276,7 +2284,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Spec\n{{director}}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "implementation",
+                "agent": "claude-opus-4-7", "label": "implementation", "role": "Engineer",
                 "depends_on": ["director", "architect", "designer"],
                 "prompt": "You are the implementer. Write the FULL working "
                           "implementation. Output EVERY file as a fenced code "
@@ -2305,7 +2313,7 @@ PRESETS: list[dict[str, Any]] = [
                 # tests need: API contract, acceptance criteria, file
                 # tree. Reviewer step still reads both, so the loop
                 # closes there.
-                "agent": "claude-sonnet-4-6", "label": "tests",
+                "agent": "claude-sonnet-4-6", "label": "tests", "role": "QA",
                 "depends_on": ["director"],
                 "prompt": "You are the test author. Write thorough tests for "
                           "the project described by the spec below. Cover:\n"
@@ -2322,7 +2330,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Spec\n{{director}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "reviewer",
+                "agent": "claude-sonnet-4-6", "label": "reviewer", "role": "Critic",
                 "depends_on": ["implementation", "tests"],
                 "prompt": "You are the senior code reviewer. Find: bugs, "
                           "security issues (injection / authz / secrets / SSRF / "
@@ -2343,7 +2351,7 @@ PRESETS: list[dict[str, Any]] = [
                 # (the loop detector watches the model's own output, not
                 # tool calls). Sonnet 4.6 has no such detector, similar
                 # speed for short Markdown, perfectly reliable.
-                "agent": "claude-sonnet-4-6", "label": "readme-deploy",
+                "agent": "claude-sonnet-4-6", "label": "readme-deploy", "role": "Operator",
                 "depends_on": ["director", "architect", "implementation"],
                 "prompt": "Write the project's complete README + deploy guide:\n\n"
                           "## README.md\n- Title + tagline (≤12 words)\n- Hero "
@@ -2376,7 +2384,7 @@ PRESETS: list[dict[str, Any]] = [
         },
         "spec": [
             {
-                "agent": "claude-opus-4-7", "label": "strategy",
+                "agent": "claude-opus-4-7", "label": "strategy", "role": "Strategist",
                 "prompt": "You are head of content. From the topic + audience, "
                           "output:\n\n"
                           "## Positioning\n2 sentences — what we own vs the rest.\n\n"
@@ -2387,7 +2395,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Topic\n${TOPIC}\n\n## Audience\n${AUDIENCE}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "calendar",
+                "agent": "claude-opus-4-7", "label": "calendar", "role": "Architect",
                 "depends_on": ["strategy"],
                 "prompt": "From the strategy, build a 90-day calendar. Output "
                           "Markdown table: `| Day | Channel | Format | Title | Pillar | KPI focus |`. "
@@ -2396,7 +2404,7 @@ PRESETS: list[dict[str, Any]] = [
                           "12.\n\n## Strategy\n{{strategy}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "sample-blog",
+                "agent": "claude-sonnet-4-6", "label": "sample-blog", "role": "Writer",
                 "depends_on": ["strategy", "calendar"],
                 "prompt": "Pick the strongest blog headline from the calendar "
                           "and write the full 1500-word post. Tone: confident, "
@@ -2404,7 +2412,7 @@ PRESETS: list[dict[str, Any]] = [
                           "description.\n\n## Strategy\n{{strategy}}\n\n## Calendar\n{{calendar}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "sample-thread",
+                "agent": "claude-sonnet-4-6", "label": "sample-thread", "role": "Writer",
                 "depends_on": ["strategy", "calendar"],
                 "prompt": "Pick the strongest X (Twitter) hook from the "
                           "calendar and write the full 8-tweet thread. Each "
@@ -2412,7 +2420,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Calendar\n{{calendar}}",
             },
             {
-                "agent": "gemini-pro", "label": "sample-email",
+                "agent": "gemini-pro", "label": "sample-email", "role": "Writer",
                 "depends_on": ["strategy", "calendar"],
                 "prompt": "Pick the strongest newsletter idea from the "
                           "calendar and write the full email (subject + "
@@ -2421,7 +2429,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Calendar\n{{calendar}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "critic",
+                "agent": "claude-sonnet-4-6", "label": "critic", "role": "Critic",
                 "depends_on": ["strategy", "calendar", "sample-blog",
                                "sample-thread", "sample-email"],
                 "prompt": "Critique the whole plan. Score 0-10 on: "
@@ -2451,7 +2459,7 @@ PRESETS: list[dict[str, Any]] = [
         },
         "spec": [
             {
-                "agent": "claude-opus-4-7", "label": "angle",
+                "agent": "claude-opus-4-7", "label": "angle", "role": "Strategist",
                 "prompt": "You are a pitch coach. From the idea + stage, "
                           "sharpen the angle:\n\n"
                           "## One-line pitch\n≤14 words. Memorable.\n\n"
@@ -2461,7 +2469,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Idea\n${IDEA}\n\n## Stage\n${STAGE}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "problem",
+                "agent": "claude-opus-4-7", "label": "problem", "role": "Researcher",
                 "depends_on": ["angle"],
                 "prompt": "Write the Problem section: 1 customer story (named "
                           "persona, real day-in-the-life), 3 quantified pain "
@@ -2469,7 +2477,7 @@ PRESETS: list[dict[str, Any]] = [
                           "short. ≤200 words.\n\n## Angle\n{{angle}}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "solution",
+                "agent": "claude-opus-4-7", "label": "solution", "role": "Architect",
                 "depends_on": ["angle"],
                 "prompt": "Write the Solution section: 3-step user journey "
                           "(before/during/after), unique mechanism (the 'how'), "
@@ -2477,7 +2485,7 @@ PRESETS: list[dict[str, Any]] = [
                           "wireframe). ≤200 words.\n\n## Angle\n{{angle}}",
             },
             {
-                "agent": "gemini-pro", "label": "market",
+                "agent": "gemini-pro", "label": "market", "role": "Researcher",
                 "depends_on": ["angle"],
                 "prompt": "Write the Market + Competition section: TAM/SAM/SOM "
                           "with cited sources or 'estimate based on …', "
@@ -2486,7 +2494,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Angle\n{{angle}}",
             },
             {
-                "agent": "claude-opus-4-7", "label": "deck",
+                "agent": "claude-opus-4-7", "label": "deck", "role": "Engineer",
                 "depends_on": ["angle", "problem", "solution", "market"],
                 "prompt": "Assemble the 10-slide deck as Markdown. Each slide "
                           "is a `## Slide N: Title` heading + 5-8 bullet "
@@ -2498,7 +2506,7 @@ PRESETS: list[dict[str, Any]] = [
                           "## Solution\n{{solution}}\n\n## Market\n{{market}}",
             },
             {
-                "agent": "claude-sonnet-4-6", "label": "qa",
+                "agent": "claude-sonnet-4-6", "label": "qa", "role": "Critic",
                 "depends_on": ["deck"],
                 "prompt": "Simulate 12 of the toughest questions a "
                           "${STAGE} investor will ask after seeing this deck. "

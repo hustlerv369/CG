@@ -2227,6 +2227,33 @@ function shortAgentLabel(agentId) {
   return agentId;
 }
 
+// v46 W2: role icons map. When a preset (or Conductor-generated spec) tags
+// a step with a `role`, render an icon + role name badge ahead of the
+// machine slug. Empty/unknown role → no badge (backward compat).
+const ROLE_ICONS = {
+  "Visionary":  "🔭",
+  "Strategist": "🧭",
+  "Researcher": "🔬",
+  "Architect":  "🏛",
+  "Designer":   "🎨",
+  "Engineer":   "🛠",
+  "Writer":     "✍",
+  "QA":         "🧪",
+  "Critic":     "⚖",
+  "Reviewer":   "⚖",
+  "Operator":   "📡",
+  "Director":   "🎬",
+};
+
+function roleBadgeHtml(role) {
+  if (!role) return "";
+  const icon = ROLE_ICONS[role] || "👤";
+  return `<span class="role-badge" title="Role: ${escapeHtml(role)}">`
+       + `<span class="role-icon" aria-hidden="true">${icon}</span>`
+       + `<span class="role-name">${escapeHtml(role)}</span>`
+       + `</span>`;
+}
+
 function buildPanel(agent) {
   const root = document.createElement("div");
   root.className = `agent-panel agent-panel--block status-${agent.status}`;
@@ -2234,10 +2261,12 @@ function buildPanel(agent) {
     ? `<span class="deps">← ${agent.depends_on.map(escapeHtml).join(", ")}</span>` : "";
   const fam = familyOf(agent.agent);
   const modelLabel = shortAgentLabel(agent.agent);
+  const roleHtml = roleBadgeHtml(agent.role);
   root.innerHTML = `
     <div class="agent-panel-head">
       <div class="title">
         <span class="agent-family-dot agent-family-${fam}" aria-hidden="true"></span>
+        ${roleHtml}
         <span class="agent-label">${escapeHtml(agent.label)}</span>
         ${depsHtml}
       </div>
