@@ -29,6 +29,13 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(dash, "INDEX_PATH", tmp_path / "index.json")
     # v47.1 — shorter poll so watcher-thread joins in teardown are fast
     monkeypatch.setattr(dash, "WATCH_RUN_POLL_S", 0.05, raising=False)
+    # v52.1 — unset HTTP Basic auth env vars so tests run without auth.
+    # The host shell may have user-scope CG_AUTH_PASSWORD_HASH set
+    # (production deployment) — without this delenv, every test request
+    # gets 401 and the test fixture sees non-JSON "Authentication
+    # required." instead of the expected JSON response.
+    monkeypatch.delenv("CG_AUTH_PASSWORD_HASH", raising=False)
+    monkeypatch.delenv("CG_AUTH_USER", raising=False)
 
     # Replace each real model with a deterministic Python one-liner so
     # tests don't actually call the subscriptions.
