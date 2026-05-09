@@ -116,6 +116,165 @@ Click Conductor →
 5. **Run path** — identical to existing preset flow. Conductor-generated specs are
    "presets that didn't exist 60 s ago".
 
+### W0 extensions — Hustler's amplifications (2026-05-09 follow-up)
+
+These three additions turn Conductor from "Opus designs a team" into "Opus designs a
+team that actually collaborates with external creative tools and ships unattended."
+
+#### W0.1 — Open Design (and other MCP tools) as first-class agents
+
+> **Hustler:** *"Aby Opus celé naplánoval a dal práci i do Open Designu. Z Open Designu
+> si potom vytáhl celý design webu a pokračovali dál."*
+
+The trick: `claude --print` is text-only by design (no tool loop, that's why it's
+reliable in CG). Enabling MCP tools inside a `--print` agent re-introduces the same
+hang risk Gemini has. **Wrong layer.**
+
+The right layer is the orchestrator itself. Add a new agent kind: `tool:<mcp-name>`.
+The CG run engine recognizes it and **calls the MCP directly** in Python, not through
+an LLM subprocess. Output (design URL, image bytes, exported spec) is written to the
+agent's `*.out.md` like any other step. Downstream agents read it via `{{label}}` /
+`{{label.field}}` exactly as they read text outputs today.
+
+Example slice of a Conductor-generated spec:
+
+```json
+[
+  { "agent": "claude-opus-4-7", "label": "Designer",
+    "prompt": "Write a complete design spec for ${IDEA}: components, palette,
+               typography, layout. Output for Open Design import." },
+  { "agent": "tool:open-design", "label": "Render",
+    "depends_on": ["Designer"],
+    "tool": "generate-design-structured",
+    "args": { "spec": "{{Designer}}" } },
+  { "agent": "claude-opus-4-7", "label": "Engineer",
+    "depends_on": ["Render"],
+    "prompt": "Implement React app from design at {{Render.url}} and spec
+               {{Designer}}. Generate code." }
+]
+```
+
+Same pattern works for **any MCP** the user has configured in
+`~/.claude/mcp_servers.json` — Stitch, Canva, Notion, Figma, etc. CG becomes a router
+between LLMs and MCPs without forcing every tool call through an LLM hop.
+
+**Implementation cost:** ~80 lines in `dashboard.py`:
+- Recognize `agent: "tool:<name>"` in the spec
+- Look up MCP client (reuse the path Claude Code uses to load MCP servers)
+- Invoke the named tool with the resolved args (variables substituted from upstream)
+- Write the response to `<label>.out.md` (text part) + `<label>.assets/` (binary parts)
+
+**Conductor system prompt update:** include the list of currently-configured MCP
+tools as available "agents" in the heuristics table, so Opus knows it can dispatch
+visual work to Open Design rather than asking another LLM to "describe" the design.
+
+#### W0.2 — Real cross-agent collaboration (refinement loops)
+
+> **Hustler:** *"Aby ti agenti spolu opravdu spolupracovali."*
+
+Today's spec is a static DAG: each step runs once, then dependents fire. That's enough
+for "Designer → Engineer", but not for "Designer ↔ Critic, refine until acceptable."
+
+Add two optional spec fields:
+
+- `iterate_with: <label>` — pair this agent with another in a feedback loop
+- `max_rounds: <int>` (default 3) — cap the loop
+- `accept_when: <regex|score_field>` (optional) — early exit condition
+
+Engine semantics: after first run of A and B, if B's verdict is "needs work" (regex
+match on `accept_when`, or `accept_when` field in JSON output is `false`), feed B's
+critique back to A as `${CRITIQUE}` and re-run A → re-run B. Stop when accepted or
+`max_rounds` reached.
+
+Conductor uses this freely: "Designer iterates with Critic for max 3 rounds before
+handing off to Engineer." This is the **collaboration** Hustler asked for, not just
+sequential handoff.
+
+**Cross-vendor by default:** Conductor's heuristic should pair models from different
+vendors in iteration loops (Gemini Designer ↔ Claude Critic, or Claude Architect ↔
+Gemini Reviewer) — catches blind spots one vendor would miss alone. Already a CG
+principle from the v43 multi-vendor preset; now it scales.
+
+**Implementation cost:** ~60 lines in run engine — wrap the per-step executor in a
+`while round < max_rounds` loop with the accept-check.
+
+#### W0.3 — Auto Mode (no approval gates, idea → working thing unattended)
+
+> **Hustler:** *"Aby byla možnost automód. Že nebudeš čekat na feedback od uživatele,
+> ale rovnou vytvořil všechno, celý projekt."*
+
+Add `auto_mode: true` flag to the Conductor request. When set:
+
+- Phase 1 Brief still streams to the UI (so the user can watch), but **auto-approves**
+  the moment streaming ends + 1 s grace.
+- Phase 2 JSON spec validates, runs through the schema check, and **auto-starts the
+  run** without showing the preview-and-confirm card.
+- Approval-gate steps inside the workflow (if any) auto-pass after a configurable
+  `auto_mode_grace` (default 5 s — enough for the user to hit Stop if it looks wrong).
+- Final output: working project on disk, ready for `📦 Save project`.
+
+**UI:**
+
+```
+Quick Start hero:
+  ┌─────────────────────────────────────────────┐
+  │  💡 What do you want to build today?         │
+  │  ┌───────────────────────────────────────┐   │
+  │  │ [your idea — 1-3 sentences]           │   │
+  │  └───────────────────────────────────────┘   │
+  │                                              │
+  │  [✨ Conductor — design my team]             │
+  │  [🚀 Auto mode — ship it without asking]     │
+  │  [📋 Use template instead]                   │
+  └─────────────────────────────────────────────┘
+```
+
+Auto Mode is the **headline demo path**. Three buttons, descending hand-holding:
+manual approval, semi-supervised, fully autonomous. The fully-autonomous path is
+what the video sells. ~30 seconds of footage: idea typed → click 🚀 → coffee →
+project on disk.
+
+**Safety rails (because unattended runs WILL try to do dumb things):**
+
+- Hard wall-clock cap on the whole auto-run (default 45 min, configurable).
+- Hard cap on agent count from Conductor (≤ 12, already in W0).
+- Hard cap on total tokens consumed (default 2 M tokens per auto-run).
+- Per-agent first-token watchdog (90 s — already shipped in v45).
+- Stop button at the top of the timeline, always visible, kills the run + all
+  subprocesses.
+- All outputs still written to disk per-step, so even a killed auto-run leaves
+  partial artifacts the user can salvage.
+
+**Implementation cost:** ~40 lines — flag plumbing through Phase 1 / Phase 2 / run
+engine, and the three caps.
+
+---
+
+### Why these three together = "overkill"
+
+- **W0** alone: Conductor designs a team that talks to itself in text.
+- **W0 + W0.1**: Conductor designs a team that *also reaches into Open Design /
+  Stitch / Figma / Canva* and brings real assets back into the run.
+- **W0 + W0.1 + W0.2**: that team *iterates* — Designer and Critic argue across
+  vendors until the design holds up.
+- **W0 + W0.1 + W0.2 + W0.3**: all of the above runs *unattended* end-to-end.
+  Idea in, working thing out. No clicks in between.
+
+**No competitor in the analysis can do all four.** Make/Zapier/n8n have no agents.
+CrewAI/LangGraph have no MCP routing and no auto-design. Gumloop/Lindy have fixed
+templates. Warp BYOS but is terminal-only and single-agent.
+
+This is the moat. Demo line for the video:
+
+> *"I type one sentence. Conductor designs a team — Visionary, Architect, Designer,
+> Engineer, QA, Critic, Operator — picks Claude where reasoning matters, Gemini where
+> creativity matters, dispatches the visual work to Open Design, lets Designer and
+> Critic refine the design across two vendors for three rounds, and ships the whole
+> project to disk without me touching the keyboard. From idea to working thing.
+> On my own subscriptions. No credits."*
+
+---
+
 ### Why this also strengthens W1–W5
 
 - **W1 (Visionary intake):** Conductor's Phase 1 Brief **is** the Visionary intake.
@@ -324,21 +483,27 @@ These came up in the analysis but don't move the demo needle and would dilute th
 
 ---
 
-## Implementation order (revised v46-v49 sprint, W0 added)
+## Implementation order (revised v46-v50 sprint with overkill mode)
 
 ```
 v46 (0.5 sess.) — W2 role rebranding (must precede W0 — Conductor needs the vocabulary)
-                  → rename labels in flagship presets, add role badges, MODEL-LIMITS heuristics
+                  → rename labels in flagship presets, add role badges + MODEL-LIMITS heuristics
+                  → SHIPPING NOW (this session)
 
-v47 (1.5 sess.) — W0 Conductor: Phase 1 Brief endpoint + Phase 2 JSON compose endpoint
-                  + schema validator + retry loop + model whitelist + cycle check
+v47 (0.5 sess.) — W0.1 tool:<mcp> agent kind + W0.2 iterate_with refinement loops
+                  → engine plumbing first, before Conductor that uses them
+                  → updates dashboard.py spec parser + run engine
+
+v48 (1.5 sess.) — W0 Conductor (Phase 1 Brief + Phase 2 JSON + validator)
+                  with W0.3 Auto Mode flag plumbed through end-to-end
                   → THE killer feature; absorbs W1 (Visionary intake)
+                  → Conductor system prompt teaches Opus about tool: agents and loops
 
-v48 (1 sess.)   — W3 Mission Mode timeline UI (default view for Conductor runs)
+v49 (1 sess.)   — W3 Mission Mode timeline UI (default view for Conductor + auto-mode)
                   + W4 replay-from-here (same backend touch points)
                   → THIS is the video-demo screen
 
-v49 (0.5 sess.) — W5 Mission Library tiles as the secondary "Use template instead" path
+v50 (0.5 sess.) — W5 Mission Library tiles as the secondary "Use template instead" path
                   → polish + onboarding clarity for users who don't know what they want
 ```
 
