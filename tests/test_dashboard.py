@@ -1564,6 +1564,60 @@ def test_parse_stream_json_non_json_returns_none():
     assert dash._parse_stream_json_line("gemini", "[2025-01-01] log") is None
 
 
+def test_describe_stream_event_claude_init():
+    line = ('{"type":"system","subtype":"init","session_id":"abcd1234efgh5678"}')
+    out = dash._describe_stream_event("claude", line)
+    assert "session ready" in out
+    assert "abcd1234" in out
+
+
+def test_describe_stream_event_claude_tool_use():
+    line = ('{"type":"assistant","message":{"content":'
+             '[{"type":"tool_use","name":"Read"}]}}')
+    assert dash._describe_stream_event("claude", line) == "calling tool · Read"
+
+
+def test_describe_stream_event_claude_thinking():
+    line = ('{"type":"assistant","message":{"content":'
+             '[{"type":"thinking","thinking":"hmm"}]}}')
+    assert dash._describe_stream_event("claude", line) == "thinking…"
+
+
+def test_describe_stream_event_claude_text_writing():
+    line = ('{"type":"assistant","message":{"content":'
+             '[{"type":"text","text":"Hello"}]}}')
+    assert dash._describe_stream_event("claude", line) == "writing…"
+
+
+def test_describe_stream_event_claude_result():
+    line = '{"type":"result","status":"success"}'
+    out = dash._describe_stream_event("claude", line)
+    assert "finalizing" in out
+    assert "success" in out
+
+
+def test_describe_stream_event_gemini_init():
+    line = '{"type":"init","session_id":"xyz"}'
+    assert dash._describe_stream_event("gemini", line) == "session ready"
+
+
+def test_describe_stream_event_gemini_tool_call():
+    line = '{"type":"tool_call","name":"search_web"}'
+    assert dash._describe_stream_event("gemini", line) == "calling tool · search_web"
+
+
+def test_describe_stream_event_non_json_returns_empty():
+    """Non-JSON lines must yield empty string (no crash)."""
+    assert dash._describe_stream_event("claude", "regular log line") == ""
+    assert dash._describe_stream_event("claude", "") == ""
+    assert dash._describe_stream_event("gemini", "[2025] something") == ""
+
+
+def test_describe_stream_event_unknown_family():
+    line = '{"type":"assistant"}'
+    assert dash._describe_stream_event("browser", line) == ""
+
+
 def test_parse_stream_json_unknown_family_returns_none():
     line = '{"type":"assistant","message":{"content":[{"type":"text","text":"x"}]}}'
     assert dash._parse_stream_json_line("browser", line) is None

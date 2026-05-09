@@ -124,6 +124,79 @@ def _recover_mojibake(text: str) -> str:
         return text
 
 
+def _describe_stream_event(family: str, line: str) -> str:
+    """Best-effort activity description for a filtered stream-json line.
+
+    The visible-content parser ``_parse_stream_json_line`` returns ``[]``
+    for non-text events (init, tool_use, hook, result, …) so the panel
+    log stays clean. But the user still wants to SEE that the agent is
+    active — like watching a CMUX terminal where something is always
+    happening. This helper turns each filtered event into a short
+    human-readable string the dashboard can show under "currently:".
+
+    Returns an empty string when the line yields no useful description
+    (so the caller can keep the previous activity line visible).
+    """
+    s = line.strip()
+    if not s or s[0] not in "{[":
+        return ""
+    try:
+        ev = json.loads(s)
+    except (ValueError, TypeError):
+        return ""
+    if not isinstance(ev, dict):
+        return ""
+    ev_type = ev.get("type")
+
+    if family == "claude":
+        if ev_type == "system" and ev.get("subtype") == "init":
+            sess = ev.get("session_id") or ""
+            return f"session ready{' · ' + sess[:8] if sess else ''}"
+        if ev_type == "assistant":
+            msg = ev.get("message") or {}
+            content = msg.get("content") or []
+            if isinstance(content, list):
+                for blk in content:
+                    if not isinstance(blk, dict):
+                        continue
+                    btype = blk.get("type")
+                    if btype == "tool_use":
+                        name = blk.get("name") or "tool"
+                        return f"calling tool · {name}"
+                    if btype == "thinking":
+                        return "thinking…"
+                    if btype == "text":
+                        # The visible-content parser handles these; we
+                        # just acknowledge the activity for the panel.
+                        return "writing…"
+            return "writing…"
+        if ev_type == "user":
+            # Tool result echoed back to the model
+            return "tool result returned"
+        if ev_type == "result":
+            status = ev.get("status") or ev.get("subtype") or ""
+            return f"finalizing{' · ' + status if status else ''}"
+        if ev_type:
+            return str(ev_type)
+
+    if family == "gemini":
+        if ev_type == "init":
+            return "session ready"
+        if ev_type == "message" and ev.get("role") == "assistant":
+            return "writing…"
+        if ev_type == "tool_call" or ev_type == "tool_use":
+            name = ev.get("name") or ev.get("tool") or "tool"
+            return f"calling tool · {name}"
+        if ev_type == "result":
+            return "finalizing"
+        if ev_type == "thinking":
+            return "thinking…"
+        if ev_type:
+            return str(ev_type)
+
+    return ""
+
+
 def _parse_stream_json_line(family: str, line: str) -> list[str] | None:
     """K3 — extract assistant text deltas from a stream-json output line.
 
@@ -1496,10 +1569,30 @@ class RunManager:
                 pass
 
         # Stderr reader on its own thread so it can't deadlock the stdout reader.
+        # v52 — well-known noise we filter out of activity surfacing.
+        # These lines arrive on stderr from CLI bootstrap and don't
+        # represent the agent doing anything meaningful.
+        STDERR_NOISE = (
+            "256-color support not detected",
+            "Ripgrep is not available",
+            "deprecat",
+        )
+
         def _drain_stderr():
             assert proc.stderr is not None
             for line in proc.stderr:
-                agent_state.stderr_lines.append(line.rstrip("\n"))
+                clean = line.rstrip("\n")
+                agent_state.stderr_lines.append(clean)
+                # v52 — surface non-noise stderr as activity so the
+                # user sees what the agent is doing (Gemini prints
+                # "Calling tool: search_web" etc. to stderr).
+                if clean.strip() and not any(n in clean for n in STDERR_NOISE):
+                    agent_state.last_activity_at = time.time()
+                    self._emit(run.id, label, {"event": "activity", "data": {
+                        "label": label,
+                        "text": clean[:160],
+                        "source": "stderr",
+                    }})
         stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
         stderr_thread.start()
 
@@ -1574,11 +1667,19 @@ class RunManager:
                         "label": label, "line": line_clean}})
                     visible_added += len(line_clean)
                 elif len(deltas) == 0:
-                    # System / init / result — sign of life but no
-                    # visible content. Emit a heartbeat so the UI can
-                    # show "connected, waiting for first token".
+                    # System / init / tool_use / hook / result — sign
+                    # of life but no visible content. Emit a heartbeat
+                    # AND a structured activity description so the UI
+                    # can show "currently: calling tool · Read", etc.
+                    # CMUX-style continuous activity: every filtered
+                    # event becomes a labelled tick in the panel.
                     self._emit(run.id, label, {"event": "alive", "data": {
                         "label": label, "kind": "stream-init"}})
+                    desc = _describe_stream_event(family, line_clean)
+                    if desc:
+                        self._emit(run.id, label, {"event": "activity", "data": {
+                            "label": label, "text": desc,
+                            "source": "stream-json"}})
                 else:
                     # Filter ran — only assistant text deltas reach here
                     for delta in deltas:

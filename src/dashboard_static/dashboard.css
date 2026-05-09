@@ -4636,6 +4636,62 @@ body.status-bar-hidden .status-bar { display: none; }
   color: var(--bg-primary);
 }
 
+/* v52 — "currently:" line under each agent panel header.
+   CMUX-style continuous activity surface: every time the agent CLI
+   emits a tool_use, thinking, init, or finalizing stream-json event
+   (which the visible-content parser correctly filters), or prints a
+   non-noise stderr line, we update this single line with a soft
+   pulse so the user always sees what the agent is presently doing.
+   No more "9 minutes of 0 chars and silence". */
+.agent-currently {
+  display: flex;
+  align-items: center;
+  gap: 0.5em;
+  padding: 0.35em 0.85em;
+  margin: 0 0 0.45em 0;
+  border-radius: 6px;
+  border-left: 3px solid var(--fg-secondary);
+  background: color-mix(in srgb, var(--fg-secondary) 6%, transparent);
+  font: 500 var(--fs-micro)/1.35 var(--font-mono);
+  color: var(--fg-secondary);
+  letter-spacing: 0.02em;
+  min-height: 2.2em;
+  transition: border-color 200ms ease, background 200ms ease;
+}
+.agent-currently-icon {
+  flex-shrink: 0;
+  color: var(--fg-secondary);
+  font-size: 0.95em;
+}
+.agent-currently-text {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-currently--stream {
+  border-left-color: var(--accent-amber);
+  background: color-mix(in srgb, var(--accent-amber) 9%, transparent);
+  color: var(--fg-primary);
+}
+.agent-currently--stream .agent-currently-icon { color: var(--accent-amber); }
+.agent-currently--stderr {
+  border-left-color: var(--accent-coral);
+  background: color-mix(in srgb, var(--accent-coral) 8%, transparent);
+  color: var(--fg-primary);
+}
+.agent-currently--stderr .agent-currently-icon { color: var(--accent-coral); }
+.agent-currently--pulse { animation: currently-tick 600ms ease-out; }
+@keyframes currently-tick {
+  0%   { transform: translateX(-2px); opacity: 0.55; }
+  20%  { transform: none; opacity: 1; }
+  100% { opacity: 1; }
+}
+.agent-panel:not(.status-running) .agent-currently {
+  /* finished / queued / failed — keep the line but mute it */
+  opacity: 0.55;
+}
+
 /* v51 — alive pill: visible heartbeat for running agents.
    Hidden unless the panel is in status-running. While running, the
    1 s ticker in dashboard.js bumps the text to show "connecting · 12s",

@@ -2241,6 +2241,13 @@ async function openRun(runId) {
   es.addEventListener("alive", (e) => {
     try { handleAlive(JSON.parse(e.data)); } catch {}
   });
+  // v52 — structured "currently:" line. Emitted when stream-json
+  // parser filtered an event (tool_use, thinking, init, finalizing)
+  // OR when stderr line landed (Gemini's "Calling tool: X" etc).
+  // Drives the CMUX-style "always something happening" panel feel.
+  es.addEventListener("activity", (e) => {
+    try { handleActivity(JSON.parse(e.data)); } catch {}
+  });
   es.addEventListener("snapshot", (e) => handleSnapshot(JSON.parse(e.data)));
   es.addEventListener("log", (e) => handleLog(JSON.parse(e.data)));
   es.addEventListener("done", () => {
@@ -2352,6 +2359,10 @@ function buildPanel(agent) {
         </button>
       </div>
     </div>
+    <div class="agent-currently" aria-live="polite">
+      <span class="agent-currently-icon" aria-hidden="true">▸</span>
+      <span class="agent-currently-text">queued</span>
+    </div>
     <div class="agent-panel-log" tabindex="0"></div>
     <div class="agent-panel-foot">
       <span class="bytes">0 chars</span>
@@ -2444,6 +2455,33 @@ function buildPanel(agent) {
   };
 }
 
+// v52 — "currently:" CMUX-style ticker line. Surfaces stream-json
+// tool_use / thinking / init / finalizing events AND stderr lines so
+// the panel always shows what the model is currently doing — never
+// silently sitting at 0 chars wondering if it's alive.
+function handleActivity(d) {
+  if (!d || !d.label) return;
+  const p = state.panels[d.label];
+  if (!p || !p.root) return;
+  let line = p.root.querySelector(".agent-currently");
+  if (!line) return;
+  const text = (d.text || "").trim();
+  if (!text) return;
+  // Update text + bump opacity for a visible "tick"
+  const sourceClass = d.source === "stderr"
+    ? "agent-currently--stderr"
+    : "agent-currently--stream";
+  line.classList.remove("agent-currently--stderr", "agent-currently--stream");
+  line.classList.add(sourceClass);
+  line.querySelector(".agent-currently-text").textContent = text;
+  line.dataset.activityAt = String(Date.now());
+  // Trigger a 1-frame opacity pulse so each new event "blinks"
+  line.classList.remove("agent-currently--pulse");
+  // force reflow so the animation restarts
+  void line.offsetWidth; // eslint-disable-line no-unused-expressions
+  line.classList.add("agent-currently--pulse");
+}
+
 // v51 — heartbeat tick handler. Bumps the "alive Xs" indicator on the
 // agent panel even when the parser filtered out the line (e.g. Sonnet
 // stream-json system/init events that satisfy connectivity but yield
@@ -2523,6 +2561,25 @@ function handleStatus(d) {
     delete p.root.dataset.startedAt;
     delete p.root.dataset.alive;
     delete p.root.dataset.aliveAt;
+  }
+  // v52 — sync the "currently:" line to the lifecycle status when no
+  // activity event has overridden it yet
+  const cur = p.root?.querySelector(".agent-currently");
+  if (cur) {
+    const txt = cur.querySelector(".agent-currently-text");
+    const overridden = !!cur.dataset.activityAt &&
+      (Date.now() - Number(cur.dataset.activityAt) < 60000);
+    if (txt && !overridden) {
+      const map = {
+        queued: "queued — waiting for run",
+        waiting: "waiting on dependencies",
+        running: "starting up…",
+        done: "done",
+        failed: "failed",
+        cancelled: "cancelled",
+      };
+      txt.textContent = map[d.status] || d.status;
+    }
   }
   if ((d.status === "done" || d.status === "failed" || d.status === "cancelled")
       && p.stopElapsed) p.stopElapsed();
