@@ -119,9 +119,21 @@
         </div>
         <div class="quick-start-actions">
           <button class="primary quick-start-go" id="quick-start-go-btn"
-                  title="Spawn the build team and start working on your idea">
+                  title="Spawn a fixed-template build team for your idea">
             ✨ Make it real
           </button>
+          <!-- v48 W0 — Conductor: Opus designs a custom team for THIS idea
+               (not a fixed template). Two phases: (1) Project Brief, (2)
+               JSON workflow spec. -->
+          <button class="primary quick-start-conductor" id="quick-start-conductor-btn"
+                  title="Opus 4.7 designs a custom team for your specific idea (no template)">
+            🎩 Conductor
+          </button>
+          <label class="quick-start-auto-toggle"
+                 title="Skip approval gates and ship end-to-end. Stop button stays available.">
+            <input type="checkbox" id="quick-start-auto-mode">
+            <span>🚀 Auto mode</span>
+          </label>
           <div class="quick-start-mode">
             <span class="quick-start-mode-label">or build:</span>
             <button class="ghost quick-start-mode-btn" data-quick-mode="app"
@@ -132,6 +144,52 @@
                     title="Pitch deck — 10 slides + investor Q&amp;A">pitch deck</button>
           </div>
         </div>
+
+        <!-- v48 W0 — Conductor live panel (hidden until Conductor is clicked).
+             Three sequential cards: brief stream, compose stream, launch. -->
+        <div class="conductor-panel" id="conductor-panel" hidden>
+          <div class="conductor-step" data-step="brief" hidden>
+            <div class="conductor-step-head">
+              <span class="conductor-step-icon">🔭</span>
+              <span class="conductor-step-title">Phase 1 — Project Brief</span>
+              <span class="conductor-step-status" data-status>preparing…</span>
+            </div>
+            <pre class="conductor-step-output" data-output></pre>
+            <div class="conductor-step-actions" hidden>
+              <button class="primary" data-action="approve-brief">
+                ✅ Approve &amp; compose workflow
+              </button>
+              <button class="ghost" data-action="reconduct-brief">
+                🔁 Re-conduct brief
+              </button>
+            </div>
+          </div>
+          <div class="conductor-step" data-step="compose" hidden>
+            <div class="conductor-step-head">
+              <span class="conductor-step-icon">🏛</span>
+              <span class="conductor-step-title">Phase 2 — Custom workflow</span>
+              <span class="conductor-step-status" data-status>preparing…</span>
+            </div>
+            <pre class="conductor-step-output" data-output></pre>
+            <div class="conductor-step-actions" hidden>
+              <button class="primary" data-action="launch-run">
+                ▶ Launch this team
+              </button>
+              <button class="ghost" data-action="reconduct-compose">
+                🔁 Re-compose
+              </button>
+            </div>
+          </div>
+          <div class="conductor-step" data-step="launch" hidden>
+            <div class="conductor-step-head">
+              <span class="conductor-step-icon">🚀</span>
+              <span class="conductor-step-title">Phase 3 — Team is shipping</span>
+              <span class="conductor-step-status" data-status></span>
+            </div>
+            <div class="conductor-step-output" data-output></div>
+          </div>
+        </div>
+
         <button class="quick-start-toggle-advanced" id="quick-start-toggle-advanced"
                 title="Show templates + manual editor">
           Power user? Show templates / build steps manually ↓

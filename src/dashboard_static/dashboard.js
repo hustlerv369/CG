@@ -3762,6 +3762,284 @@ function initQuickStart() {
       goBtn.click();
     }
   });
+
+  // v48 W0 — Conductor button: Opus designs a custom team for THIS idea.
+  // Two phases (Brief → Compose) then auto-launch (or user clicks Launch).
+  const conductorBtn = document.getElementById("quick-start-conductor-btn");
+  conductorBtn?.addEventListener("click", () => {
+    const idea = (ideaTa.value || "").trim();
+    if (!idea) {
+      ideaTa.focus();
+      ideaTa.classList.add("input-error");
+      setTimeout(() => ideaTa.classList.remove("input-error"), 800);
+      if (typeof toast === "function") toast("Type your idea above first.", 2500);
+      return;
+    }
+    const auto = document.getElementById("quick-start-auto-mode")?.checked || false;
+    runConductorFlow(idea, { autoMode: auto });
+  });
+}
+
+/* ----------------------------------------------------------
+ * v48 W0 — Conductor flow controller (Phase 1 → Phase 2 → Launch)
+ *
+ * Each phase is a regular CG run with one agent. We open SSE streams
+ * to /api/runs/<id>/stream and pipe assistant text into the matching
+ * panel card. When the agent's status flips to "done" we move to the
+ * next phase (or wait for user approval if auto_mode is off).
+ * ---------------------------------------------------------- */
+
+function _conductorHeaders() {
+  // Forward the same secret headers /api/runs uses, in case the user
+  // configured per-vendor keys in Settings.
+  const settings = (typeof loadSettings === "function") ? loadSettings() : {};
+  const keys = settings.apiKeys || {};
+  const h = { "Content-Type": "application/json" };
+  if (keys.openrouter) h["x-cg-openrouter-key"] = keys.openrouter;
+  if (keys.zhipu)      h["x-cg-zhipu-key"]      = keys.zhipu;
+  if (keys.anthropic)  h["x-cg-anthropic-key"]  = keys.anthropic;
+  if (keys.gemini)     h["x-cg-gemini-key"]     = keys.gemini;
+  return h;
+}
+
+function _conductorReset() {
+  const panel = document.getElementById("conductor-panel");
+  if (!panel) return null;
+  panel.hidden = false;
+  panel.querySelectorAll(".conductor-step").forEach(el => {
+    el.hidden = true;
+    const out = el.querySelector("[data-output]");
+    if (out) out.textContent = "";
+    const status = el.querySelector("[data-status]");
+    if (status) status.textContent = "preparing…";
+    const actions = el.querySelector(".conductor-step-actions");
+    if (actions) actions.hidden = true;
+  });
+  return panel;
+}
+
+function _conductorShowStep(name) {
+  const panel = document.getElementById("conductor-panel");
+  if (!panel) return null;
+  const step = panel.querySelector(`.conductor-step[data-step="${name}"]`);
+  if (!step) return null;
+  step.hidden = false;
+  step.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  return step;
+}
+
+async function _conductorStreamRun(runId, stepEl) {
+  // Open SSE on /api/runs/<id>/stream and pipe assistant text + log
+  // events into the step's data-output element. Resolves to the full
+  // accumulated text when the agent reaches a terminal status.
+  return new Promise((resolve, reject) => {
+    const out = stepEl.querySelector("[data-output]");
+    const status = stepEl.querySelector("[data-status]");
+    const url = `/api/runs/${encodeURIComponent(runId)}/stream`;
+    const es = new EventSource(url);
+    let acc = "";
+    const setStatus = (s) => { if (status) status.textContent = s; };
+    setStatus("connecting…");
+    es.addEventListener("message", (ev) => {
+      let payload;
+      try { payload = JSON.parse(ev.data); } catch { return; }
+      // Backend SSE format: { event: "status"|"log", data: { ... } }
+      const evt = payload.event || payload.type;
+      const d = payload.data || payload;
+      if (evt === "status") {
+        const s = d.status || "";
+        if (s) setStatus(s);
+        if (s === "done" || s === "failed" || s === "cancelled") {
+          es.close();
+          if (s === "done") resolve(acc);
+          else reject(new Error(`agent ${s}`));
+        }
+      } else if (evt === "log" || evt === "delta") {
+        const chunk = d.line ?? d.delta ?? d.text ?? "";
+        if (chunk) {
+          acc += chunk + (d.line !== undefined ? "\n" : "");
+          if (out) {
+            out.textContent = acc;
+            out.scrollTop = out.scrollHeight;
+          }
+        }
+      }
+    });
+    es.addEventListener("error", () => {
+      // SSE errors are noisy; only reject if we never got data
+      setStatus("stream error");
+      // Don't auto-reject — let status flip drive the resolution
+    });
+    // Defensive: if 4 minutes pass with no terminal status, give up
+    setTimeout(() => {
+      if (es.readyState !== 2) {
+        es.close();
+        reject(new Error("timeout waiting for agent"));
+      }
+    }, 4 * 60 * 1000);
+  });
+}
+
+async function runConductorFlow(idea, opts = {}) {
+  const autoMode = !!opts.autoMode;
+  const panel = _conductorReset();
+  if (!panel) return;
+  if (typeof toast === "function") {
+    toast(autoMode
+      ? "🎩 Conductor running in 🚀 Auto mode — sit back."
+      : "🎩 Conductor — Phase 1: writing your Project Brief.",
+      3500);
+  }
+
+  // ---- Phase 1: Brief --------------------------------------------------
+  const briefStep = _conductorShowStep("brief");
+  let briefRunId, briefText;
+  try {
+    const r = await fetch("/api/conductor/brief", {
+      method: "POST",
+      headers: _conductorHeaders(),
+      body: JSON.stringify({ idea }),
+    });
+    if (!r.ok) throw new Error(`brief start ${r.status}: ${await r.text()}`);
+    const data = await r.json();
+    briefRunId = data.run_id;
+    briefText = await _conductorStreamRun(briefRunId, briefStep);
+  } catch (e) {
+    if (typeof toast === "function") toast(`Conductor brief failed: ${e}`, 5000);
+    return;
+  }
+
+  // ---- Approval gate (or auto) ----------------------------------------
+  let proceed;
+  if (autoMode) {
+    proceed = Promise.resolve();
+  } else {
+    const actions = briefStep.querySelector(".conductor-step-actions");
+    if (actions) actions.hidden = false;
+    proceed = new Promise((resolve, reject) => {
+      actions.querySelector('[data-action="approve-brief"]').onclick = () => {
+        actions.hidden = true;
+        resolve();
+      };
+      actions.querySelector('[data-action="reconduct-brief"]').onclick = () => {
+        actions.hidden = true;
+        reject(new Error("re-conduct"));
+      };
+    });
+  }
+  try {
+    await proceed;
+  } catch (e) {
+    if (e.message === "re-conduct") {
+      // Recurse with same idea — fresh Phase 1 run
+      return runConductorFlow(idea, opts);
+    }
+    return;
+  }
+
+  // ---- Phase 2: Compose -----------------------------------------------
+  const composeStep = _conductorShowStep("compose");
+  let composeRunId, composeText;
+  try {
+    const r = await fetch("/api/conductor/compose", {
+      method: "POST",
+      headers: _conductorHeaders(),
+      body: JSON.stringify({ brief: briefText }),
+    });
+    if (!r.ok) throw new Error(`compose start ${r.status}: ${await r.text()}`);
+    const data = await r.json();
+    composeRunId = data.run_id;
+    composeText = await _conductorStreamRun(composeRunId, composeStep);
+  } catch (e) {
+    if (typeof toast === "function") toast(`Conductor compose failed: ${e}`, 5000);
+    return;
+  }
+
+  // ---- Approval gate (or auto) ----------------------------------------
+  let launchProceed;
+  if (autoMode) {
+    launchProceed = Promise.resolve();
+  } else {
+    const actions = composeStep.querySelector(".conductor-step-actions");
+    if (actions) actions.hidden = false;
+    launchProceed = new Promise((resolve, reject) => {
+      actions.querySelector('[data-action="launch-run"]').onclick = () => {
+        actions.hidden = true;
+        resolve();
+      };
+      actions.querySelector('[data-action="reconduct-compose"]').onclick = () => {
+        actions.hidden = true;
+        reject(new Error("re-compose"));
+      };
+    });
+  }
+  try {
+    await launchProceed;
+  } catch (e) {
+    if (e.message === "re-compose") {
+      // Re-run compose with same brief
+      const composeStep2 = _conductorShowStep("compose");
+      composeStep2.querySelector("[data-output]").textContent = "";
+      try {
+        const r = await fetch("/api/conductor/compose", {
+          method: "POST",
+          headers: _conductorHeaders(),
+          body: JSON.stringify({ brief: briefText }),
+        });
+        const data = await r.json();
+        composeText = await _conductorStreamRun(data.run_id, composeStep2);
+        composeRunId = data.run_id;
+      } catch (err) { return; }
+    } else {
+      return;
+    }
+  }
+
+  // ---- Phase 3: Launch ------------------------------------------------
+  const launchStep = _conductorShowStep("launch");
+  const launchOut = launchStep.querySelector("[data-output]");
+  const launchStatus = launchStep.querySelector("[data-status]");
+  if (launchStatus) launchStatus.textContent = "validating + launching…";
+  try {
+    const r = await fetch("/api/conductor/launch", {
+      method: "POST",
+      headers: _conductorHeaders(),
+      body: JSON.stringify({
+        compose_run_id: composeRunId,
+        auto_mode: autoMode,
+      }),
+    });
+    if (!r.ok) {
+      const errBody = await r.text();
+      throw new Error(`launch ${r.status}: ${errBody}`);
+    }
+    const data = await r.json();
+    if (launchOut) {
+      launchOut.innerHTML = `<p>Launched team:</p>
+        <ul>${(data.agents || []).map(a => `<li>${escapeHtml(a)}</li>`).join("")}</ul>
+        <p>Run ID: <code>${escapeHtml(data.run_id)}</code></p>
+        <p><a href="#" data-run-id="${escapeHtml(data.run_id)}"
+              class="conductor-open-run">Open this run →</a></p>`;
+      const link = launchOut.querySelector(".conductor-open-run");
+      if (link) {
+        link.addEventListener("click", (ev) => {
+          ev.preventDefault();
+          // The dashboard already has run navigation logic via #run-<id>
+          // hash; if not present, just scroll the page top to surface it.
+          location.hash = `#run-${data.run_id}`;
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        });
+      }
+    }
+    if (launchStatus) launchStatus.textContent = "running";
+    if (typeof toast === "function") {
+      toast(`🚀 Conductor launched ${data.agents?.length || "?"}-agent team. Run ID: ${data.run_id}`, 6000);
+    }
+  } catch (e) {
+    if (launchStatus) launchStatus.textContent = "failed";
+    if (launchOut) launchOut.textContent = String(e);
+    if (typeof toast === "function") toast(`Conductor launch failed: ${e}`, 6000);
+  }
 }
 
 /* ----------------------------------------------------------

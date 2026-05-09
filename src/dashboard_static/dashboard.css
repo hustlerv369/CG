@@ -4429,3 +4429,111 @@ body.status-bar-hidden .status-bar { display: none; }
   .agent-elapsed, .agent-tokens { font-size: 9px; padding: 3px 6px; }
   .palette { width: 96vw; top: 6vh; }
 }
+
+/* ============================================================
+ * v48 W0 — Conductor flow panel
+ *
+ * Shown inline in Quick Start when the user clicks 🎩 Conductor.
+ * Three sequential cards: brief stream, compose stream, launch.
+ * Each card streams its agent's output via SSE.
+ * ============================================================ */
+
+.quick-start-conductor {
+  background: linear-gradient(135deg, var(--accent-coral) 0%,
+                                       var(--accent-amber) 100%);
+  color: var(--bg-primary);
+  font-weight: 700;
+  border: none;
+  margin-left: 0.5rem;
+}
+.quick-start-conductor:hover {
+  filter: brightness(1.08);
+  transform: translateY(-1px);
+}
+
+.quick-start-auto-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4em;
+  margin-left: 0.75rem;
+  padding: 0.4em 0.8em;
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, var(--accent-amber) 50%, transparent);
+  font: 600 var(--fs-small) var(--font-sans);
+  color: var(--fg-secondary);
+  cursor: pointer;
+  user-select: none;
+  transition: background 120ms;
+}
+.quick-start-auto-toggle:hover {
+  background: color-mix(in srgb, var(--accent-amber) 12%, transparent);
+}
+.quick-start-auto-toggle input { margin: 0; cursor: pointer; }
+
+.conductor-panel {
+  margin-top: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.conductor-step {
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 35%, transparent);
+  border-radius: 12px;
+  padding: 1rem 1.1rem;
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-coral) 5%, var(--bg-secondary)),
+    var(--bg-secondary) 70%);
+  box-shadow: 0 2px 8px color-mix(in srgb, black 14%, transparent);
+}
+
+.conductor-step-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6em;
+  margin-bottom: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.conductor-step-icon  { font-size: 1.4em; }
+.conductor-step-title { flex: 1; font-size: var(--fs-base); }
+.conductor-step-status {
+  font: 600 var(--fs-micro) var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 0.2em 0.7em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-amber) 18%, transparent);
+  color: var(--fg-primary);
+}
+
+.conductor-step-output {
+  margin: 0 0 0.8rem 0;
+  padding: 0.8rem 1rem;
+  border-radius: 8px;
+  background: var(--bg-primary);
+  border: 1px solid color-mix(in srgb, var(--fg-secondary) 14%, transparent);
+  font: 400 var(--fs-small)/1.55 var(--font-mono);
+  color: var(--fg-primary);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  max-height: 420px;
+  overflow-y: auto;
+  min-height: 3em;
+}
+.conductor-step-output:empty::before {
+  content: "Waiting for output…";
+  color: var(--fg-secondary);
+  font-style: italic;
+}
+.conductor-step-output a { color: var(--accent-coral); }
+.conductor-step-output ul { margin: 0.4em 0 0.4em 1.2em; }
+
+.conductor-step-actions {
+  display: flex;
+  gap: 0.6em;
+  flex-wrap: wrap;
+  padding-top: 0.4rem;
+  border-top: 1px dashed color-mix(in srgb, var(--fg-secondary) 18%, transparent);
+}
+.conductor-step-actions button { font-weight: 600; }

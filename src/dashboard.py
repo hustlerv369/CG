@@ -53,6 +53,15 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
+# v48 W0: Conductor — Opus designs custom workflows from raw ideas
+from conductor import (
+    build_phase1_prompt,
+    build_phase2_prompt,
+    extract_json_block,
+    validate_workflow_spec,
+    CANONICAL_ROLES,
+)
+
 
 # ---------------------------------------------------------------------------
 # Paths
@@ -4686,6 +4695,241 @@ def create_app() -> FastAPI:
             "open_design_dir": str(od_dir),
             "hint": ("Run launch.cmd in the Open Design folder (or click "
                       "the desktop shortcut) to see this file under imports/."),
+        }
+
+    # ---- v48 W0: Conductor — idea → custom team → live workflow -----------
+    #
+    # Three endpoints implement the two-phase Conductor flow:
+    #   POST /api/conductor/brief    — Phase 1: streams a Markdown
+    #                                   Project Brief from Opus 4.7.
+    #                                   Returns a regular run_id; client
+    #                                   reads it via /api/runs/<id>/stream.
+    #   POST /api/conductor/compose  — Phase 2: takes the approved brief,
+    #                                   asks Opus to emit a JSON workflow
+    #                                   spec. Also a regular run_id.
+    #   POST /api/conductor/launch   — Reads a Phase-2 run's output, parses
+    #                                   + validates the JSON, then starts
+    #                                   the actual workflow run as a normal
+    #                                   manager.start_run. Returns the new
+    #                                   run_id (the "real" one).
+    # All three reuse the existing run engine, SSE streaming, timeout
+    # watchdog, and on-disk output capture. No new infrastructure.
+
+    def _allowed_models_for_conductor() -> list[str]:
+        """Subset of AGENT_KINDS Conductor is allowed to assign.
+
+        Excludes browser/sub-workflow/pilot pseudo-agents (those need
+        special inputs Conductor can't realistically produce). Excludes
+        third-party API agents that may not be configured (OpenRouter
+        etc.) — keeps generated specs runnable on a fresh CG install
+        with just Claude + Gemini OAuth.
+        """
+        good_prefixes = ("claude-", "gemini-")
+        out = []
+        for kind in AGENT_KINDS:
+            if not isinstance(kind, str):
+                continue
+            if not kind.startswith(good_prefixes):
+                continue
+            # Skip preview / 3-pro etc. that have known capacity issues
+            if "preview" in kind or kind.endswith("-3-pro"):
+                continue
+            out.append(kind)
+        return out
+
+    @app.post("/api/conductor/brief")
+    async def conductor_brief(body: dict[str, Any], request: Request) -> Any:
+        """Start Phase 1: Visionary writes a Markdown Project Brief."""
+        idea = (body.get("idea") or "").strip()
+        if not idea:
+            raise HTTPException(400, "idea must be a non-empty string")
+        constraints = (body.get("constraints") or "").strip()
+        sys_prompt, user_prompt = build_phase1_prompt(idea, constraints)
+        # Combine system + user into one stdin payload — claude --print
+        # has no separate --system flag in CG's invocation; the prompt
+        # leads with the role, then the actual task.
+        full_prompt = f"{sys_prompt}\n\n---\n\n{user_prompt}"
+        spec = [{
+            "agent": "claude-opus-4-7",
+            "label": "visionary",
+            "role": "Visionary",
+            "prompt": full_prompt,
+            "streaming": True,
+        }]
+        # Forward the same secret headers as /api/runs
+        secrets: dict[str, str] = {}
+        header_to_env = {
+            "x-cg-openrouter-key": "OPENROUTER_API_KEY",
+            "x-cg-zhipu-key": "ZHIPU_API_KEY",
+            "x-cg-anthropic-key": "ANTHROPIC_API_KEY",
+            "x-cg-gemini-key": "GEMINI_API_KEY",
+        }
+        for header, env_name in header_to_env.items():
+            v = request.headers.get(header)
+            if v and v.strip():
+                secrets[env_name] = v.strip()
+        run = manager.start_run(
+            title=f"Conductor brief: {idea[:60]}",
+            spec=spec,
+            secrets=secrets,
+            variables={},
+        )
+        return {
+            "phase": 1,
+            "run_id": run.id,
+            "title": run.title,
+            "label": "visionary",
+        }
+
+    @app.post("/api/conductor/compose")
+    async def conductor_compose(body: dict[str, Any], request: Request) -> Any:
+        """Start Phase 2: Conductor emits a fenced JSON workflow spec."""
+        brief = (body.get("brief") or "").strip()
+        if not brief:
+            raise HTTPException(400, "brief must be a non-empty string")
+        allowed = _allowed_models_for_conductor()
+        sys_prompt, _ = build_phase2_prompt(brief, allowed)
+        spec = [{
+            "agent": "claude-opus-4-7",
+            "label": "composer",
+            "role": "Architect",
+            "prompt": sys_prompt,
+            "streaming": True,
+        }]
+        secrets: dict[str, str] = {}
+        for header, env_name in {
+            "x-cg-anthropic-key": "ANTHROPIC_API_KEY",
+        }.items():
+            v = request.headers.get(header)
+            if v and v.strip():
+                secrets[env_name] = v.strip()
+        run = manager.start_run(
+            title="Conductor compose: workflow JSON",
+            spec=spec,
+            secrets=secrets,
+            variables={},
+        )
+        return {
+            "phase": 2,
+            "run_id": run.id,
+            "title": run.title,
+            "label": "composer",
+            "allowed_models": allowed,
+        }
+
+    @app.post("/api/conductor/launch")
+    async def conductor_launch(body: dict[str, Any], request: Request) -> Any:
+        """Parse + validate a Phase-2 output, then launch the real run.
+
+        Body:
+          - compose_run_id: id of the Phase 2 run whose output is the JSON
+          - variables: optional dict of ${VAR} overrides for the launched run
+          - title: optional title override
+          - auto_mode: bool — currently informational; kept for symmetry
+            with W0.3 (run engine has no approval gates yet anyway, so
+            today every Conductor run is effectively auto-mode end-to-end
+            until W3 ships explicit gates).
+        """
+        compose_run_id = body.get("compose_run_id") or ""
+        if not compose_run_id:
+            raise HTTPException(400, "compose_run_id is required")
+        compose_run = manager.runs.get(compose_run_id)
+        if not compose_run:
+            raise HTTPException(404, f"compose run {compose_run_id!r} not found")
+        composer = compose_run.agents.get("composer")
+        if not composer:
+            raise HTTPException(400, "compose run has no 'composer' agent")
+        # Read the composer's full output. Prefer on-disk output (v44 path)
+        # over in-memory log_lines so we get the post-cancel-safe view.
+        composer_text = ""
+        try:
+            run_dir = RUNS_DIR / compose_run_id
+            for candidate in (run_dir / "composer.out.md", run_dir / "composer.txt"):
+                if candidate.exists():
+                    composer_text = candidate.read_text(encoding="utf-8", errors="replace")
+                    break
+        except Exception:
+            pass
+        if not composer_text:
+            composer_text = "\n".join(composer.log_lines)
+        if not composer_text.strip():
+            raise HTTPException(
+                400,
+                "compose run has no output yet — wait for status=done before launching",
+            )
+
+        json_str = extract_json_block(composer_text)
+        if not json_str:
+            raise HTTPException(
+                422,
+                "could not find a JSON block in the composer output",
+            )
+
+        allowed = set(_allowed_models_for_conductor())
+        result = validate_workflow_spec(json_str, allowed)
+        if not result.ok or not result.spec:
+            raise HTTPException(
+                422,
+                {"error": "workflow validation failed",
+                 "details": result.errors},
+            )
+
+        # Apply user variable overrides on top of the generated defaults
+        merged_vars = dict(result.spec.get("variables") or {})
+        merged_vars.update(body.get("variables") or {})
+
+        # Forward secret headers to the launched run
+        secrets: dict[str, str] = {}
+        header_to_env = {
+            "x-cg-openrouter-key": "OPENROUTER_API_KEY",
+            "x-cg-zhipu-key": "ZHIPU_API_KEY",
+            "x-cg-anthropic-key": "ANTHROPIC_API_KEY",
+            "x-cg-gemini-key": "GEMINI_API_KEY",
+            "x-cg-project-root": "CG_PROJECT_ROOT",
+        }
+        for header, env_name in header_to_env.items():
+            v = request.headers.get(header)
+            if v and v.strip():
+                secrets[env_name] = v.strip()
+
+        title = body.get("title") or result.spec.get("title") or "Conductor run"
+        # iterate_with / max_rounds are not yet honored by the engine
+        # (planned for v47.1). Strip them here so the existing
+        # start_run validator doesn't reject them. Preserved in
+        # docs/PRESETS for now.
+        cleaned_spec: list[dict[str, Any]] = []
+        for step in result.spec["spec"]:
+            s2 = {k: v for k, v in step.items()
+                  if k not in ("iterate_with", "max_rounds")}
+            cleaned_spec.append(s2)
+
+        run = manager.start_run(
+            title=title,
+            spec=cleaned_spec,
+            secrets=secrets,
+            variables=merged_vars,
+        )
+        return {
+            "phase": 3,
+            "run_id": run.id,
+            "title": run.title,
+            "agents": [s.get("label") for s in cleaned_spec],
+            "auto_mode": bool(body.get("auto_mode")),
+            "warnings": [
+                "iterate_with / max_rounds present in spec but engine "
+                "does not yet execute refinement loops (v47.1 planned)"
+            ] if any("iterate_with" in s for s in result.spec["spec"]) else [],
+        }
+
+    @app.get("/api/conductor/roles")
+    async def conductor_roles() -> Any:
+        """Expose the canonical roles + default models to the UI."""
+        return {
+            "roles": [
+                {"name": name, **meta}
+                for name, meta in CANONICAL_ROLES.items()
+            ],
+            "allowed_models": _allowed_models_for_conductor(),
         }
 
     # ---- workflows on disk -------------------------------------------------
