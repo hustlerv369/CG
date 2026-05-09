@@ -2331,6 +2331,66 @@ class RunManager:
 # ---------------------------------------------------------------------------
 
 
+# v50 W5 — Mission Library categories. Five buckets the Quick Start
+# advanced block surfaces as tiles. Each preset maps to ONE category via
+# PRESET_CATEGORIES below; presets without a mapping fall through to
+# "other" and only show in the flat dropdown.
+MISSION_CATEGORIES: list[dict[str, str]] = [
+    {"id": "app",       "icon": "🚀",
+     "name": "App builder",
+     "description": "Idea → working code. SaaS, tools, scripts."},
+    {"id": "audit",     "icon": "🔍",
+     "name": "Audit & research",
+     "description": "Crawl, analyze, score. SEO, competitors, code review."},
+    {"id": "content",   "icon": "🎨",
+     "name": "Design & content factory",
+     "description": "Blog, social, design, pitch deck, email, translation."},
+    {"id": "automation","icon": "🤖",
+     "name": "Automation hub",
+     "description": "Pipelines, fan-outs, model comparisons."},
+    {"id": "browser",   "icon": "🌐",
+     "name": "Browser ops",
+     "description": "Headless web — scrape, fill, screenshot, pilot."},
+]
+
+PRESET_CATEGORIES: dict[str, str] = {
+    # App builder
+    "idea-to-app":               "app",
+    "file-refactor":             "app",
+    "github-readme-from-code":   "app",
+    "bug-investigation":         "app",
+    "code-review":               "app",
+    "code-pr-review":            "app",
+    "github-pr-review":          "app",
+    "git-pr-review":             "app",
+    # Audit & research
+    "seo-audit":                 "audit",
+    "competitor-analysis":       "audit",
+    "research-deep-dive":        "audit",
+    # Design & content factory
+    "idea-to-content-plan":      "content",
+    "idea-to-pitch-deck":        "content",
+    "design-brief-to-concepts":  "content",
+    "blog-article-full":         "content",
+    "blog-draft":                "content",
+    "social-content-fanout":     "content",
+    "email-drip-5":              "content",
+    "product-description-3":     "content",
+    "translate-cz-en":           "content",
+    "meeting-to-actions":        "content",
+    # Automation hub
+    "compare":                   "automation",
+    "pipeline":                  "automation",
+    "pipeline-var":              "automation",
+    "fanout":                    "automation",
+    # Browser ops
+    "browser-scrape-and-summarize": "browser",
+    "browser-visual-regression":    "browser",
+    "browser-form-test":            "browser",
+    "browser-pilot-search":         "browser",
+    "browser-pilot-summarize":      "browser",
+}
+
 PRESETS: list[dict[str, Any]] = [
     # ============================================================
     # v41 — FLAGSHIP "from idea" presets
@@ -4474,7 +4534,19 @@ def create_app() -> FastAPI:
 
     @app.get("/api/presets")
     async def get_presets() -> Any:
-        return {"presets": PRESETS}
+        # v50 W5 — enrich each preset with its category for the Mission
+        # Library tile UI. The map below is the only place to edit when
+        # categorizing presets — adding `category: "..."` to 30 dict
+        # literals would be brittle and easy to drift out of sync.
+        out = []
+        for p in PRESETS:
+            entry = dict(p)
+            entry["category"] = PRESET_CATEGORIES.get(p.get("id"), "other")
+            out.append(entry)
+        return {
+            "presets": out,
+            "categories": MISSION_CATEGORIES,
+        }
 
     @app.post("/api/runs")
     async def post_run(body: dict[str, Any], request: Request) -> Any:

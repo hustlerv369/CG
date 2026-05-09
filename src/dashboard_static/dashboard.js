@@ -27,7 +27,10 @@ async function init() {
 
   const p = await fetch("/api/presets").then(r => r.json());
   state.presets = p.presets;
+  state.categories = p.categories || [];
   populatePresets();
+  // v50 W5 — Mission Library tile grid
+  if (typeof renderMissionLibrary === "function") renderMissionLibrary();
   await populateWorkflows();
   await refreshHistory();
   // K5 — load active workspace's draft (replaces ensureOneAgentRow path
@@ -1127,10 +1130,54 @@ function setStatus(msg, klass) {
   el.className = `status ${klass || ""}`;
 }
 
+// v50 W5 — Mission Library: 5 category tiles. Click filters the preset
+// dropdown + shows that category's preset cards inline. Click again or
+// click "All" to clear.
+let _missionActiveCat = null;
+
+function renderMissionLibrary() {
+  const grid = document.getElementById("mission-tiles");
+  if (!grid) return;
+  const cats = state.categories || [];
+  const tiles = [
+    `<button class="mission-tile is-all${_missionActiveCat === null ? " active" : ""}"
+             data-cat="">
+       <span class="mission-tile-icon">📚</span>
+       <span class="mission-tile-name">All</span>
+       <span class="mission-tile-count">${(state.presets || []).length}</span>
+     </button>`,
+    ...cats.map(c => {
+      const count = (state.presets || []).filter(p => p.category === c.id).length;
+      const active = _missionActiveCat === c.id ? " active" : "";
+      return `<button class="mission-tile${active}" data-cat="${escapeHtml(c.id)}">
+        <span class="mission-tile-icon">${escapeHtml(c.icon)}</span>
+        <span class="mission-tile-name">${escapeHtml(c.name)}</span>
+        <span class="mission-tile-desc">${escapeHtml(c.description)}</span>
+        <span class="mission-tile-count">${count}</span>
+      </button>`;
+    }),
+  ];
+  grid.innerHTML = tiles.join("");
+  grid.querySelectorAll(".mission-tile").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const c = btn.dataset.cat || null;
+      _missionActiveCat = (_missionActiveCat === c) ? null : c;
+      // re-render to update active class + dropdown
+      renderMissionLibrary();
+      populatePresets();  // re-filtered
+    });
+  });
+}
+
 function populatePresets() {
   const sel = $("#preset-select");
+  // v50 W5 — filter by active mission category if set
+  let visible = state.presets || [];
+  if (_missionActiveCat) {
+    visible = visible.filter(p => p.category === _missionActiveCat);
+  }
   sel.innerHTML = '<option value="">— pick a preset —</option>' +
-    state.presets.map(p =>
+    visible.map(p =>
       `<option value="${p.id}">${escapeHtml(p.title)}</option>`
     ).join("");
   sel.onchange = () => {

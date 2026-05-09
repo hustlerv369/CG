@@ -1,9 +1,27 @@
 # CG Presets — practical workflow library
 
-CG ships **27 presets** that map to real automation needs. Each one is a
+CG ships **30 presets** that map to real automation needs. Each one is a
 multi-agent pipeline you can pick from the **Preset** dropdown, edit any
 prompt, and Run. Most use `${VARIABLES}` so you can configure once in
 **Settings → Workflow variables** and reuse across runs.
+
+> **v48+ shortcut:** click **🎩 Conductor** in the Quick Start hero
+> instead. Opus 4.7 reads your idea and designs a *custom* multi-agent
+> team for it on the fly — no template needed. Tick **🚀 Auto mode**
+> to ship end-to-end without approval gates. See the full flow in
+> `docs/CONDUCTOR.md`.
+
+## Mission Library categories (v50)
+
+The advanced block groups all 30 presets into 5 tiles:
+
+| Tile | Presets | What it covers |
+|---|---|---|
+| 🚀 **App builder** | idea-to-app · file-refactor · github-readme · bug-investigation · code-review · code-pr-review · github-pr-review · git-pr-review | Code projects, refactors, PR reviews |
+| 🔍 **Audit & research** | seo-audit · competitor-analysis · research-deep-dive | Crawl, score, analyze |
+| 🎨 **Design & content factory** | idea-to-content-plan · idea-to-pitch-deck · design-brief-to-concepts · blog-article-full · blog-draft · social-content-fanout · email-drip-5 · product-description-3 · translate-cz-en · meeting-to-actions | Content, design, narrative |
+| 🤖 **Automation hub** | compare · pipeline · pipeline-var · fanout | Pipelines, fan-outs, model A/B |
+| 🌐 **Browser ops** | browser-scrape-and-summarize · browser-visual-regression · browser-form-test · browser-pilot-search · browser-pilot-summarize | Headless web, Playwright |
 
 The 10 presets prefixed with an emoji (`📝 📱 🎨 🌍 ✉️ 🔬 🎙 🔍 🛍 📚`) were
 designed for the most common automation jobs: content, design, research,

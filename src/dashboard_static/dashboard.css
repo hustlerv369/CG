@@ -4537,3 +4537,101 @@ body.status-bar-hidden .status-bar { display: none; }
   border-top: 1px dashed color-mix(in srgb, var(--fg-secondary) 18%, transparent);
 }
 .conductor-step-actions button { font-weight: 600; }
+
+/* ============================================================
+ * v50 W5 — Mission Library tiles
+ *
+ * Sits at the top of the advanced block. Five category tiles
+ * (+ "All") that filter the preset dropdown below.
+ * ============================================================ */
+
+.mission-library {
+  margin-bottom: 1.25rem;
+}
+
+.mission-library-head {
+  display: flex;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.7rem;
+  flex-wrap: wrap;
+}
+.mission-library-title {
+  font: 800 var(--fs-heading) var(--font-sans);
+  letter-spacing: -0.01em;
+  color: var(--fg-primary);
+}
+.mission-library-sub {
+  font: 400 var(--fs-small) var(--font-sans);
+  color: var(--fg-secondary);
+}
+
+.mission-tiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 0.7rem;
+}
+
+.mission-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.3rem;
+  padding: 0.9rem 0.95rem 1rem;
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, var(--fg-secondary) 18%, transparent);
+  background: var(--bg-secondary);
+  font: 600 var(--fs-small) var(--font-sans);
+  color: var(--fg-primary);
+  text-align: left;
+  cursor: pointer;
+  position: relative;
+  transition: transform 120ms ease,
+              border-color 120ms ease,
+              background 120ms ease;
+}
+.mission-tile:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--accent-amber) 60%, transparent);
+}
+.mission-tile.active {
+  border-color: var(--accent-coral);
+  background: linear-gradient(180deg,
+    color-mix(in srgb, var(--accent-coral) 14%, var(--bg-secondary)),
+    var(--bg-secondary));
+  box-shadow: 0 4px 12px color-mix(in srgb, var(--accent-coral) 26%, transparent);
+}
+.mission-tile.is-all {
+  background: var(--bg-primary);
+}
+
+.mission-tile-icon {
+  font-size: 1.6em;
+  line-height: 1;
+}
+.mission-tile-name {
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  font-size: var(--fs-base);
+}
+.mission-tile-desc {
+  font-weight: 400;
+  font-size: var(--fs-micro);
+  color: var(--fg-secondary);
+  line-height: 1.4;
+  margin-top: 0.15rem;
+}
+.mission-tile-count {
+  position: absolute;
+  top: 0.55rem;
+  right: 0.7rem;
+  font: 700 var(--fs-micro) var(--font-mono);
+  padding: 0.2em 0.55em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-secondary) 18%, transparent);
+  color: var(--fg-secondary);
+}
+.mission-tile.active .mission-tile-count {
+  background: var(--accent-coral);
+  color: var(--bg-primary);
+}
