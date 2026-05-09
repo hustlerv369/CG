@@ -1510,8 +1510,17 @@ class RunManager:
         # wall-clock timeout. The previous test run had Sonnet 4.6
         # hang at 0 B for 6 min on an oversized prompt; this would
         # have killed it at 90 s.
+        # v51.1 — per-step override. A spec step can carry
+        # `first_token_timeout: <seconds>` to bump the watchdog for
+        # known-slow steps (e.g. Opus generating 30 KB+ of code can
+        # legitimately take > 90 s before the first visible token
+        # because the provider is queueing the long output).
+        spec_step = next(
+            (s for s in run.spec if s.get("label") == label), {}
+        ) if run else {}
         first_token_timeout = float(
-            cfg.get("first_token_timeout")
+            spec_step.get("first_token_timeout")
+            or cfg.get("first_token_timeout")
             or os.environ.get("CG_FIRST_TOKEN_TIMEOUT")
             or 90
         )
