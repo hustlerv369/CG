@@ -2234,6 +2234,13 @@ async function openRun(runId) {
   const es = new EventSource(`/api/runs/${runId}/stream`);
   state.evtSource = es;
   es.addEventListener("status", (e) => handleStatus(JSON.parse(e.data)));
+  // v51 — heartbeat events (subprocess emitted stdout but no visible
+  // content yet). Used to drive the "waiting Xs" pulse on the agent
+  // panel so the user sees something IS happening even before the
+  // first user-visible token.
+  es.addEventListener("alive", (e) => {
+    try { handleAlive(JSON.parse(e.data)); } catch {}
+  });
   es.addEventListener("snapshot", (e) => handleSnapshot(JSON.parse(e.data)));
   es.addEventListener("log", (e) => handleLog(JSON.parse(e.data)));
   es.addEventListener("done", () => {
@@ -2323,6 +2330,7 @@ function buildPanel(agent) {
           <span class="badge-dot" aria-hidden="true"></span>
           <span class="badge-text">${agent.status}</span>
         </span>
+        <span class="alive-pill" title="Connectivity — bumps every time the model emits anything, even before visible tokens">waiting…</span>
         ${agent.iterate_with ? `
         <span class="badge iterate" data-round
               title="Refinement loop with ${escapeHtml(agent.iterate_with)} (max ${agent.max_rounds || 1} rounds)">
@@ -2436,6 +2444,57 @@ function buildPanel(agent) {
   };
 }
 
+// v51 — heartbeat tick handler. Bumps the "alive Xs" indicator on the
+// agent panel even when the parser filtered out the line (e.g. Sonnet
+// stream-json system/init events that satisfy connectivity but yield
+// no visible content yet). Without this the user saw a frozen "0 chars
+// running" panel for 9 minutes — exactly the symptom that broke the
+// Sonnet engineer step in the first Smile Today run.
+function handleAlive(d) {
+  if (!d || !d.label) return;
+  const p = state.panels[d.label];
+  if (!p || !p.root) return;
+  p.root.dataset.alive = "true";
+  p.root.dataset.aliveAt = String(Date.now());
+  // Refresh the visible "waiting Xs" pill if running with no content yet
+  const pill = p.root.querySelector(".alive-pill");
+  if (pill) {
+    pill.textContent = d.kind === "first-visible"
+      ? "first token!"
+      : "waiting…";
+    pill.classList.toggle("alive-pill--first-visible",
+                              d.kind === "first-visible");
+  }
+}
+
+// v51 — every 1 s, refresh "alive Xs ago" / "waiting Xs" labels on any
+// running agent panel. Cheap (just DOM text, no fetch).
+function _tickAlivePills() {
+  const now = Date.now();
+  document.querySelectorAll(".agent-panel.status-running").forEach((root) => {
+    const pill = root.querySelector(".alive-pill");
+    if (!pill) return;
+    const startedAttr = root.dataset.startedAt;
+    const aliveAt = Number(root.dataset.aliveAt || 0);
+    const startedAt = Number(startedAttr || 0);
+    const baseAt = aliveAt || startedAt || now;
+    const sec = Math.max(0, Math.floor((now - baseAt) / 1000));
+    const hasContent = pill.classList.contains("alive-pill--first-visible");
+    if (hasContent) {
+      pill.textContent = `streaming · ${sec}s`;
+    } else if (aliveAt) {
+      pill.textContent = `connected · ${sec}s`;
+    } else if (startedAt) {
+      pill.textContent = `connecting · ${sec}s`;
+    } else {
+      pill.textContent = "waiting…";
+    }
+  });
+}
+if (typeof window !== "undefined" && !window.__cgAliveTicker) {
+  window.__cgAliveTicker = setInterval(_tickAlivePills, 1000);
+}
+
 function handleStatus(d) {
   // v16 — also paint the visual canvas node
   if (typeof visualUpdateAgentStatus === "function") {
@@ -2455,6 +2514,16 @@ function handleStatus(d) {
   }
   // Drive elapsed timer lifecycle from real status events
   if (d.status === "running" && p.startElapsed) p.startElapsed();
+  // v51 — record the moment we became running so the "waiting Xs"
+  // pill shows "connecting · Ns" until the first stdout heartbeat
+  if (d.status === "running" && p.root && !p.root.dataset.startedAt) {
+    p.root.dataset.startedAt = String(Date.now());
+  }
+  if (d.status !== "running" && p.root) {
+    delete p.root.dataset.startedAt;
+    delete p.root.dataset.alive;
+    delete p.root.dataset.aliveAt;
+  }
   if ((d.status === "done" || d.status === "failed" || d.status === "cancelled")
       && p.stopElapsed) p.stopElapsed();
   if (d.exit_code !== null && d.exit_code !== undefined) {

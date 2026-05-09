@@ -2255,6 +2255,145 @@ def test_auth_enabled_rejects_wrong_user(client, monkeypatch):
     assert r.status_code == 401
 
 
+# ===========================================================================
+# v51 — continue_on_dep_failure + improved liveness
+# ===========================================================================
+
+def test_continue_on_dep_failure_runs_downstream_anyway(client, monkeypatch):
+    """When upstream agent fails, downstream agents marked
+    continue_on_dep_failure: True still run with placeholder substitution
+    instead of being cancelled."""
+    # Replace `claude` with a command that ALWAYS fails for one specific
+    # label (the upstream we want broken).
+    fail_kind = {
+        "label": "FailingClaude (mock)",
+        "family": "claude",
+        "summary": "fails on stdin",
+        "command": [sys.executable, "-c",
+                     "import sys; sys.stderr.write('boom\\n'); sys.exit(2)"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "claude-broken", fail_kind)
+
+    payload = {
+        "title": "soft-fail demo",
+        "spec": [
+            {"agent": "claude-broken", "label": "broken",
+             "prompt": "this will fail"},
+            {"agent": "claude", "label": "downstream",
+             "prompt": "from {{broken}}",
+             "depends_on": ["broken"],
+             "continue_on_dep_failure": True},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id, timeout_s=10)
+    by_label = {a["label"]: a for a in body["agents"]}
+    # Upstream failed
+    assert by_label["broken"]["status"] == "failed"
+    # Downstream RAN despite failed dep (this is the new behavior)
+    assert by_label["downstream"]["status"] == "done"
+
+
+def test_continue_on_dep_failure_substitutes_placeholder(client, monkeypatch):
+    """The {{depLabel}} substitution falls back to a clear placeholder
+    string instead of crashing or leaving the literal `{{label}}`
+    in the rendered prompt."""
+    fail_kind = {
+        "label": "FailingClaude (mock)",
+        "family": "claude",
+        "summary": "fails on stdin",
+        "command": [sys.executable, "-c", "import sys; sys.exit(2)"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "claude-broken", fail_kind)
+    # Echo agent — print whatever stdin contains so we can assert what
+    # the downstream actually saw.
+    echo_kind = {
+        "label": "EchoClaude (mock)",
+        "family": "claude",
+        "summary": "echo",
+        "command": [sys.executable, "-c",
+                     "import sys; print('[ECHO]', sys.stdin.read().strip())"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "claude-echo", echo_kind)
+
+    r = client.post("/api/runs", json={
+        "title": "placeholder demo",
+        "spec": [
+            {"agent": "claude-broken", "label": "up",
+             "prompt": "fail"},
+            {"agent": "claude-echo", "label": "down",
+             "prompt": "Saw: {{up}}",
+             "depends_on": ["up"],
+             "continue_on_dep_failure": True},
+        ],
+    })
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id, timeout_s=10)
+    out = client.get(f"/api/runs/{run_id}/output/down").text
+    # Downstream's prompt was substituted with the placeholder
+    assert "did not complete" in out
+    assert "{{up}}" not in out  # raw placeholder must NOT survive
+    assert "[upstream agent 'up'" in out
+
+
+def test_continue_on_dep_failure_default_off(client, monkeypatch):
+    """Without the flag, existing strict behavior remains: failed dep
+    causes downstream to be marked failed too."""
+    fail_kind = {
+        "label": "FailingClaude (mock)",
+        "family": "claude",
+        "summary": "fails",
+        "command": [sys.executable, "-c", "import sys; sys.exit(2)"],
+        "stdin_prompt": True,
+        "env": {},
+    }
+    monkeypatch.setitem(dash.AGENT_KINDS, "claude-broken", fail_kind)
+
+    r = client.post("/api/runs", json={
+        "title": "strict default",
+        "spec": [
+            {"agent": "claude-broken", "label": "up", "prompt": "x"},
+            {"agent": "claude", "label": "down",
+             "prompt": "after {{up}}",
+             "depends_on": ["up"]},
+            # Note: no continue_on_dep_failure flag
+        ],
+    })
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id, timeout_s=10)
+    by_label = {a["label"]: a for a in body["agents"]}
+    assert by_label["up"]["status"] == "failed"
+    assert by_label["down"]["status"] == "failed"
+
+
+def test_agent_state_exposes_liveness_fields(client):
+    """v51 — last_activity_at and first_visible_at are exposed via
+    /api/runs/<id> so the frontend can render the alive pill."""
+    r = client.post("/api/runs", json={
+        "title": "liveness",
+        "spec": [{"agent": "claude", "label": "a", "prompt": "x"}],
+    })
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id)
+    body = client.get(f"/api/runs/{run_id}").json()
+    a = body["agents"][0]
+    assert "last_activity_at" in a
+    assert "first_visible_at" in a
+    assert "continue_on_dep_failure" in a
+    # The mock subprocess prints synchronously, so both timestamps
+    # should be set by the time the run is done.
+    assert a["last_activity_at"] is not None
+    assert a["first_visible_at"] is not None
+
+
 def test_auth_static_assets_pass_through(client, monkeypatch):
     """Static asset paths bypass the auth check (so the 401 challenge
     page can still load CSS/JS in the browser)."""

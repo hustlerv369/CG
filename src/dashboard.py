@@ -887,6 +887,19 @@ class AgentRunState:
     max_rounds: int = 1
     accept_when: str = ""
     rounds_completed: int = 0  # bumped each time this step finishes a round
+    # v51 — opt-in fail-soft. When True, this step still runs even if
+    # one or more `depends_on` agents failed. The failed dep's
+    # {{label}} substitution falls back to a placeholder so prompts
+    # don't crash. Default: False (existing strict behavior).
+    continue_on_dep_failure: bool = False
+    # v51 — liveness telemetry. `last_activity_at` is bumped on every
+    # stdout line (visible OR filtered system/init events) so the UI
+    # can render "connected, waiting Xs" instead of a frozen 0-chars
+    # block. `first_visible_at` records when the first user-visible
+    # text arrived (used by the v45 watchdog rebuild — fires on lack
+    # of *visible* content, not lack of raw stdout).
+    last_activity_at: float | None = None
+    first_visible_at: float | None = None
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -905,6 +918,9 @@ class AgentRunState:
             "iterate_with": self.iterate_with,
             "max_rounds": self.max_rounds,
             "rounds_completed": self.rounds_completed,
+            "continue_on_dep_failure": self.continue_on_dep_failure,
+            "last_activity_at": self.last_activity_at,
+            "first_visible_at": self.first_visible_at,
         }
 
 
@@ -1046,6 +1062,9 @@ class RunManager:
                 iterate_with=str(item.get("iterate_with", "") or ""),
                 max_rounds=int(item.get("max_rounds", 1) or 1),
                 accept_when=str(item.get("accept_when", "") or ""),
+                continue_on_dep_failure=bool(
+                    item.get("continue_on_dep_failure", False)
+                ),
             )
         self.runs[run_id] = run
         self._persist_index()
@@ -1073,8 +1092,14 @@ class RunManager:
         return run
 
     def _wait_for_deps(self, run: RunState, agent_state: AgentRunState) -> bool:
-        """Block until every dependency is done. Returns False if any dep
-        failed or was cancelled (caller should mark this agent failed too)."""
+        """Block until every dependency reaches a terminal status.
+
+        Returns False if any dep failed/cancelled AND this agent does
+        NOT have ``continue_on_dep_failure`` set (caller should mark
+        the agent failed too). When fail-soft is on, returns True even
+        with failed upstreams — `_substitute_prompt` will substitute
+        a placeholder for missing `{{label}}` content.
+        """
         if not agent_state.depends_on:
             return True
         agent_state.status = "waiting"
@@ -1083,9 +1108,23 @@ class RunManager:
         while True:
             statuses = [run.agents[d].status for d in agent_state.depends_on
                          if d in run.agents]
-            if any(s in {"failed", "cancelled"} for s in statuses):
-                return False
-            if all(s == "done" for s in statuses):
+            terminal = {"done", "failed", "cancelled"}
+            if all(s in terminal for s in statuses):
+                # All deps reached a terminal state.
+                if any(s in {"failed", "cancelled"} for s in statuses):
+                    if agent_state.continue_on_dep_failure:
+                        # Note in the log so the user understands why
+                        # {{deplabel}} placeholders may be empty.
+                        broken = [d for d in agent_state.depends_on
+                                   if run.agents.get(d) and
+                                   run.agents[d].status in {"failed", "cancelled"}]
+                        msg = (f"[continue-on-dep-failure] proceeding without "
+                               f"{', '.join(broken)} — placeholder substitution will fill in")
+                        agent_state.log_lines.append(msg)
+                        self._emit(run.id, agent_state.label, {"event": "log", "data": {
+                            "label": agent_state.label, "line": msg}})
+                        return True
+                    return False
                 return True
             time.sleep(0.5)
 
@@ -1120,8 +1159,15 @@ class RunManager:
                     field_str = str(field_val) if field_val is not None else ""
                 result = result.replace(
                     "{{" + dep + "." + field_name + "}}", field_str)
-            # Then: bare {{dep}} = full agent output
-            output = "\n".join(agent.log_lines)
+            # Then: bare {{dep}} = full agent output. v51 — if the dep
+            # finished in a non-`done` terminal state and we're running
+            # under continue_on_dep_failure, substitute a clear human-
+            # readable placeholder so the agent's prompt still parses.
+            if agent.status in {"failed", "cancelled"}:
+                output = (f"[upstream agent '{dep}' did not complete "
+                          f"(status={agent.status}) — proceed without it]")
+            else:
+                output = "\n".join(agent.log_lines)
             result = result.replace("{{" + dep + "}}", output)
 
         # File / git / shell placeholders, with project root override
@@ -1494,14 +1540,21 @@ class RunManager:
 
         assert proc.stdout is not None
         for line in proc.stdout:
-            if not first_token_received.is_set():
-                first_token_received.set()
-                watchdog_canceled.set()  # let watchdog exit cleanly
+            # v51 — bump activity timestamp on EVERY raw stdout line so the
+            # UI can show "connected, waiting Xs" before any visible
+            # content arrives (Sonnet stream-json emits a system/init
+            # event first that the parser correctly filters out — the
+            # init line is not "first visible token" but it IS a sign of
+            # life).
+            agent_state.last_activity_at = time.time()
+
             # _recover_mojibake fixes the Windows-CLI double-encode case
             # (emoji like 🧠 arriving as đź§  through Windows-1250→UTF-8
             # round trips). It's a no-op on clean ASCII so it's free.
             line = _recover_mojibake(line)
             line_clean = line.rstrip("\n")
+            visible_added = 0  # bytes of user-visible content this line yielded
+
             if use_streaming:
                 deltas = _parse_stream_json_line(family, line_clean)
                 if deltas is None:
@@ -1510,6 +1563,13 @@ class RunManager:
                     out_fp.write(line)
                     self._emit(run.id, label, {"event": "log", "data": {
                         "label": label, "line": line_clean}})
+                    visible_added += len(line_clean)
+                elif len(deltas) == 0:
+                    # System / init / result — sign of life but no
+                    # visible content. Emit a heartbeat so the UI can
+                    # show "connected, waiting for first token".
+                    self._emit(run.id, label, {"event": "alive", "data": {
+                        "label": label, "kind": "stream-init"}})
                 else:
                     # Filter ran — only assistant text deltas reach here
                     for delta in deltas:
@@ -1519,11 +1579,24 @@ class RunManager:
                         self._emit(run.id, label, {"event": "log", "data": {
                             "label": label, "line": delta,
                             "stream": True}})
+                        visible_added += len(delta)
             else:
                 agent_state.log_lines.append(line_clean)
                 out_fp.write(line)
                 self._emit(run.id, label, {"event": "log", "data": {
                     "label": label, "line": line_clean}})
+                visible_added += len(line_clean)
+
+            # v51 — watchdog cancels ONLY on first VISIBLE token. Stream-
+            # json init events keep the subprocess alive in the dashboard
+            # ("connected, 25s") but no longer satisfy the watchdog —
+            # which is the bug that left Sonnet 9 min on 0 visible chars.
+            if visible_added > 0 and not first_token_received.is_set():
+                first_token_received.set()
+                watchdog_canceled.set()
+                agent_state.first_visible_at = time.time()
+                self._emit(run.id, label, {"event": "alive", "data": {
+                    "label": label, "kind": "first-visible"}})
 
         # v44 — hard wall-clock timeout per agent. Without it, an agent
         # CLI that hangs (e.g. Gemini stuck in a missing-tool loop, or

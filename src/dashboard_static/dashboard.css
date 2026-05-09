@@ -4636,6 +4636,48 @@ body.status-bar-hidden .status-bar { display: none; }
   color: var(--bg-primary);
 }
 
+/* v51 — alive pill: visible heartbeat for running agents.
+   Hidden unless the panel is in status-running. While running, the
+   1 s ticker in dashboard.js bumps the text to show "connecting · 12s",
+   "connected · 25s" (after first stream-json init event), or
+   "streaming · 8s" (after the first user-visible token). This is the
+   answer to "Sonnet stuck 9 min, no visual feedback" — every second
+   the user sees the timer climb, so they can tell the model is alive
+   even before tokens render. */
+.alive-pill {
+  display: none;
+  font: 600 var(--fs-micro)/1 var(--font-mono);
+  color: var(--fg-secondary);
+  letter-spacing: 0.04em;
+  padding: 0.18em 0.6em;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg-secondary) 12%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--fg-secondary) 24%, transparent);
+  text-transform: lowercase;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.agent-panel.status-running .alive-pill {
+  display: inline-flex;
+  animation: alive-breath 1.6s ease-in-out infinite;
+}
+.agent-panel.status-running[data-alive="true"] .alive-pill {
+  /* once we've heard a heartbeat, switch from dashed to solid */
+  border-style: solid;
+  background: color-mix(in srgb, var(--accent-amber) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-amber) 38%, transparent);
+}
+.agent-panel.status-running .alive-pill--first-visible,
+.agent-panel.status-running[data-alive="true"] .alive-pill.alive-pill--first-visible {
+  background: color-mix(in srgb, var(--accent-coral) 22%, transparent);
+  border-color: color-mix(in srgb, var(--accent-coral) 50%, transparent);
+  color: var(--fg-primary);
+}
+@keyframes alive-breath {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}
+
 /* v47.1 W0.2 — refinement loop round badge.
    Shown only on agents with iterate_with set; backend bumps the
    "round" field via SSE status events. */
