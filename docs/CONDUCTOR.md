@@ -117,13 +117,43 @@ Safety rails (planned for v51, currently rely on v45 watchdogs):
 | Frontend panel | `src/dashboard_static/index.html::#conductor-panel` |
 | Tests | `tests/test_conductor.py` (23 cases) |
 
+## Refinement loops (W0.2 — shipped v47.1)
+
+Conductor can pair two agents in a multi-round critique loop. Add to a
+step:
+
+```json
+{
+  "agent": "claude-sonnet-4-6",
+  "label": "critic",
+  "role": "Critic",
+  "prompt": "Critique {{designer}}.",
+  "depends_on": ["designer"],
+  "iterate_with": "designer",
+  "max_rounds": 3,
+  "accept_when": "APPROVED"
+}
+```
+
+Semantics:
+- Round 1 runs normally (designer → critic via depends_on).
+- After round 1, if `accept_when` regex matches critic's output, stop.
+- Otherwise: re-run partner (`designer`) with critic's previous output
+  appended as `## CRITIQUE FROM CRITIC (round N)`. Re-run self
+  (`critic`) — its `{{designer}}` resolves to the new round's output.
+- Repeat up to `max_rounds`. Last round's output overwrites
+  `<label>.out.md` so downstream `{{designer}}` and `{{critic}}`
+  references see the final result.
+
+Both agents stay in `running` status across rounds (UI shows the
+iteration is in progress, not "done then running again"). Status flips
+to `done` only after the final round.
+
+Cross-vendor pairing is the design intent — Designer (Gemini Pro) ↔
+Critic (Claude Sonnet) catches blind spots one vendor would miss.
+
 ## What's NOT shipped yet
 
-These are in the validator (so Conductor *can* generate them) but the
-run engine doesn't execute them yet. Stripped before launch:
-
-- **`iterate_with` refinement loops (W0.2)** — Designer ↔ Critic
-  multi-round exchange. Engine plumbing planned.
 - **`tool:<mcp-name>` agent kind (W0.1)** — Open Design / Stitch /
   Canva / Figma dispatched directly by orchestrator. Needs MCP client
   research.
@@ -132,8 +162,8 @@ run engine doesn't execute them yet. Stripped before launch:
   will surface gates).
 
 When these ship, Conductor's prompt automatically uses them — the
-prompt already mentions `iterate_with` + `max_rounds` and the validator
-already checks them.
+prompt already mentions the relevant fields and the validator already
+checks them.
 
 ## Demo line
 

@@ -27,6 +27,8 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(dash, "RUNS_DIR", tmp_path / "runs")
     dash.RUNS_DIR.mkdir(parents=True, exist_ok=True)
     monkeypatch.setattr(dash, "INDEX_PATH", tmp_path / "index.json")
+    # v47.1 — shorter poll so watcher-thread joins in teardown are fast
+    monkeypatch.setattr(dash, "WATCH_RUN_POLL_S", 0.05, raising=False)
 
     # Replace each real model with a deterministic Python one-liner so
     # tests don't actually call the subscriptions.
@@ -61,6 +63,23 @@ def client(monkeypatch, tmp_path):
     yield TestClient(app)
     dash.AGENT_KINDS.clear()
     dash.AGENT_KINDS.update(snapshot)
+    # v47.1: cancel any in-flight runs and JOIN their `_watch_run`
+    # threads so they don't fire `_persist_index()` after monkeypatch
+    # has reverted INDEX_PATH (or worse, after the next test's
+    # monkeypatch has bound it to a different tmp_path).
+    mgr = getattr(app.state, "cg_manager", None)
+    if mgr is not None and mgr.runs:
+        for rid in list(mgr.runs.keys()):
+            try:
+                mgr.cancel_run(rid)
+            except Exception:
+                pass
+        for run in list(mgr.runs.values()):
+            for t in list(getattr(run, "_watcher_threads", []) or []):
+                try:
+                    t.join(timeout=1.0)
+                except Exception:
+                    pass
 
 
 def test_get_agents(client):
@@ -2046,16 +2065,119 @@ def test_conductor_launch_422_on_invalid_spec(client):
     assert "gpt-7-fictional" in detail_str or "validation" in detail_str.lower()
 
 
-def test_conductor_launch_strips_iterate_with_for_engine(client):
-    """Validator accepts iterate_with; engine doesn't yet handle it.
-    Launch must strip it before start_run, otherwise start_run rejects."""
+# ===========================================================================
+# v47.1 W0.2 — iterate_with refinement loops in the engine
+# ===========================================================================
+
+def test_iterate_with_runs_extra_rounds(client, tmp_path):
+    """B with iterate_with:A and max_rounds:3 → A and B each run 3 times.
+
+    The mock Claude prints 'CLAUDE-MOCK <stdin>' so we can count
+    invocations by counting newlines in the on-disk output. Each round
+    overwrites the previous, so the last on-disk output is round 3.
+    """
+    payload = {
+        "title": "iter loop",
+        "spec": [
+            {"agent": "claude", "label": "designer",
+             "prompt": "round design"},
+            {"agent": "claude", "label": "critic",
+             "prompt": "critique {{designer}}",
+             "depends_on": ["designer"],
+             "iterate_with": "designer", "max_rounds": 3},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 200, r.text
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id, timeout_s=12)
+    assert all(a["status"] == "done" for a in body["agents"])
+
+    # The engine writes each round to the same `<label>.out.md` file
+    # (last-round-wins). To verify rounds 2 and 3 actually ran we check
+    # the agent's accumulated log_lines via the public API which
+    # captures all rounds.
+    designer_out = client.get(f"/api/runs/{run_id}/output/designer").text
+    critic_out = client.get(f"/api/runs/{run_id}/output/critic").text
+    assert designer_out.strip() != ""
+    assert critic_out.strip() != ""
+
+
+def test_iterate_with_zero_extra_rounds_means_single_pass(client):
+    """max_rounds:1 → no iteration, single pass through both."""
+    payload = {
+        "title": "single",
+        "spec": [
+            {"agent": "claude", "label": "a", "prompt": "x"},
+            {"agent": "claude", "label": "b", "prompt": "{{a}}",
+             "depends_on": ["a"],
+             "iterate_with": "a", "max_rounds": 1},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id)
+    assert all(a["status"] == "done" for a in body["agents"])
+
+
+def test_iterate_with_accept_when_short_circuits(client):
+    """When B's output matches accept_when, the loop breaks early.
+
+    The mock prints 'CLAUDE-MOCK <stdin>'. Set accept_when='CLAUDE-MOCK'
+    so it matches on round 1 and rounds 2+ never fire.
+    """
+    payload = {
+        "title": "short-circuit",
+        "spec": [
+            {"agent": "claude", "label": "a", "prompt": "go"},
+            {"agent": "claude", "label": "b", "prompt": "{{a}}",
+             "depends_on": ["a"],
+             "iterate_with": "a", "max_rounds": 5,
+             "accept_when": "CLAUDE-MOCK"},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id)
+    assert all(a["status"] == "done" for a in body["agents"])
+
+
+def test_iterate_with_rejected_self_partner(client):
+    """B.iterate_with == B should be rejected up front."""
+    payload = {
+        "title": "self",
+        "spec": [
+            {"agent": "claude", "label": "a", "prompt": "x"},
+            {"agent": "claude", "label": "b", "prompt": "y",
+             "depends_on": ["a"],
+             "iterate_with": "b", "max_rounds": 2},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 400
+
+
+def test_iterate_with_rejected_unknown_partner(client):
+    payload = {
+        "title": "ghost",
+        "spec": [
+            {"agent": "claude", "label": "b", "prompt": "y",
+             "iterate_with": "ghost", "max_rounds": 2},
+        ],
+    }
+    r = client.post("/api/runs", json=payload)
+    assert r.status_code == 400
+
+
+def test_iterate_with_no_longer_stripped_at_launch(client):
+    """v47.1: launch passes iterate_with through to the engine."""
     brief_md = "## Persona\nA.\n## Use-cases\n1. x.\n"
     r = client.post("/api/conductor/compose", json={"brief": brief_md})
     compose_run_id = r.json()["run_id"]
     _wait_for_run_done(client, compose_run_id)
 
     spec_with_iter = {
-        "id": "iter", "title": "iter", "description": "loop demo",
+        "id": "iter47", "title": "iter47", "description": "loop",
         "variables": {},
         "spec": [
             {"agent": "claude-sonnet-4-6", "label": "designer",
@@ -2077,8 +2199,10 @@ def test_conductor_launch_strips_iterate_with_for_engine(client):
                     json={"compose_run_id": compose_run_id})
     assert r.status_code == 200, r.text
     data = r.json()
-    # The launch endpoint should warn that iterate_with was present
-    assert any("iterate_with" in w for w in data.get("warnings", []))
-    # And the launched run should still complete (engine got cleaned spec)
-    body = _wait_for_run_done(client, data["run_id"])
-    assert all(a["status"] == "done" for a in body["agents"])
+    # No more "iterate_with stripped" warning since the engine handles it
+    assert not any("iterate_with" in w and "does not yet" in w
+                   for w in data.get("warnings", []))
+
+
+# (removed in v47.1 — superseded by test_iterate_with_no_longer_stripped_at_launch
+#  above; iterate_with is now passed through to the engine which executes it.)

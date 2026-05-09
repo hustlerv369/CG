@@ -875,6 +875,15 @@ class AgentRunState:
     # `label` stays the slug used in depends_on + {{label}} substitution.
     # Empty string = no badge rendered (backward compat for older presets).
     role: str = ""
+    # v47.1 W0.2: refinement loop with another agent. When set, after
+    # this step's first run, the engine optionally re-runs the partner
+    # then this step again, up to max_rounds, with the partner's prompt
+    # appended with this step's previous output as critique. Stops
+    # early if the regex in accept_when matches this step's output.
+    iterate_with: str = ""
+    max_rounds: int = 1
+    accept_when: str = ""
+    rounds_completed: int = 0  # bumped each time this step finishes a round
 
     def to_public(self) -> dict[str, Any]:
         return {
@@ -890,6 +899,9 @@ class AgentRunState:
             "stderr_chars": sum(len(l) for l in self.stderr_lines),
             "streaming": self.streaming,
             "role": self.role,
+            "iterate_with": self.iterate_with,
+            "max_rounds": self.max_rounds,
+            "rounds_completed": self.rounds_completed,
         }
 
 
@@ -900,6 +912,10 @@ class RunState:
     created: float
     spec: list[dict[str, Any]]
     agents: dict[str, AgentRunState] = field(default_factory=dict)
+    # v47.1 W0.2: track watcher thread refs so test teardown (and any
+    # caller) can join them and ensure no _persist_index() fires after
+    # the run is supposed to be quiescent.
+    _watcher_threads: list[Any] = field(default_factory=list, repr=False)
     finished: bool = False
     # Per-run env overrides (e.g. API keys forwarded from browser
     # Settings) and ${VAR} substitutions for prompts.
@@ -992,6 +1008,28 @@ class RunManager:
                     )
                 if dep == label:
                     raise HTTPException(400, f"agent {label!r} cannot depend on itself")
+        # v47.1 W0.2 — validate iterate_with references
+        for i, item in enumerate(spec):
+            label = item.get("label") or f"agent-{i+1}"
+            iter_with = item.get("iterate_with")
+            if not iter_with:
+                continue
+            if iter_with == label:
+                raise HTTPException(
+                    400,
+                    f"agent {label!r} iterate_with cannot reference itself",
+                )
+            if iter_with not in labels_in_spec:
+                raise HTTPException(
+                    400,
+                    f"agent {label!r} iterate_with {iter_with!r} which is not in this run",
+                )
+            mr = item.get("max_rounds", 1)
+            if not isinstance(mr, int) or not (1 <= mr <= 10):
+                raise HTTPException(
+                    400,
+                    f"agent {label!r} max_rounds must be int in [1, 10]",
+                )
         # Build state
         for i, item in enumerate(spec):
             label = item.get("label") or f"agent-{i+1}"
@@ -1002,6 +1040,9 @@ class RunManager:
                 status="queued" if not item.get("depends_on") else "waiting",
                 streaming=bool(item.get("streaming", False)),
                 role=str(item.get("role", "") or ""),
+                iterate_with=str(item.get("iterate_with", "") or ""),
+                max_rounds=int(item.get("max_rounds", 1) or 1),
+                accept_when=str(item.get("accept_when", "") or ""),
             )
         self.runs[run_id] = run
         self._persist_index()
@@ -1023,7 +1064,9 @@ class RunManager:
             )
             t.start()
         # Watcher thread to mark run finished
-        threading.Thread(target=self._watch_run, args=(run,), daemon=True).start()
+        _wt = threading.Thread(target=self._watch_run, args=(run,), daemon=True)
+        run._watcher_threads.append(_wt)
+        _wt.start()
         return run
 
     def _wait_for_deps(self, run: RunState, agent_state: AgentRunState) -> bool:
@@ -1108,7 +1151,175 @@ class RunManager:
             return
         # Substitute {{depLabel}} placeholders with the dependency's output
         rendered = self._substitute_prompt(run, prompt, agent_state.depends_on)
+
+        # v47.1 W0.2 — if we'll iterate, mask the transient "done" status
+        # _run_one will set after round 1 completes. Polling external
+        # observers (UI, tests) must see status flip from "running"
+        # (round 1) → "running" (round 2) → … → "done" (final round)
+        # without ever seeing "done" mid-flight. We do this by lifting
+        # the status flip out of round 1 and setting it ourselves only
+        # after the iteration loop finishes.
+        will_iterate = (agent_state.iterate_with
+                         and agent_state.max_rounds > 1
+                         and agent_state.iterate_with in run.agents)
+
         self._run_one(run, label, agent, rendered)
+        agent_state.rounds_completed = max(1, agent_state.rounds_completed)
+
+        if (will_iterate and agent_state.status == "done"):
+            # Mask round-1 done — flip back to running before polling
+            # can sample. Mirror for the partner whose round-1 thread
+            # has already returned.
+            partner = run.agents.get(agent_state.iterate_with)
+            agent_state.status = "running"
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "running", "round": 1,
+                "iterating": True}})
+            if partner is not None:
+                partner.status = "running"
+                self._emit(run.id, partner.label, {
+                    "event": "status", "data": {
+                        "label": partner.label, "status": "running",
+                        "round": 1, "iterating": True}})
+            try:
+                self._run_iteration_loop(run, label, agent, prompt)
+            finally:
+                # Loop body already sets status=done at the end of the
+                # last round via _run_one. If it broke early on a
+                # subprocess failure, status is failed/cancelled. If
+                # status is still "running" for any reason, force done
+                # so the run can settle.
+                if agent_state.status == "running":
+                    agent_state.status = "done"
+                    self._emit(run.id, label, {"event": "status", "data": {
+                        "label": label, "status": "done"}})
+                if partner is not None and partner.status == "running":
+                    partner.status = "done"
+                    self._emit(run.id, partner.label, {
+                        "event": "status", "data": {
+                            "label": partner.label, "status": "done"}})
+
+    def _run_iteration_loop(self, run: "RunState", label: str,
+                              agent: str, prompt: str) -> None:
+        """Repeatedly re-run (partner, self) for max_rounds rounds.
+
+        Round 1 already happened in _run_one_with_deps. This method
+        adds rounds 2..N. Each round:
+          1. Inject this step's last output into partner's prompt as
+             a "## CRITIQUE FROM <self>" appended block.
+          2. Re-run partner.
+          3. Re-run self (its prompt re-resolves {{partner}} from disk).
+          4. Stop early if accept_when matches self's output OR if any
+             subprocess fails.
+
+        Notes:
+          - The partner's normal thread already finished in round 1.
+            We bypass it here and call _run_one directly.
+          - We reset rolling state (log_lines, on-disk output) for each
+            round so the UI shows a fresh stream per round, but we keep
+            the AgentRunState instance (so status/exit_code/etc. flip
+            in place — UI sees "designer running again, round 2").
+          - This method assumes round 1 has already left both agents in
+            status=done.
+        """
+        import re as _re
+        agent_state = run.agents[label]
+        partner_label = agent_state.iterate_with
+        partner_state = run.agents.get(partner_label)
+        if partner_state is None:
+            return
+        # Find the partner's spec entry for its prompt + agent kind
+        partner_step = next(
+            (s for s in run.spec if s.get("label") == partner_label), None)
+        self_step = next(
+            (s for s in run.spec if s.get("label") == label), None)
+        if not partner_step or not self_step:
+            return
+
+        max_rounds = max(1, int(agent_state.max_rounds or 1))
+        accept_re = None
+        if agent_state.accept_when:
+            try:
+                accept_re = _re.compile(agent_state.accept_when, _re.MULTILINE)
+            except Exception:
+                accept_re = None
+
+        run_dir = RUNS_DIR / run.id
+        for round_n in range(2, max_rounds + 1):
+            # Check accept signal in current self-output before next round
+            if accept_re is not None:
+                cur_out = "\n".join(agent_state.log_lines)
+                if accept_re.search(cur_out):
+                    self._emit(run.id, label, {"event": "log", "data": {
+                        "label": label,
+                        "line": f"[iterate] accepted in round "
+                                f"{round_n - 1} (matched accept_when)",
+                    }})
+                    break
+
+            # ---- Round N: re-run partner with critique injected --------
+            critique = "\n".join(agent_state.log_lines)
+            partner_prompt_base = partner_step.get("prompt", "")
+            partner_prompt = (
+                partner_prompt_base
+                + f"\n\n## CRITIQUE FROM {label.upper()} (round {round_n - 1})\n"
+                + critique.strip()
+            )
+            # Reset partner's rolling state for the new round
+            partner_state.log_lines = []
+            partner_state.stderr_lines = []
+            partner_state.exit_code = None
+            partner_state.started = None
+            partner_state.finished = None
+            partner_state.status = "running"
+            self._emit(run.id, partner_label, {"event": "status", "data": {
+                "label": partner_label, "status": "running",
+                "round": round_n,
+            }})
+            # Delete the prior on-disk output so {{partner}} substitution
+            # in self's prompt picks up the new round's content.
+            try:
+                old = run_dir / f"{partner_label}.out.md"
+                if old.exists():
+                    old.unlink()
+            except Exception:
+                pass
+            partner_rendered = self._substitute_prompt(
+                run, partner_prompt, partner_state.depends_on)
+            self._run_one(run, partner_label,
+                            partner_state.agent, partner_rendered)
+            partner_state.rounds_completed = round_n
+            if partner_state.status != "done":
+                self._emit(run.id, label, {"event": "log", "data": {
+                    "label": label,
+                    "line": f"[iterate] partner {partner_label!r} did not "
+                            f"finish round {round_n}; stopping loop",
+                }})
+                break
+
+            # ---- Round N: re-run self with new partner output ----------
+            agent_state.log_lines = []
+            agent_state.stderr_lines = []
+            agent_state.exit_code = None
+            agent_state.started = None
+            agent_state.finished = None
+            agent_state.status = "running"
+            self._emit(run.id, label, {"event": "status", "data": {
+                "label": label, "status": "running",
+                "round": round_n,
+            }})
+            try:
+                old = run_dir / f"{label}.out.md"
+                if old.exists():
+                    old.unlink()
+            except Exception:
+                pass
+            self_rendered = self._substitute_prompt(
+                run, prompt, agent_state.depends_on)
+            self._run_one(run, label, agent, self_rendered)
+            agent_state.rounds_completed = round_n
+            if agent_state.status != "done":
+                break
 
     def _run_one(self, run: RunState, label: str, agent: str, prompt: str) -> None:
         cfg = AGENT_KINDS[agent]
@@ -2205,15 +2416,20 @@ class RunManager:
                 )
                 t.start()
         # Watcher to flip run.finished again when the replayed batch settles
-        threading.Thread(target=self._watch_run, args=(run,), daemon=True).start()
+        _wt = threading.Thread(target=self._watch_run, args=(run,), daemon=True)
+        run._watcher_threads.append(_wt)
+        _wt.start()
 
         preserved = [lbl for lbl in run.agents.keys()
                      if lbl not in downstream_set]
         return {"replayed": downstream, "preserved": preserved}
 
     def _watch_run(self, run: RunState) -> None:
+        # Module-overridable poll interval. Production uses 500ms;
+        # tests can lower it (e.g. 50ms) to make teardown joins fast.
+        poll_s = float(globals().get("WATCH_RUN_POLL_S", 0.5))
         while True:
-            time.sleep(0.5)
+            time.sleep(poll_s)
             if all(a.status in {"done", "failed", "cancelled"}
                     for a in run.agents.values()):
                 break
@@ -4442,6 +4658,10 @@ def create_app() -> FastAPI:
         yield
 
     app = FastAPI(title="CG Dashboard", version="0.1", lifespan=lifespan)
+    # Expose manager on app.state so tests can cancel pending runs in
+    # teardown without leaking `_watch_run` threads (which would later
+    # write to the next test's monkeypatched INDEX_PATH).
+    app.state.cg_manager = manager
 
     @app.get("/", include_in_schema=False)
     async def root() -> Any:
@@ -5085,32 +5305,28 @@ def create_app() -> FastAPI:
                 secrets[env_name] = v.strip()
 
         title = body.get("title") or result.spec.get("title") or "Conductor run"
-        # iterate_with / max_rounds are not yet honored by the engine
-        # (planned for v47.1). Strip them here so the existing
-        # start_run validator doesn't reject them. Preserved in
-        # docs/PRESETS for now.
-        cleaned_spec: list[dict[str, Any]] = []
-        for step in result.spec["spec"]:
-            s2 = {k: v for k, v in step.items()
-                  if k not in ("iterate_with", "max_rounds")}
-            cleaned_spec.append(s2)
+        # v47.1: iterate_with / max_rounds are now honored by the engine.
+        # Pass them through verbatim — start_run validates them.
 
         run = manager.start_run(
             title=title,
-            spec=cleaned_spec,
+            spec=result.spec["spec"],
             secrets=secrets,
             variables=merged_vars,
         )
+        warnings: list[str] = []
+        if any(s.get("iterate_with") for s in result.spec["spec"]):
+            warnings.append(
+                "Conductor scheduled refinement loops (iterate_with). "
+                "Rounds 2+ will fire after round 1 completes."
+            )
         return {
             "phase": 3,
             "run_id": run.id,
             "title": run.title,
-            "agents": [s.get("label") for s in cleaned_spec],
+            "agents": [s.get("label") for s in result.spec["spec"]],
             "auto_mode": bool(body.get("auto_mode")),
-            "warnings": [
-                "iterate_with / max_rounds present in spec but engine "
-                "does not yet execute refinement loops (v47.1 planned)"
-            ] if any("iterate_with" in s for s in result.spec["spec"]) else [],
+            "warnings": warnings,
         }
 
     @app.get("/api/conductor/roles")
