@@ -1745,3 +1745,119 @@ def test_mojibake_recovery_recovers_in_realistic_doc():
     has_recovered = any(c in fixed for c in ('⚡', '🧠', '🚀'))
     assert has_recovered, f'No emoji recovered. Got: {fixed!r}'
     assert len(fixed) < len(doc)
+
+
+# ===========================================================================
+# v49 W4 — Replay-from-here
+# ===========================================================================
+
+def _wait_for_run_done(client, run_id, timeout_s=8.0):
+    """Poll /api/runs/<id> until all agents reach a terminal status."""
+    import time
+    deadline = time.time() + timeout_s
+    while time.time() < deadline:
+        body = client.get(f"/api/runs/{run_id}").json()
+        if all(a["status"] in {"done", "failed", "cancelled"}
+               for a in body["agents"]):
+            return body
+        time.sleep(0.1)
+    return body  # timed out — return whatever we have
+
+
+def _three_step_chain(label_prefix="step"):
+    return [
+        {"agent": "claude", "label": f"{label_prefix}1", "prompt": "first"},
+        {"agent": "claude", "label": f"{label_prefix}2",
+         "prompt": "build on {{step1}}", "depends_on": [f"{label_prefix}1"]},
+        {"agent": "claude", "label": f"{label_prefix}3",
+         "prompt": "finalize {{step2}}", "depends_on": [f"{label_prefix}2"]},
+    ]
+
+
+def test_replay_from_resets_step_and_downstream(client):
+    r = client.post("/api/runs", json={
+        "title": "replay test", "spec": _three_step_chain()})
+    assert r.status_code == 200
+    run_id = r.json()["id"]
+    body = _wait_for_run_done(client, run_id)
+    assert all(a["status"] == "done" for a in body["agents"])
+    initial_started = {a["label"]: a["started"] for a in body["agents"]}
+
+    # Replay from step2 — step2 + step3 should re-run, step1 stays
+    r = client.post(f"/api/runs/{run_id}/replay-from/step2")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["replayed"] == ["step2", "step3"]
+    assert data["preserved"] == ["step1"]
+
+    body2 = _wait_for_run_done(client, run_id)
+    by_label = {a["label"]: a for a in body2["agents"]}
+    # step1 has the SAME started time (preserved)
+    assert by_label["step1"]["started"] == initial_started["step1"]
+    # step2 + step3 have NEW started times (re-ran)
+    assert by_label["step2"]["started"] != initial_started["step2"]
+    assert by_label["step3"]["started"] != initial_started["step3"]
+    # All terminal-done after replay completes
+    assert all(a["status"] == "done" for a in body2["agents"])
+
+
+def test_replay_from_first_step_replays_everything(client):
+    r = client.post("/api/runs", json={
+        "title": "replay all", "spec": _three_step_chain()})
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id)
+    r = client.post(f"/api/runs/{run_id}/replay-from/step1")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["replayed"] == ["step1", "step2", "step3"]
+    assert data["preserved"] == []
+
+
+def test_replay_from_leaf_step_only_replays_that(client):
+    r = client.post("/api/runs", json={
+        "title": "replay leaf", "spec": _three_step_chain()})
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id)
+    r = client.post(f"/api/runs/{run_id}/replay-from/step3")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["replayed"] == ["step3"]
+    assert set(data["preserved"]) == {"step1", "step2"}
+
+
+def test_replay_from_404_unknown_run(client):
+    r = client.post("/api/runs/nope/replay-from/step1")
+    assert r.status_code == 404
+
+
+def test_replay_from_404_unknown_label(client):
+    r = client.post("/api/runs", json={
+        "title": "replay bad lbl", "spec": _three_step_chain()})
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id)
+    r = client.post(f"/api/runs/{run_id}/replay-from/ghost")
+    assert r.status_code == 404
+
+
+def test_replay_with_diamond_graph(client):
+    """A → B, A → C, (B,C) → D. Replay from A should replay everything."""
+    r = client.post("/api/runs", json={
+        "title": "diamond", "spec": [
+            {"agent": "claude", "label": "A", "prompt": "root"},
+            {"agent": "claude", "label": "B", "prompt": "from {{A}}",
+             "depends_on": ["A"]},
+            {"agent": "claude", "label": "C", "prompt": "from {{A}}",
+             "depends_on": ["A"]},
+            {"agent": "claude", "label": "D", "prompt": "merge {{B}} {{C}}",
+             "depends_on": ["B", "C"]},
+        ]})
+    run_id = r.json()["id"]
+    _wait_for_run_done(client, run_id)
+    r = client.post(f"/api/runs/{run_id}/replay-from/A")
+    assert r.json()["replayed"] == ["A", "B", "C", "D"]
+    # Replay only from B should leave A + C alone, replay B + D
+    _wait_for_run_done(client, run_id)
+    r = client.post(f"/api/runs/{run_id}/replay-from/B")
+    data = r.json()
+    assert data["replayed"] == ["B", "D"]
+    assert set(data["preserved"]) == {"A", "C"}

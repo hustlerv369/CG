@@ -2105,6 +2105,112 @@ class RunManager:
                     "label": agent_state.label, "status": "cancelled"}})
         return True
 
+    def _compute_downstream(self, run: "RunState", label: str) -> list[str]:
+        """BFS over the depends_on graph (reversed) to find every agent
+        whose result would be invalidated by re-running ``label``.
+
+        Returns the labels in spec order (preserving the original execution
+        order), with ``label`` itself first.
+        """
+        if label not in run.agents:
+            return []
+        # Map: dependent → set of labels it depends on
+        deps_of: dict[str, set[str]] = {
+            lbl: set(ag.depends_on) for lbl, ag in run.agents.items()
+        }
+        affected: set[str] = {label}
+        changed = True
+        while changed:
+            changed = False
+            for lbl, deps in deps_of.items():
+                if lbl in affected:
+                    continue
+                if deps & affected:
+                    affected.add(lbl)
+                    changed = True
+        # Preserve spec order
+        ordered: list[str] = []
+        seen: set[str] = set()
+        for item in run.spec:
+            lbl = item.get("label")
+            if lbl in affected and lbl not in seen:
+                ordered.append(lbl)
+                seen.add(lbl)
+        return ordered
+
+    def replay_from(self, run_id: str, label: str) -> dict[str, Any]:
+        """Reset ``label`` + every downstream dependent and re-spawn them.
+
+        Prior steps' outputs are preserved on disk so ``{{label}}``
+        substitution still works for upstream references. Kills any
+        subprocess that's currently running for the affected steps.
+
+        Returns ``{"replayed": [labels...], "preserved": [labels...]}``.
+        """
+        run = self.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, f"run {run_id!r} not found")
+        if label not in run.agents:
+            raise HTTPException(404,
+                f"agent {label!r} not in run {run_id!r}")
+
+        downstream = self._compute_downstream(run, label)
+        if not downstream:
+            return {"replayed": [], "preserved": list(run.agents.keys())}
+
+        run_dir = RUNS_DIR / run.id
+        for lbl in downstream:
+            ag = run.agents[lbl]
+            # Kill running subprocess if any
+            if ag.process is not None:
+                try:
+                    ag.process.kill()
+                except Exception:
+                    pass
+                ag.process = None
+            # Reset state — keep depends_on; flip status back per spec
+            initial_status = "queued" if not ag.depends_on else "waiting"
+            ag.status = initial_status
+            ag.exit_code = None
+            ag.started = None
+            ag.finished = None
+            ag.log_lines = []
+            ag.stderr_lines = []
+            # Delete prior on-disk output for this step (so {{lbl}}
+            # references see the fresh content the re-run produces, not
+            # the stale failed output).
+            try:
+                out_path = run_dir / f"{lbl}.out.md"
+                if out_path.exists():
+                    out_path.unlink()
+            except Exception:
+                pass
+            self._emit(run.id, lbl, {"event": "status", "data": {
+                "label": lbl, "status": initial_status,
+                "replayed": True}})
+
+        # Mark run as not-finished so /api/runs/<id> reflects in-flight state
+        run.finished = False
+        self._persist_index()
+
+        # Re-spawn threads for the affected labels using the original spec
+        downstream_set = set(downstream)
+        for item in run.spec:
+            lbl = item.get("label")
+            if lbl in downstream_set:
+                t = threading.Thread(
+                    target=self._run_one_with_deps,
+                    args=(run, lbl, item.get("agent"), item.get("prompt", "")),
+                    daemon=True,
+                )
+                t.start()
+        # Watcher to flip run.finished again when the replayed batch settles
+        threading.Thread(target=self._watch_run, args=(run,), daemon=True).start()
+
+        preserved = [lbl for lbl in run.agents.keys()
+                     if lbl not in downstream_set]
+        return {"replayed": downstream, "preserved": preserved}
+
     def _watch_run(self, run: RunState) -> None:
         while True:
             time.sleep(0.5)
@@ -4420,6 +4526,20 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "run not found")
         manager.cancel_run(run_id)
         return {"id": run_id, "cancelled": True}
+
+    # v49 W4 — Replay-from-here. Re-runs `<label>` + every downstream
+    # dependent. Prior steps' outputs stay on disk so upstream {{label}}
+    # references still resolve. Kills any in-flight subprocess for the
+    # affected steps before re-spawning.
+    @app.post("/api/runs/{run_id}/replay-from/{label}")
+    async def replay_from_ep(run_id: str, label: str) -> Any:
+        if run_id not in manager.runs:
+            raise HTTPException(404, "run not found")
+        return {
+            "id": run_id,
+            "from": label,
+            **manager.replay_from(run_id, label),
+        }
 
     @app.get("/api/runs/{run_id}/output/{label}")
     async def get_output(run_id: str, label: str) -> Any:

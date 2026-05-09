@@ -2280,6 +2280,10 @@ function buildPanel(agent) {
         <span class="agent-tokens" data-tokens hidden>0 tok</span>
       </div>
       <div class="agent-panel-actions" aria-label="Panel actions">
+        <button class="ap-action ap-replay" title="Replay this step + downstream"
+                aria-label="Replay from here">
+          <span class="ap-icon">🔁</span>
+        </button>
         <button class="ap-action ap-copy" title="Copy log (C)" aria-label="Copy log">
           <span class="ap-icon">⧉</span>
         </button>
@@ -2305,6 +2309,35 @@ function buildPanel(agent) {
   };
   root.querySelector(".ap-fullscreen").onclick = () => {
     root.classList.toggle("agent-panel--fullscreen");
+  };
+  // v49 W4 — Replay this step and every downstream dependent
+  root.querySelector(".ap-replay").onclick = async () => {
+    const runId = (state && state.run && state.run.id) || state?.runId;
+    if (!runId) {
+      if (typeof toast === "function") toast("No active run to replay", 2500);
+      return;
+    }
+    const ok = confirm(
+      `Replay "${agent.label}"?\n\n` +
+      `This will kill any running subprocess for this step and ` +
+      `every step that depends on it, then re-run them all. ` +
+      `Earlier steps stay intact.`
+    );
+    if (!ok) return;
+    try {
+      const r = await fetch(
+        `/api/runs/${encodeURIComponent(runId)}/replay-from/${encodeURIComponent(agent.label)}`,
+        { method: "POST" }
+      );
+      if (!r.ok) throw new Error(`${r.status} ${await r.text()}`);
+      const data = await r.json();
+      if (typeof toast === "function") {
+        toast(`🔁 Replaying ${data.replayed.length} step(s): ${data.replayed.join(", ")}`,
+              4000);
+      }
+    } catch (e) {
+      if (typeof toast === "function") toast(`Replay failed: ${e}`, 5000);
+    }
   };
 
   // Sticky-bottom auto-scroll: pin to bottom while user hasn't scrolled up.
