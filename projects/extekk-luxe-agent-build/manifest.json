@@ -1,0 +1,17 @@
+{
+  "name": "EXTEKK",
+  "short_name": "EXTEKK",
+  "description": "The security bot that rebuilds nuked Discord servers and kills scammers before they post.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#7CFFB2",
+  "background_color": "#080808",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

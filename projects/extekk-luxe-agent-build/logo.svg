@@ -1,0 +1,9 @@
+<svg viewBox='0 0 320 80' xmlns='http://www.w3.org/2000/svg'>
+  <defs>
+    <style>
+      .wordmark { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Geist", "Roboto", "Oxygen", "Ubuntu", "Cantarell", "Fira Sans", "Droid Sans", "Helvetica Neue", sans-serif; font-size: 56px; fill: white; font-weight: 500; letter-spacing: -0.02em; }
+    </style>
+  </defs>
+  <path d='M24 10 L10 24 L10 56 L24 70 L40 70 L54 56 L54 24 L40 10 Z M32 20 L44 20 L44 30 L32 42 Z' fill='#7CFFB2'/>
+  <text x='70' y='60' class='wordmark'>EXTEKK</text>
+</svg>

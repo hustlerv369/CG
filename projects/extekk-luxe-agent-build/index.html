@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>EXTEKK — Your server, restored in one second.</title>
+<meta name="description" content="EXTEKK is the security bot that rebuilds nuked Discord servers and kills scammers before they post. Insurance for communities that can't afford to disappear." />
+<meta name="theme-color" content="#7CFFB2" />
+<meta property="og:title" content="EXTEKK — Your server, restored in one second." />
+<meta property="og:description" content="The security bot that rebuilds nuked Discord servers and kills scammers before they post." />
+<meta property="og:type" content="website" />
+<meta property="og:image" content="/logo.svg" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="EXTEKK — Your server, restored in one second." />
+<meta name="twitter:description" content="The security bot that rebuilds nuked Discord servers and kills scammers before they post." />
+<link rel="manifest" href="/manifest.json" />
+<link rel="icon" type="image/svg+xml" href="/logo.svg" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<!-- ============= NAV ============= -->
+<header class="nav" id="nav">
+  <div class="nav__inner">
+    <a class="nav__logo" href="#top" aria-label="EXTEKK home">
+      <svg viewBox="0 0 320 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M24 10 L10 24 L10 56 L24 70 L40 70 L54 56 L54 24 L40 10 Z M32 20 L44 20 L44 30 L32 42 Z" fill="#7CFFB2"/>
+        <text x="70" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Geist', 'Roboto', sans-serif" font-size="56" fill="white" font-weight="500" letter-spacing="-0.02em">EXTEKK</text>
+      </svg>
+    </a>
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#features">Features</a>
+      <a href="#demo">Demo</a>
+      <a href="#pricing">Pricing</a>
+      <a href="#faq">FAQ</a>
+    </nav>
+    <a class="btn btn--primary nav__cta" href="#cta-final">Add to Discord</a>
+    <button class="nav__burger" aria-label="Toggle menu" aria-expanded="false" id="navBurger">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+  <div class="nav__mobile" id="navMobile">
+    <a href="#features">Features</a>
+    <a href="#demo">Demo</a>
+    <a href="#pricing">Pricing</a>
+    <a href="#faq">FAQ</a>
+    <a class="btn btn--primary" href="#cta-final">Add to Discord</a>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============= HERO ============= -->
+<section class="hero">
+  <div class="hero__grid" aria-hidden="true"></div>
+  <div class="container hero__inner">
+    <div class="hero__copy">
+      <div class="pill">
+        <span class="pill__dot" aria-hidden="true"></span>
+        <span class="micro">ALL SYSTEMS NOMINAL · 99.99% UPTIME</span>
+      </div>
+      <h1 class="hero__headline">Your server, restored<br/>in one second.</h1>
+      <p class="hero__sub">EXTEKK is the security bot that rebuilds nuked Discord servers and kills scammers before they post.</p>
+      <div class="hero__ctas">
+        <a class="btn btn--primary" href="#cta-final">Add to Discord</a>
+        <a class="btn btn--secondary" href="#watch">Watch demo</a>
+      </div>
+    </div>
+
+    <div class="hero__terminal" aria-hidden="false">
+      <div class="terminal">
+        <div class="terminal__chrome">
+          <span class="dot dot--r"></span>
+          <span class="dot dot--y"></span>
+          <span class="dot dot--g"></span>
+          <span class="terminal__title mono">extekk@ops</span>
+        </div>
+        <pre class="terminal__body mono" id="heroTerminal" aria-label="Live terminal feed"></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= WATCH-IT-WORK ============= -->
+<section class="watch" id="watch">
+  <div class="container">
+    <p class="micro section__eyebrow">Watch it work</p>
+    <h2 class="section__title">Attack to rebuilt in 1.04 seconds.</h2>
+    <div class="watch__row">
+      <article class="watch__card watch__card--alert" data-step="0">
+        <span class="watch__pill watch__pill--alert mono" data-target="0.000">0.000s</span>
+        <h3 class="watch__title watch__title--alert">ATTACK DETECTED</h3>
+        <p class="watch__desc">Sentinel flags a compromised admin token at 03:47:12 UTC. Channels start dropping.</p>
+      </article>
+      <svg class="watch__arrow" viewBox="0 0 60 24" aria-hidden="true"><path d="M0 12 L52 12 M46 6 L52 12 L46 18" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/></svg>
+      <article class="watch__card" data-step="1">
+        <span class="watch__pill mono" data-target="0.420">0.000s</span>
+        <h3 class="watch__title watch__title--accent">RESTORE INITIATED</h3>
+        <p class="watch__desc">Snapshot loaded. Roles, categories, vouches, permissions queued for re-sync in parallel.</p>
+      </article>
+      <svg class="watch__arrow" viewBox="0 0 60 24" aria-hidden="true"><path d="M0 12 L52 12 M46 6 L52 12 L46 18" fill="none" stroke="rgba(255,255,255,0.2)" stroke-width="1.5"/></svg>
+      <article class="watch__card" data-step="2">
+        <span class="watch__pill mono" data-target="1.000">0.000s</span>
+        <h3 class="watch__title watch__title--accent">SERVER REBUILT</h3>
+        <p class="watch__desc">1.04 seconds later your community is whole. Attacker logged, blacklisted, gone.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============= LIVE NUMBERS ============= -->
+<section class="numbers">
+  <div class="container">
+    <div class="numbers__grid">
+      <div class="numbers__card">
+        <div class="numbers__value" data-count="23400" data-suffix="+">0</div>
+        <p class="micro">Servers protected</p>
+        <p class="numbers__hint">communities online</p>
+      </div>
+      <div class="numbers__card">
+        <div class="numbers__value" data-count="11600" data-suffix="+">0</div>
+        <p class="micro">Premium operators</p>
+        <p class="numbers__hint">trusted by</p>
+      </div>
+      <div class="numbers__card">
+        <div class="numbers__value" data-count="1.2" data-suffix="M+" data-decimals="1">0</div>
+        <p class="micro">Threats neutralized</p>
+        <p class="numbers__hint">scams auto-killed</p>
+      </div>
+      <div class="numbers__card">
+        <div class="numbers__value" data-count="0.97" data-suffix="s" data-decimals="2">0</div>
+        <p class="micro">Mean restore time</p>
+        <p class="numbers__hint">attack to rebuilt</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= FEATURE GRID ============= -->
+<section class="features" id="features">
+  <div class="container">
+    <p class="micro section__eyebrow">The arsenal</p>
+    <h2 class="section__title">Six capabilities. One bot.</h2>
+    <div class="features__grid">
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        </div>
+        <h3 class="feature__title">OAUTH RESTORE</h3>
+        <p class="feature__desc">Members and structure rebuilt from cryptographic snapshots.</p>
+      </article>
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7S1 12 1 12z"/><circle cx="12" cy="12" r="3"/></svg>
+        </div>
+        <h3 class="feature__title">SENTINEL AI</h3>
+        <p class="feature__desc">24/7 patrol bot deletes phishing and mutes spammers in real time.</p>
+      </article>
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </div>
+        <h3 class="feature__title">AESTHETIC BUILDER</h3>
+        <p class="feature__desc">One command spins up a production-grade server in seconds.</p>
+      </article>
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 8a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v2a2 2 0 1 0 0 4v2a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-2a2 2 0 1 0 0-4V8z"/><line x1="13" y1="6" x2="13" y2="18" stroke-dasharray="2 2"/></svg>
+        </div>
+        <h3 class="feature__title">PRO TICKETS</h3>
+        <p class="feature__desc">Encrypted support threads with audit trails and role gating.</p>
+      </article>
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="9" r="6"/><polyline points="9 13 7 22 12 19 17 22 15 13"/></svg>
+        </div>
+        <h3 class="feature__title">VOUCH VAULT</h3>
+        <p class="feature__desc">Universal reputation ledger that travels with your community.</p>
+      </article>
+      <article class="feature">
+        <div class="feature__icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        </div>
+        <h3 class="feature__title">GLOBAL BLACKLIST</h3>
+        <p class="feature__desc">Cross-server scammer graph updated every 30 seconds.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============= TERMINAL DEMO ============= -->
+<section class="demo" id="demo">
+  <div class="container">
+    <p class="micro section__eyebrow">Real software</p>
+    <h2 class="section__title">Three commands. Three outcomes.</h2>
+    <div class="demo__grid">
+      <div class="terminal">
+        <div class="terminal__chrome">
+          <span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span>
+          <span class="terminal__title mono">restore</span>
+        </div>
+<pre class="terminal__body mono"><span class="prompt">$</span> extekk restore --snapshot=latest
+<span class="ts">[03:47:13]</span> <span class="ok">&#10003;</span> snapshot loaded · 247 channels, 84 roles
+<span class="ts">[03:47:13]</span> <span class="ok">&#10003;</span> permissions reconciled
+<span class="ts">[03:47:14]</span> <span class="ok">&#10003;</span> vouches resynced · 11,832 entries
+<span class="ts">[03:47:14]</span> <span class="ok">&#10003;</span> rebuild complete · 1.04s</pre>
+      </div>
+
+      <div class="terminal">
+        <div class="terminal__chrome">
+          <span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span>
+          <span class="terminal__title mono">lockdown</span>
+        </div>
+<pre class="terminal__body mono"><span class="prompt">$</span> extekk lockdown --tier=critical
+<span class="ts">[03:47:15]</span> <span class="bolt">&#9889;</span> tier 3 lockdown engaged
+<span class="ts">[03:47:15]</span> <span class="ok">&#10003;</span> 312 members · read-only
+<span class="ts">[03:47:15]</span> <span class="ok">&#10003;</span> 4 admin tokens revoked · 0.31s</pre>
+      </div>
+
+      <div class="terminal">
+        <div class="terminal__chrome">
+          <span class="dot dot--r"></span><span class="dot dot--y"></span><span class="dot dot--g"></span>
+          <span class="terminal__title mono">vouches</span>
+        </div>
+<pre class="terminal__body mono"><span class="prompt">$</span> extekk vouches sync --global
+<span class="ts">[03:47:16]</span> <span class="arrow">&rarr;</span> pulling vault · 1.2M records
+<span class="ts">[03:47:17]</span> <span class="ok">&#10003;</span> 8,431 reputations updated
+<span class="ts">[03:47:17]</span> <span class="ok">&#10003;</span> 12 scammers flagged · added to blacklist
+<span class="ts">[03:47:17]</span> <span class="ok">&#10003;</span> sync complete · 0.88s</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============= TESTIMONIALS ============= -->
+<section class="testimonials">
+  <div class="container">
+    <p class="micro section__eyebrow">Operators</p>
+    <h2 class="section__title">Trusted under fire.</h2>
+    <div class="testimonials__grid">
+      <figure class="testimonial">
+        <blockquote>"Got nuked at 4am by a rogue admin. EXTEKK had us back online before I finished my coffee. Insurance you didn't know you needed."</blockquote>
+        <figcaption>
+          <strong>@volt</strong>
+          <span>Server owner · 12K members</span>
+          <span class="verified"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8 L7 12 L13 4" fill="none" stroke="currentColor" stroke-width="2"/></svg> verified purchase</span>
+        </figcaption>
+      </figure>
+      <figure class="testimonial">
+        <blockquote>"Sentinel caught a phishing campaign my mods missed for two weeks. Banned 47 alts in an hour. Worth every cent of the trial."</blockquote>
+        <figcaption>
+          <strong>@nyx_mod</strong>
+          <span>Head moderator · 38K community</span>
+          <span class="verified"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8 L7 12 L13 4" fill="none" stroke="currentColor" stroke-width="2"/></svg> verified purchase</span>
+        </figcaption>
+      </figure>
+      <figure class="testimonial">
+        <blockquote>"Ran my whole launch off EXTEKK's builder. Roles, channels, vouches — production-ready in one command. No competitor comes close."</blockquote>
+        <figcaption>
+          <strong>@kairo</strong>
+          <span>Project founder · 6K trading hub</span>
+          <span class="verified"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8 L7 12 L13 4" fill="none" stroke="currentColor" stroke-width="2"/></svg> verified purchase</span>
+        </figcaption>
+      </figure>
+    </div>
+  </div>
+</section>
+
+<!-- ============= PRICING ============= -->
+<section class="pricing" id="pricing">
+  <div class="container">
+    <p class="micro section__eyebrow">Pricing</p>
+    <h2 class="section__title">Two tiers. One decision.</h2>
+    <div class="pricing__grid">
+      <article class="plan">
+        <header class="plan__head">
+          <h3 class="plan__name">FREE</h3>
+          <p class="plan__sub">Everything you need to survive.</p>
+        </header>
+        <ul class="plan__features">
+          <li><span class="check">&#10003;</span> OAuth Member &amp; Server Restore</li>
+          <li><span class="check">&#10003;</span> Aesthetic Server Builder</li>
+          <li><span class="check">&#10003;</span> Vouch Vault (community)</li>
+          <li><span class="check">&#10003;</span> Global Scammer Blacklist (read)</li>
+          <li class="muted"><span class="cross">&#10007;</span> Sentinel AI auto-mod</li>
+          <li class="muted"><span class="cross">&#10007;</span> Pro Ticket System</li>
+        </ul>
+        <a class="btn btn--secondary btn--block" href="#cta-final">Add for free</a>
+      </article>
+
+      <article class="plan plan--pro">
+        <span class="plan__tag">MOST POPULAR</span>
+        <header class="plan__head">
+          <h3 class="plan__name">PRO</h3>
+          <p class="plan__price"><span class="plan__amount">$19</span><span class="plan__period">/mo</span> · 14-day free trial</p>
+          <p class="plan__sub">Everything. No exceptions.</p>
+        </header>
+        <ul class="plan__features">
+          <li><span class="check">&#10003;</span> Sentinel AI · 24/7 patrol</li>
+          <li><span class="check">&#10003;</span> Pro Ticket System · encrypted</li>
+          <li><span class="check">&#10003;</span> Sub-second restore SLA</li>
+          <li><span class="check">&#10003;</span> Cross-server reputation sync</li>
+          <li><span class="check">&#10003;</span> Priority blacklist push</li>
+          <li><span class="check">&#10003;</span> 24/7 white-glove support</li>
+        </ul>
+        <a class="btn btn--accent btn--block" href="#cta-final">Start free trial</a>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============= FAQ ============= -->
+<section class="faq" id="faq">
+  <div class="container container--narrow">
+    <p class="micro section__eyebrow">FAQ</p>
+    <h2 class="section__title">Sharp answers.</h2>
+    <div class="faq__list">
+      <details open>
+        <summary>Is it safe to give the bot OAuth?</summary>
+        <p>Yes. EXTEKK uses scoped Discord OAuth with read-mostly permissions. Snapshots are encrypted at rest and we never touch DMs.</p>
+      </details>
+      <details>
+        <summary>How fast is restore?</summary>
+        <p>Median 0.97 seconds for servers under 50K members. The clock starts the instant Sentinel detects the breach.</p>
+      </details>
+      <details>
+        <summary>What if Discord deletes my server?</summary>
+        <p>Snapshots live on our infrastructure, not Discord's. Spin up a new server, point EXTEKK at it, and your community is back.</p>
+      </details>
+      <details>
+        <summary>Do you log my server data?</summary>
+        <p>We store encrypted structural snapshots only. No message content, no DMs, no personal data. Audit log is open-source.</p>
+      </details>
+      <details>
+        <summary>Can I cancel anytime?</summary>
+        <p>One click in the dashboard. No retention call, no email gauntlet. Free tier stays active forever.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+<!-- ============= FINAL CTA ============= -->
+<section class="cta-final" id="cta-final">
+  <div class="container">
+    <h2 class="cta-final__title">Stop hoping.<br/>Start insuring.</h2>
+    <a class="btn btn--primary btn--xl" href="https://discord.com/oauth2/authorize">Add EXTEKK to Discord</a>
+  </div>
+</section>
+
+</main>
+
+<!-- ============= FOOTER ============= -->
+<footer class="footer">
+  <div class="container footer__inner">
+    <div class="footer__brand">
+      <svg class="footer__logo" viewBox="0 0 320 80" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+        <path d="M24 10 L10 24 L10 56 L24 70 L40 70 L54 56 L54 24 L40 10 Z M32 20 L44 20 L44 30 L32 42 Z" fill="#7CFFB2"/>
+        <text x="70" y="60" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Geist', 'Roboto', sans-serif" font-size="56" fill="white" font-weight="500" letter-spacing="-0.02em">EXTEKK</text>
+      </svg>
+      <p class="footer__tag micro">Built by operators, for operators.</p>
+    </div>
+    <div class="footer__cols">
+      <div>
+        <p class="micro footer__col-title">Product</p>
+        <a href="#features">Features</a>
+        <a href="#pricing">Pricing</a>
+        <a href="#demo">Demo</a>
+        <a href="#">Docs</a>
+        <a href="#">Status</a>
+      </div>
+      <div>
+        <p class="micro footer__col-title">Social</p>
+        <a href="#">Discord</a>
+        <a href="#">GitHub</a>
+      </div>
+      <div>
+        <p class="micro footer__col-title">Legal</p>
+        <a href="#">Terms</a>
+        <a href="#">Privacy</a>
+        <a href="#">Refund Policy</a>
+      </div>
+    </div>
+  </div>
+  <div class="container footer__bottom">
+    <p class="micro">© 2026 EXTEKK Systems</p>
+  </div>
+</footer>
+
+<script src="/script.js"></script>
+</body>
+</html>
