@@ -2206,3 +2206,61 @@ def test_iterate_with_no_longer_stripped_at_launch(client):
 
 # (removed in v47.1 — superseded by test_iterate_with_no_longer_stripped_at_launch
 #  above; iterate_with is now passed through to the engine which executes it.)
+
+
+# ===========================================================================
+# Optional HTTP Basic auth (off by default, opt-in via env var)
+# ===========================================================================
+
+def test_auth_disabled_by_default(client):
+    """No CG_AUTH_PASSWORD_HASH env var → no challenge."""
+    r = client.get("/api/agents")
+    assert r.status_code == 200
+
+
+def test_auth_enabled_blocks_anonymous(client, monkeypatch):
+    import auth as _auth
+    monkeypatch.setenv("CG_AUTH_USER", "hustler")
+    monkeypatch.setenv("CG_AUTH_PASSWORD_HASH", _auth.hash_password("secretpw"))
+    r = client.get("/api/agents")
+    assert r.status_code == 401
+    assert "WWW-Authenticate" in r.headers
+    assert r.headers["WWW-Authenticate"].lower().startswith("basic")
+
+
+def test_auth_enabled_accepts_correct_credentials(client, monkeypatch):
+    import auth as _auth
+    monkeypatch.setenv("CG_AUTH_USER", "hustler")
+    monkeypatch.setenv("CG_AUTH_PASSWORD_HASH",
+                       _auth.hash_password("rightpw", iterations=1000))
+    r = client.get("/api/agents", auth=("hustler", "rightpw"))
+    assert r.status_code == 200
+
+
+def test_auth_enabled_rejects_wrong_password(client, monkeypatch):
+    import auth as _auth
+    monkeypatch.setenv("CG_AUTH_USER", "hustler")
+    monkeypatch.setenv("CG_AUTH_PASSWORD_HASH",
+                       _auth.hash_password("rightpw", iterations=1000))
+    r = client.get("/api/agents", auth=("hustler", "wrong"))
+    assert r.status_code == 401
+
+
+def test_auth_enabled_rejects_wrong_user(client, monkeypatch):
+    import auth as _auth
+    monkeypatch.setenv("CG_AUTH_USER", "hustler")
+    monkeypatch.setenv("CG_AUTH_PASSWORD_HASH",
+                       _auth.hash_password("rightpw", iterations=1000))
+    r = client.get("/api/agents", auth=("ghost", "rightpw"))
+    assert r.status_code == 401
+
+
+def test_auth_static_assets_pass_through(client, monkeypatch):
+    """Static asset paths bypass the auth check (so the 401 challenge
+    page can still load CSS/JS in the browser)."""
+    import auth as _auth
+    monkeypatch.setenv("CG_AUTH_PASSWORD_HASH",
+                       _auth.hash_password("pw", iterations=1000))
+    # /favicon.ico is bypassed even without credentials
+    r = client.get("/favicon.ico")
+    assert r.status_code in {200, 404}  # 404 if not present, but NOT 401

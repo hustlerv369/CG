@@ -49,7 +49,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sse_starlette.sse import EventSourceResponse
 
@@ -61,6 +61,9 @@ from conductor import (
     validate_workflow_spec,
     CANONICAL_ROLES,
 )
+# Optional HTTP Basic auth — opt-in via CG_AUTH_PASSWORD_HASH env var.
+# When unset (the local-dev default), middleware is a no-op.
+import auth as _cg_auth
 
 
 # ---------------------------------------------------------------------------
@@ -4662,6 +4665,38 @@ def create_app() -> FastAPI:
     # teardown without leaking `_watch_run` threads (which would later
     # write to the next test's monkeypatched INDEX_PATH).
     app.state.cg_manager = manager
+
+    # ---- Optional HTTP Basic auth ----------------------------------------
+    # Disabled by default (env var unset) so local dev keeps working
+    # without a password. Enable for any public deployment.
+    @app.middleware("http")
+    async def _basic_auth_middleware(request: Request, call_next):  # type: ignore[no-untyped-def]
+        if not _cg_auth.auth_enabled():
+            return await call_next(request)
+        # Allow unauthenticated GETs of static assets only — the index
+        # page itself is gated, since it boots the SPA that hits /api.
+        # (Browsers automatically resend the Authorization header for
+        # subdocument requests once the user has typed the password
+        # into the Basic-Auth dialog.)
+        path = request.url.path
+        if path.startswith("/static/") or path == "/favicon.ico":
+            return await call_next(request)
+        hdr = request.headers.get("authorization", "")
+        if hdr.lower().startswith("basic "):
+            try:
+                import base64 as _b64
+                decoded = _b64.b64decode(hdr[6:]).decode("utf-8")
+                if ":" in decoded:
+                    user, pw = decoded.split(":", 1)
+                    if _cg_auth.check_credentials(user, pw):
+                        return await call_next(request)
+            except Exception:
+                pass
+        return Response(
+            status_code=401,
+            content="Authentication required.",
+            headers={"WWW-Authenticate": 'Basic realm="ClaudeGravity"'},
+        )
 
     @app.get("/", include_in_schema=False)
     async def root() -> Any:

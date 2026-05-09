@@ -368,6 +368,49 @@ def cmd_cluster(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_auth_init(args: argparse.Namespace) -> int:
+    """Generate a strong password + hash, print env config, drop a
+    plain-text credentials file on the user's Desktop.
+
+    Run once before exposing the dashboard publicly. Printing the
+    password is one-shot — after this command exits the only place
+    that knows the cleartext is the Desktop file.
+    """
+    import auth as _auth
+
+    user = (args.user or "admin").strip() or "admin"
+    if args.password:
+        password = args.password
+    else:
+        password = _auth.generate_password()
+
+    iterations = max(50_000, int(args.iterations or _auth.PBKDF2_ITERATIONS))
+    hashed = _auth.hash_password(password, iterations=iterations)
+
+    target_url = args.url
+    creds_path = _auth.write_credentials_file(
+        user, password, hashed,
+        target_url=target_url,
+        dest=Path(args.dest) if args.dest else None,
+    )
+
+    print("[cg auth] generated credentials")
+    print(f"  User:        {user}")
+    print(f"  Password:    {password}")
+    print(f"  Hash:        {hashed}")
+    print(f"  Saved to:    {creds_path}")
+    if target_url:
+        print(f"  Target URL:  {target_url}")
+    print()
+    print("Set these env vars on the host running the dashboard:")
+    print(f"  CG_AUTH_USER={user}")
+    print(f"  CG_AUTH_PASSWORD_HASH={hashed}")
+    print()
+    print("Then restart the dashboard. The browser will prompt for")
+    print("Basic auth on the next request.")
+    return 0
+
+
 def cmd_conductor(args: argparse.Namespace) -> int:
     """Run the Conductor end-to-end from CLI: idea → brief → workflow → live run.
 
@@ -641,6 +684,25 @@ def build_parser() -> argparse.ArgumentParser:
     # doctor
     doc = sub.add_parser("doctor", help="smoke-check both AI worker CLIs")
     doc.set_defaults(func=cmd_doctor)
+
+    # auth — manage HTTP Basic auth for the dashboard (one-time setup
+    # before any public deployment)
+    auth_p = sub.add_parser("auth",
+                              help="manage dashboard authentication (HTTP Basic)")
+    auth_sub = auth_p.add_subparsers(dest="auth_cmd", required=True)
+    auth_init = auth_sub.add_parser("init",
+                                       help="generate password + hash, save credentials to Desktop")
+    auth_init.add_argument("--user", default="admin",
+                              help="username (default: admin)")
+    auth_init.add_argument("--password", default=None,
+                              help="explicit password (default: auto-generated 28-char)")
+    auth_init.add_argument("--url", default=None,
+                              help="optional target URL written into the credentials file")
+    auth_init.add_argument("--dest", default=None,
+                              help="override credentials file path (default: Desktop)")
+    auth_init.add_argument("--iterations", type=int, default=None,
+                              help="PBKDF2 iteration count (default: 600000)")
+    auth_init.set_defaults(func=cmd_auth_init)
 
     # conductor — power-user CLI shortcut for the dashboard's 🎩 button
     cd = sub.add_parser("conductor",
