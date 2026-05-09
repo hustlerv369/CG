@@ -368,6 +368,168 @@ def cmd_cluster(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_conductor(args: argparse.Namespace) -> int:
+    """Run the Conductor end-to-end from CLI: idea → brief → workflow → live run.
+
+    This invokes the same /api/conductor/* HTTP endpoints the dashboard
+    uses, against a locally running dashboard (auto-launched if not
+    already up). Streams the brief, the JSON spec, and the launched
+    run's per-agent log lines to the terminal.
+
+    Useful for:
+      - quick demo runs without opening a browser
+      - scripting "idea → finished project" pipelines
+      - verifying Conductor on a fresh machine after deploy
+    """
+    import urllib.request
+    import urllib.error
+    import http.client
+    import time as _t
+
+    base_url = f"http://{args.host}:{args.port}"
+    idea = (args.idea or "").strip()
+    if not idea:
+        print("error: idea must be a non-empty string", file=sys.stderr)
+        return 2
+
+    def _http_post(path: str, body: dict) -> dict:
+        data = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            base_url + path, data=data,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def _http_get(path: str) -> dict:
+        with urllib.request.urlopen(base_url + path, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def _wait_for_run(run_id: str, label: str, timeout_s: int = 240) -> str:
+        """Poll until the named agent reaches a terminal status.
+        Returns the on-disk output of that agent (or empty)."""
+        deadline = _t.time() + timeout_s
+        last_status = ""
+        while _t.time() < deadline:
+            try:
+                body = _http_get(f"/api/runs/{run_id}")
+            except Exception:
+                _t.sleep(1.0)
+                continue
+            agents = {a["label"]: a for a in body["agents"]}
+            ag = agents.get(label)
+            if ag and ag["status"] != last_status:
+                print(f"  [{label}] {ag['status']}")
+                last_status = ag["status"]
+            if ag and ag["status"] in {"done", "failed", "cancelled"}:
+                try:
+                    out = _http_get(f"/api/runs/{run_id}/output/{label}")
+                    return out if isinstance(out, str) else json.dumps(out)
+                except Exception:
+                    return ""
+            _t.sleep(0.5)
+        print(f"  [{label}] timeout after {timeout_s}s", file=sys.stderr)
+        return ""
+
+    # Sanity-check the dashboard is up
+    try:
+        _http_get("/api/conductor/roles")
+    except Exception as e:
+        print(f"error: dashboard not reachable at {base_url} ({e})",
+              file=sys.stderr)
+        print(f"hint: run `cg dashboard --port {args.port}` in another terminal first.",
+              file=sys.stderr)
+        return 1
+
+    print(f"[conductor] phase 1 — Visionary writes the Project Brief")
+    p1 = _http_post("/api/conductor/brief", {"idea": idea})
+    brief_text = _wait_for_run(p1["run_id"], "visionary",
+                                  timeout_s=args.brief_timeout)
+    if not brief_text.strip():
+        print("error: Phase 1 produced no output", file=sys.stderr)
+        return 1
+    if args.show_brief:
+        print("\n--- BRIEF ---")
+        print(brief_text)
+        print("--- end ---\n")
+
+    if not args.auto:
+        try:
+            answer = input("Approve brief and continue to compose? [Y/n]: ")
+        except EOFError:
+            answer = "y"
+        if answer.strip().lower() not in {"", "y", "yes"}:
+            print("cancelled by user")
+            return 0
+
+    print("[conductor] phase 2 — Compose workflow JSON")
+    p2 = _http_post("/api/conductor/compose", {"brief": brief_text})
+    compose_text = _wait_for_run(p2["run_id"], "composer",
+                                    timeout_s=args.compose_timeout)
+    if not compose_text.strip():
+        print("error: Phase 2 produced no output", file=sys.stderr)
+        return 1
+    if args.show_spec:
+        print("\n--- SPEC ---")
+        print(compose_text)
+        print("--- end ---\n")
+
+    if not args.auto:
+        try:
+            answer = input("Approve workflow and launch? [Y/n]: ")
+        except EOFError:
+            answer = "y"
+        if answer.strip().lower() not in {"", "y", "yes"}:
+            print("cancelled by user")
+            return 0
+
+    print("[conductor] phase 3 — Validate + launch")
+    try:
+        p3 = _http_post("/api/conductor/launch", {
+            "compose_run_id": p2["run_id"],
+            "auto_mode": bool(args.auto),
+        })
+    except urllib.error.HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace")
+        print(f"error: launch returned {e.code}\n{body}", file=sys.stderr)
+        return 1
+
+    new_run_id = p3["run_id"]
+    print(f"[conductor] launched team: {p3['agents']}")
+    print(f"[conductor] run_id: {new_run_id}")
+    print(f"[conductor] watch live: {base_url}/  (or open dashboard)")
+    if p3.get("warnings"):
+        for w in p3["warnings"]:
+            print(f"[conductor] note: {w}")
+
+    if args.wait:
+        print("[conductor] waiting for run to finish…")
+        deadline = _t.time() + args.run_timeout
+        seen_done: set[str] = set()
+        while _t.time() < deadline:
+            try:
+                body = _http_get(f"/api/runs/{new_run_id}")
+            except Exception:
+                _t.sleep(1.0)
+                continue
+            for a in body["agents"]:
+                if (a["status"] in {"done", "failed", "cancelled"}
+                        and a["label"] not in seen_done):
+                    print(f"  [{a['label']}] {a['status']}")
+                    seen_done.add(a["label"])
+            if all(a["status"] in {"done", "failed", "cancelled"}
+                    for a in body["agents"]):
+                ok = all(a["status"] == "done" for a in body["agents"])
+                print(f"[conductor] {'completed ✓' if ok else 'finished with failures ✗'}")
+                return 0 if ok else 1
+            _t.sleep(1.0)
+        print(f"[conductor] run still running after {args.run_timeout}s",
+              file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_dashboard(args: argparse.Namespace) -> int:
     """Launch the web dashboard (FastAPI app) on a local port.
 
@@ -479,6 +641,30 @@ def build_parser() -> argparse.ArgumentParser:
     # doctor
     doc = sub.add_parser("doctor", help="smoke-check both AI worker CLIs")
     doc.set_defaults(func=cmd_doctor)
+
+    # conductor — power-user CLI shortcut for the dashboard's 🎩 button
+    cd = sub.add_parser("conductor",
+                          help="run the Conductor end-to-end from CLI: idea → brief → workflow → run")
+    cd.add_argument("idea", help="1-3 sentence idea (the same text you'd type in the dashboard)")
+    cd.add_argument("--host", default="127.0.0.1",
+                     help="dashboard host (default 127.0.0.1)")
+    cd.add_argument("--port", type=int, default=8765,
+                     help="dashboard port (default 8765)")
+    cd.add_argument("--auto", action="store_true",
+                     help="skip approval gates between phases (matches Auto mode in the UI)")
+    cd.add_argument("--show-brief", action="store_true",
+                     help="print the Phase 1 brief Markdown when ready")
+    cd.add_argument("--show-spec", action="store_true",
+                     help="print the Phase 2 JSON spec when ready")
+    cd.add_argument("--no-wait", dest="wait", action="store_false", default=True,
+                     help="exit after launching Phase 3 instead of waiting for completion")
+    cd.add_argument("--brief-timeout", type=int, default=180,
+                     help="Phase 1 timeout in seconds (default 180)")
+    cd.add_argument("--compose-timeout", type=int, default=180,
+                     help="Phase 2 timeout in seconds (default 180)")
+    cd.add_argument("--run-timeout", type=int, default=2700,
+                     help="Phase 3 wait-for-completion timeout in seconds (default 45 min)")
+    cd.set_defaults(func=cmd_conductor)
 
     return p
 

@@ -117,6 +117,31 @@ Safety rails (planned for v51, currently rely on v45 watchdogs):
 | Frontend panel | `src/dashboard_static/index.html::#conductor-panel` |
 | Tests | `tests/test_conductor.py` (23 cases) |
 
+## CLI shortcut
+
+```bash
+cg conductor "An app for solo freelancers to track time and auto-invoice. Mobile-first PWA. Stripe."
+```
+
+Runs the same 3-phase flow without a browser. Streams brief + spec +
+per-agent run status to the terminal. Flags:
+
+| Flag | Effect |
+|---|---|
+| `--auto` | Skip approval gates (matches the UI's Auto mode toggle) |
+| `--show-brief` | Print Phase 1 Markdown when ready |
+| `--show-spec` | Print Phase 2 JSON spec when ready |
+| `--no-wait` | Exit after launching Phase 3 (don't block on completion) |
+| `--brief-timeout N` | Phase 1 timeout in seconds (default 180) |
+| `--compose-timeout N` | Phase 2 timeout in seconds (default 180) |
+| `--run-timeout N` | Phase 3 wait timeout (default 2700 = 45 min) |
+| `--port 8765` | Dashboard port (default 8765) |
+| `--host 127.0.0.1` | Dashboard host (default 127.0.0.1) |
+
+The CLI requires a running dashboard (`cg dashboard` in another
+terminal). It's a thin wrapper over the same `/api/conductor/*` HTTP
+endpoints the browser hits.
+
 ## Refinement loops (W0.2 — shipped v47.1)
 
 Conductor can pair two agents in a multi-round critique loop. Add to a
