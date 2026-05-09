@@ -1861,3 +1861,224 @@ def test_replay_with_diamond_graph(client):
     data = r.json()
     assert data["replayed"] == ["B", "D"]
     assert set(data["preserved"]) == {"A", "C"}
+
+
+# ===========================================================================
+# v48 W0 — Conductor integration tests (endpoints + flow chaining)
+#
+# Validator unit tests live in test_conductor.py. These tests exercise
+# the full /api/conductor/* HTTP surface using the mocked Claude/Gemini
+# subprocesses from the conftest fixture (no real Pro/Google quota).
+# ===========================================================================
+
+def test_conductor_roles_endpoint(client):
+    r = client.get("/api/conductor/roles")
+    assert r.status_code == 200
+    data = r.json()
+    role_names = {x["name"] for x in data["roles"]}
+    # Spot-check the canonical roles are exposed
+    assert {"Visionary", "Architect", "Engineer", "Critic", "Operator"} <= role_names
+    # Every role must have icon + default_model + purpose
+    for r_obj in data["roles"]:
+        assert r_obj.get("icon")
+        assert r_obj.get("default_model")
+        assert r_obj.get("purpose")
+    # Allowed models list contains at least the OAuth Claude+Gemini set
+    am = data["allowed_models"]
+    assert "claude-opus-4-7" in am
+    assert "claude-sonnet-4-6" in am
+    assert "gemini-pro" in am
+
+
+def test_conductor_brief_starts_run(client):
+    r = client.post("/api/conductor/brief", json={"idea": "a SaaS for cat photos"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["phase"] == 1
+    assert data["label"] == "visionary"
+    assert isinstance(data["run_id"], str) and len(data["run_id"]) > 0
+    # Verify the run actually exists and finishes (with mocked agent)
+    body = _wait_for_run_done(client, data["run_id"])
+    assert body["agents"][0]["status"] == "done"
+    assert body["agents"][0]["label"] == "visionary"
+
+
+def test_conductor_brief_rejects_empty_idea(client):
+    r = client.post("/api/conductor/brief", json={"idea": ""})
+    assert r.status_code == 400
+
+
+def test_conductor_compose_starts_run(client):
+    brief_md = (
+        "## Persona\nAlex.\n\n"
+        "## Use-cases\n1. fast.\n\n"
+        "## Scope (in / out)\n**In:** auth.\n**Out:** SSO.\n\n"
+        "## Milestones\n1. ship\n\n"
+        "## Recommended stack\nNext.js.\n\n"
+        "## Pricing direction\n$9/mo.\n\n"
+        "## Risks\n- churn.\n"
+    )
+    r = client.post("/api/conductor/compose", json={"brief": brief_md})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["phase"] == 2
+    assert data["label"] == "composer"
+    assert "claude-opus-4-7" in data["allowed_models"]
+
+
+def test_conductor_compose_rejects_empty_brief(client):
+    r = client.post("/api/conductor/compose", json={"brief": ""})
+    assert r.status_code == 400
+
+
+def test_conductor_launch_404_on_unknown_compose_run(client):
+    r = client.post("/api/conductor/launch",
+                    json={"compose_run_id": "ghost-run-id"})
+    assert r.status_code == 404
+
+
+def test_conductor_launch_400_on_missing_field(client):
+    r = client.post("/api/conductor/launch", json={})
+    assert r.status_code == 400
+
+
+def test_conductor_launch_validates_and_runs(client, monkeypatch, tmp_path):
+    """End-to-end: write a valid JSON spec to a fake compose run's
+    on-disk output, call launch, expect a real run to spawn + complete."""
+    # Step 1 — start a "compose" run that we'll seed by hand
+    brief_md = "## Persona\nA.\n## Use-cases\n1. x.\n"
+    r = client.post("/api/conductor/compose", json={"brief": brief_md})
+    compose_run_id = r.json()["run_id"]
+    _wait_for_run_done(client, compose_run_id)
+
+    # Step 2 — overwrite the on-disk output with a hand-crafted spec.
+    # The mock CLAUDE-MOCK output won't parse as a valid spec, so we
+    # simulate "Opus emitted a clean fenced JSON" by writing one.
+    valid_spec = {
+        "id": "conductor-demo",
+        "title": "Demo flow",
+        "description": "Two-step demo team.",
+        "variables": {"TASK": "demo"},
+        "spec": [
+            {
+                "agent": "claude-sonnet-4-6",
+                "label": "step1",
+                "role": "Architect",
+                "prompt": "Plan ${TASK}.",
+            },
+            {
+                "agent": "claude-sonnet-4-6",
+                "label": "step2",
+                "role": "Engineer",
+                "prompt": "Implement {{step1}}.",
+                "depends_on": ["step1"],
+            },
+        ],
+    }
+    composer_path = dash.RUNS_DIR / compose_run_id / "composer.out.md"
+    composer_path.parent.mkdir(parents=True, exist_ok=True)
+    composer_path.write_text(
+        f"Here is the spec:\n```json\n{json.dumps(valid_spec, indent=2)}\n```\n",
+        encoding="utf-8",
+    )
+
+    # Step 3 — launch
+    r = client.post("/api/conductor/launch",
+                    json={"compose_run_id": compose_run_id})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["phase"] == 3
+    assert data["agents"] == ["step1", "step2"]
+    new_run_id = data["run_id"]
+    assert new_run_id != compose_run_id
+
+    # Step 4 — verify the launched run actually executes
+    body = _wait_for_run_done(client, new_run_id)
+    assert all(a["status"] == "done" for a in body["agents"])
+
+
+def test_conductor_launch_422_on_unparseable_output(client):
+    """Compose run with no JSON block in output should 422 cleanly."""
+    brief_md = "## Persona\nA.\n## Use-cases\n1. x.\n"
+    r = client.post("/api/conductor/compose", json={"brief": brief_md})
+    compose_run_id = r.json()["run_id"]
+    _wait_for_run_done(client, compose_run_id)
+
+    composer_path = dash.RUNS_DIR / compose_run_id / "composer.out.md"
+    composer_path.parent.mkdir(parents=True, exist_ok=True)
+    composer_path.write_text(
+        "Sorry, I don't think I can do that.\n",
+        encoding="utf-8",
+    )
+
+    r = client.post("/api/conductor/launch",
+                    json={"compose_run_id": compose_run_id})
+    assert r.status_code == 422
+
+
+def test_conductor_launch_422_on_invalid_spec(client):
+    """JSON parses but fails validator (unknown model)."""
+    brief_md = "## Persona\nA.\n## Use-cases\n1. x.\n"
+    r = client.post("/api/conductor/compose", json={"brief": brief_md})
+    compose_run_id = r.json()["run_id"]
+    _wait_for_run_done(client, compose_run_id)
+
+    bad_spec = {
+        "id": "x", "title": "x", "description": "x", "spec": [
+            {"agent": "gpt-7-fictional", "label": "a", "prompt": "go",
+             "role": "Engineer"}
+        ],
+    }
+    composer_path = dash.RUNS_DIR / compose_run_id / "composer.out.md"
+    composer_path.parent.mkdir(parents=True, exist_ok=True)
+    composer_path.write_text(
+        f"```json\n{json.dumps(bad_spec)}\n```\n",
+        encoding="utf-8",
+    )
+
+    r = client.post("/api/conductor/launch",
+                    json={"compose_run_id": compose_run_id})
+    assert r.status_code == 422
+    body = r.json()
+    # FastAPI wraps detail; either string or dict acceptable
+    detail = body.get("detail", "")
+    detail_str = json.dumps(detail) if isinstance(detail, dict) else str(detail)
+    assert "gpt-7-fictional" in detail_str or "validation" in detail_str.lower()
+
+
+def test_conductor_launch_strips_iterate_with_for_engine(client):
+    """Validator accepts iterate_with; engine doesn't yet handle it.
+    Launch must strip it before start_run, otherwise start_run rejects."""
+    brief_md = "## Persona\nA.\n## Use-cases\n1. x.\n"
+    r = client.post("/api/conductor/compose", json={"brief": brief_md})
+    compose_run_id = r.json()["run_id"]
+    _wait_for_run_done(client, compose_run_id)
+
+    spec_with_iter = {
+        "id": "iter", "title": "iter", "description": "loop demo",
+        "variables": {},
+        "spec": [
+            {"agent": "claude-sonnet-4-6", "label": "designer",
+             "role": "Designer", "prompt": "design"},
+            {"agent": "claude-sonnet-4-6", "label": "critic",
+             "role": "Critic", "prompt": "critique {{designer}}",
+             "depends_on": ["designer"],
+             "iterate_with": "designer", "max_rounds": 2},
+        ],
+    }
+    composer_path = dash.RUNS_DIR / compose_run_id / "composer.out.md"
+    composer_path.parent.mkdir(parents=True, exist_ok=True)
+    composer_path.write_text(
+        f"```json\n{json.dumps(spec_with_iter)}\n```\n",
+        encoding="utf-8",
+    )
+
+    r = client.post("/api/conductor/launch",
+                    json={"compose_run_id": compose_run_id})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    # The launch endpoint should warn that iterate_with was present
+    assert any("iterate_with" in w for w in data.get("warnings", []))
+    # And the launched run should still complete (engine got cleaned spec)
+    body = _wait_for_run_done(client, data["run_id"])
+    assert all(a["status"] == "done" for a in body["agents"])
