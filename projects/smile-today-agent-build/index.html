@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ff5a4e">
+<meta name="description" content="A small kindness, every hour.">
+<title>Smile Today</title>
+<link rel="manifest" href="manifest.json">
+<link rel="icon" type="image/svg+xml" href="logo.svg">
+<link rel="apple-touch-icon" href="logo.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:wght@300;400;500&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main class="app">
+  <header class="hero">
+    <img src="logo.svg" alt="Smile Today" class="logo" width="80" height="80">
+    <h1 class="headline">Smile at someone today.</h1>
+    <p class="subheadline">A small kindness, every hour.</p>
+  </header>
+
+  <section class="permission" id="permission" hidden>
+    <p class="pre-prompt">Smile Today would like to send you a small reminder every hour. No tracking, no accounts — just a nudge.</p>
+    <button class="btn btn-secondary" id="permission-cta" type="button">Allow gentle reminders</button>
+  </section>
+
+  <section class="timer" aria-label="Next smile timer">
+    <p class="timer-label">Next smile in</p>
+    <div class="countdown" id="countdown" aria-live="polite">
+      <span id="cd-h">00</span><span class="colon">:</span><span id="cd-m">00</span><span class="colon">:</span><span id="cd-s">00</span>
+    </div>
+  </section>
+
+  <section class="quote" id="quote-box">
+    <blockquote id="quote-text"></blockquote>
+  </section>
+
+  <section class="action">
+    <button class="btn btn-primary" id="smile-btn" type="button">
+      <span class="ripple" id="ripple" aria-hidden="true"></span>
+      <span class="btn-label" id="smile-label">I smiled</span>
+    </button>
+    <p class="streak" id="streak-text" aria-live="polite"></p>
+  </section>
+
+  <section class="settings" aria-label="Settings">
+    <h2 class="settings-title">Settings</h2>
+    <label class="setting">
+      <span>Remind me every <strong id="interval-display">60 min</strong></span>
+      <input type="range" id="interval-slider" min="15" max="240" step="5" value="60" aria-label="Reminder interval in minutes">
+    </label>
+    <label class="setting setting-toggle">
+      <span>Quiet until morning</span>
+      <input type="checkbox" id="quiet-toggle">
+      <span class="switch" aria-hidden="true"></span>
+    </label>
+    <label class="setting setting-toggle">
+      <span>Soft chime</span>
+      <input type="checkbox" id="sound-toggle">
+      <span class="switch" aria-hidden="true"></span>
+    </label>
+    <button class="btn-link" id="forget-btn" type="button">Forget my streak</button>
+  </section>
+
+  <footer class="footer">
+    <p>Made quietly. No accounts, no tracking.</p>
+  </footer>
+</main>
+<script src="script.js"></script>
+</body>
+</html>

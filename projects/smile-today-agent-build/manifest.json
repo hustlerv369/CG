@@ -1,0 +1,15 @@
+{
+  "name": "Smile Today",
+  "short_name": "Smile",
+  "description": "A small kindness, every hour.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "theme_color": "#ff5a4e",
+  "background_color": "#ffffff",
+  "icons": [
+    { "src": "logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "logo.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "maskable" }
+  ]
+}
