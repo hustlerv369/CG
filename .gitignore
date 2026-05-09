@@ -57,3 +57,4 @@ browser_auth/
 schedules.json
 notifications.json
 custom_agents.json
+.skill-research/
