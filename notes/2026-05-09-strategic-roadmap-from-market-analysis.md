@@ -12,6 +12,134 @@ video demo. Not another UI tweak round.
 
 ---
 
+## 🎯 W0 — The Conductor (THE killer feature)
+
+> **Hustler's framing (2026-05-09):** *"Idea → Opus dostane to → vymyslí kompletní
+> workflow → vytvoří sestavení modelů na daný projekt → spustí se kompletní automatizace
+> → z nápadu se dostane k finálnímu produktu. FROM IDEA TO WORKING THING."*
+
+This is **THE differentiator**. Every other tool in the analysis (Gumloop, Lindy, Zapier,
+Make, n8n) ships **fixed templates** the user picks from. CG ships a **Conductor** —
+Opus 4.7 reads your idea and *designs the team itself*, picking models per role based on
+the same MODEL-LIMITS heuristics a human engineer would use.
+
+### Why it leapfrogs the analysis itself
+
+The analysis recommends "templated missions" (presets like `idea-to-app`). Conductor
+makes that a fallback, not the headline. The headline becomes:
+
+> *"You don't pick a template. You describe an idea. Conductor designs a custom team
+> for that specific idea, in 30 seconds, using the models you already pay for."*
+
+No competitor does this today. CrewAI / LangGraph make you *write* the agent definitions.
+Gumloop / Lindy give you *fixed templates*. Conductor closes the gap.
+
+### Feasibility — yes, ships in 1–2 sessions
+
+| Capability needed | Already in CG | Risk / mitigation |
+|---|---|---|
+| JSON workflow schema (`spec[]` with agent/label/prompt/depends_on) | ✅ used by 30 presets + `📋 paste` flow | none |
+| Strong structured-JSON generation | ✅ Opus 4.7 1M context, proven | invalid JSON → schema validator + 1 retry |
+| Model selection heuristics knowledge | ✅ `docs/MODEL-LIMITS.md` rule-of-thumb table | feed it as system prompt |
+| 30 example workflows as few-shot | ✅ `workflows/*.json` + builtin PRESETS | Opus pattern-matches directly |
+| Engine that runs an arbitrary JSON spec | ✅ same path as preset runner | none |
+| Model whitelist (no hallucinated names) | ⚠️ to add (5 lines) | hardcoded list in `dashboard.py` |
+| Cycle detection in `depends_on` | ⚠️ to add | topological sort + raise on cycle |
+| Soft cap on team size (≤12 agents) | ⚠️ to add | constraint in Conductor's prompt |
+
+**Honest limits:**
+- Opus may emit 8 KB JSON in 30–60 s. Fine.
+- Vague ideas ("make me something cool") yield generic plans → Conductor's prompt
+  forces a clarification round-trip if confidence is low.
+- Quality varies → **2-phase generation** below mitigates.
+
+### 2-phase generation (the trick that makes this reliable)
+
+Splitting **thinking** from **structuring** dramatically raises hit rate:
+
+**Phase 1 — Brief (creative, where Opus shines):**
+- Input: raw user idea + constraints (time/budget/stack)
+- Output: plain-Markdown **Project Brief** with predictable headings
+  (Persona / Use-cases / Scope / Milestones / Recommended stack / Suggested pricing)
+- Streams to UI in real time. User reads, edits, approves OR clicks 🔁 re-conduct.
+
+**Phase 2 — Workflow JSON (mechanical, where strict schema matters):**
+- Input: approved Brief + MODEL-LIMITS heuristics + JSON schema + 3 best example presets
+- Output: validated `spec[]` JSON with role-named labels (Visionary/Architect/Engineer/QA/...),
+  model assignments, prompts, dependencies
+- Schema validator catches errors → 1 auto-retry with the validation error fed back.
+
+### UX flow (replaces the current `idea-to-app` preset as the hero)
+
+```
+Quick Start hero:
+  ┌─────────────────────────────────────────────┐
+  │  💡 What do you want to build today?         │
+  │  ┌───────────────────────────────────────┐   │
+  │  │ [your idea — 1-3 sentences]           │   │
+  │  └───────────────────────────────────────┘   │
+  │                                              │
+  │  [✨ Conductor — design my team]             │
+  │  [📋 Use template instead]                   │
+  └─────────────────────────────────────────────┘
+
+Click Conductor →
+  ⏳ "Opus is designing your team..." (30-60 s)
+  ↓
+  📋 Project Brief (Markdown, editable inline):
+     Persona / Use-cases / Scope / Milestones / Stack / Pricing
+     [✅ Approve & generate workflow]  [✏️ Edit brief]  [🔁 Re-conduct]
+  ↓
+  🎯 "Here's the team Conductor built for you"
+     Timeline preview — 6 role-badged agents, model assignments,
+     dependencies visible, est. duration: ~18 min
+     [▶ Run]  [✏️ Edit team before run]  [🔁 Re-conduct]
+  ↓
+  🚀 Mission Mode timeline (W3 below) — live execution
+  ↓
+  📦 Save project
+```
+
+### Implementation outline (concrete enough to ship)
+
+1. **New endpoint `POST /api/conductor/brief`** — input `{idea, constraints?}` → streams
+   Phase 1 Brief Markdown. Calls `claude --print` with `claude-opus-4-7` and a system
+   prompt that loads `docs/MODEL-LIMITS.md` heuristics + a list of available models.
+2. **New endpoint `POST /api/conductor/compose`** — input `{approved_brief}` → streams
+   Phase 2 plan JSON. Same Opus, different system prompt that requires JSON Schema
+   compliance + injects 3 best preset examples as few-shot.
+3. **Schema validator** — JSON Schema for `{id, title, description, variables, spec[]}`,
+   per-step required fields, model whitelist, no cycles in `depends_on`, ≤12 agents.
+4. **Generated-workflow preview UI** — dashboard renders the proposed spec as a
+   read-only timeline (reusing W3 components). Edit button drops user into Visual
+   canvas with the spec preloaded.
+5. **Run path** — identical to existing preset flow. Conductor-generated specs are
+   "presets that didn't exist 60 s ago".
+
+### Why this also strengthens W1–W5
+
+- **W1 (Visionary intake):** Conductor's Phase 1 Brief **is** the Visionary intake.
+  W0 absorbs W1 — they're not parallel work.
+- **W2 (role rebranding):** Conductor's prompt instructs it to label agents with role
+  names. W2 must ship first or alongside, so Conductor has a vocabulary to use.
+- **W3 (Mission Mode timeline):** Conductor-generated workflows are dynamic, so the
+  static-canvas Visual mode is the wrong default for them. Mission Mode is the correct
+  default for any Conductor run.
+- **W4 (replay-from-here):** unchanged — works the same on Conductor-generated specs
+  because they're regular JSON specs.
+- **W5 (Mission Library tiles):** becomes the **fallback** path. Quick Start hero
+  shows "✨ Conductor" as primary, "📋 Use template" as secondary. Templates serve
+  users who don't know what they want and need to browse.
+
+### Demo line for the video
+
+> *"Watch this. I type one sentence. Opus designs a 6-agent team — Visionary, Architect,
+> Designer, Engineer, QA, Operator — picks Claude where reasoning matters, Gemini where
+> creativity matters, and runs the whole thing on my own subscriptions. No credits, no
+> templates, no node graph. From idea to working thing."*
+
+---
+
 ## Where CG already wins (reuse the messaging in the demo)
 
 The analysis prescribes these as differentiators. CG already has them — lean on this:
@@ -196,47 +324,78 @@ These came up in the analysis but don't move the demo needle and would dilute th
 
 ---
 
-## Implementation order (proposed v46-v48 sprint)
+## Implementation order (revised v46-v49 sprint, W0 added)
 
 ```
-v46 (1 session)  — W2 role rebranding + W5 mission library tiles
-                   → ships visible polish first, low risk
+v46 (0.5 sess.) — W2 role rebranding (must precede W0 — Conductor needs the vocabulary)
+                  → rename labels in flagship presets, add role badges, MODEL-LIMITS heuristics
 
-v47 (1 session)  — W1 Visionary intake + W4 replay-from-here
-                   → backend engine work, both touch run state machine
+v47 (1.5 sess.) — W0 Conductor: Phase 1 Brief endpoint + Phase 2 JSON compose endpoint
+                  + schema validator + retry loop + model whitelist + cycle check
+                  → THE killer feature; absorbs W1 (Visionary intake)
 
-v48 (1.5 sess.)  — W3 Mission Mode timeline UI
-                   → frontend rewrite of the run view, builds on v47 data shape
-                   → THIS is the video-demo screen
+v48 (1 sess.)   — W3 Mission Mode timeline UI (default view for Conductor runs)
+                  + W4 replay-from-here (same backend touch points)
+                  → THIS is the video-demo screen
+
+v49 (0.5 sess.) — W5 Mission Library tiles as the secondary "Use template instead" path
+                  → polish + onboarding clarity for users who don't know what they want
 ```
 
-End state by v48: idea-to-app demo flow becomes:
+**Sprint cadence:** ~3.5 sessions to video-ready. W0 is the longest single piece because
+it's net-new infrastructure (two new endpoints + schema + few-shot construction), but it
+reuses the existing run engine end-to-end.
 
-1. User clicks **🚀 App builder** tile → picks **Idea → full app**.
-2. Types 2 sentences. Clicks Run.
-3. Visionary returns a 1-page Project Brief in 30 s. Timeline pauses on
-   **⏸ Awaiting approval**. User reads, edits one bullet, clicks **✅ Approve**.
-4. Architect → Designer → Engineer → QA → Critic → Operator run as a live timeline.
-   No nodes visible. Replay-from-here on every step.
-5. Click **📦 Save project**. Files on disk. Done.
+### End-state demo flow (after v49)
 
-That's the video.
+1. Open dashboard → Quick Start hero **"💡 What do you want to build today?"**
+2. Type 2 sentences. Click **✨ Conductor — design my team**.
+3. ⏳ Opus designs the team (30–60 s). Brief streams in.
+4. Read 1-page Project Brief. Edit one bullet. Click **✅ Approve & generate workflow**.
+5. Phase 2 runs — generated JSON spec appears as a Mission Mode timeline preview:
+   "Visionary → Architect → Designer → Engineer → QA → Critic → Operator", model
+   assignments visible, est. duration ~18 min.
+6. Click **▶ Run**. Live timeline executes. No nodes visible. Replay-from-here on every step.
+7. Click **📦 Save project**. Files on disk. Done.
+
+That's the video. ~3 minutes of footage, end-to-end.
+
+### Fallback path (the "📋 Use template" branch)
+
+Users who can't articulate an idea still get a path:
+
+1. Quick Start → **📋 Use template instead** → Mission Library opens
+2. 5 category tiles → 30 curated presets (the existing library, just better organized)
+3. Same timeline + replay UX as Conductor runs
+
+Both paths converge on Mission Mode timeline. One UI to maintain.
 
 ---
 
 ## Open questions for Hustler before v46 kicks off
 
 1. **Role naming in CZ vs EN.** Visionary or Vizionář? Engineer or Engineer? Analysis
-   uses CZ in places. Suggest: keep EN role names (international audience) but CZ
-   tooltip/description. Confirm?
-2. **Visionary brief format — fixed Markdown sections or free-form?** Suggest fixed
-   sections (Persona / Use-cases / Scope / Milestones / Stack / Pricing) so downstream
-   agents can parse predictable headings.
-3. **Approval gates default ON or OFF for idea→ presets?** Suggest ON for `idea-to-app`
-   only; the content/pitch-deck variants run shorter and approval-fatigue would hurt.
-4. **Mission Library tile order.** Suggest "App builder" first (matches video focus).
-5. **Replay-from-here cancel semantics.** When user clicks replay on step N, do we kill
+   uses CZ in places. Suggest: keep EN role names (international audience, also matches
+   Conductor's natural output language) but CZ tooltip/description. Confirm?
+2. **Conductor failure-mode UX.** If Phase 2 schema validation fails twice, what do
+   we show? Suggest: surface the raw JSON in an editor with the validation error
+   inline, let user fix-and-run OR click 🔁 re-conduct.
+3. **Conductor Phase 1 streaming partial-trust.** If the user tries to click Approve
+   before Phase 1 finishes streaming, do we block or wait? Suggest block until streaming
+   ends + 1 s grace, then auto-enable Approve.
+4. **Brief format — fixed Markdown sections or free-form?** Suggest fixed sections so
+   the JSON-compose phase has predictable anchors. Schema: `## Persona / ## Use-cases /
+   ## Scope (in/out) / ## Milestones / ## Recommended stack / ## Pricing direction`.
+5. **Approval gate after Phase 2 (workflow preview) — always ON or skippable?** Suggest
+   ON by default; user can flip "Skip preview, run immediately" in Settings for
+   subsequent runs once they trust Conductor.
+6. **Mission Library tile order.** Suggest "App builder" first (matches video focus),
+   then Automation / Audit / Design / Browser ops.
+7. **Replay-from-here cancel semantics.** When user clicks replay on step N, do we kill
    running step N+1? Suggest yes (no point producing output that depends on stale data).
+8. **Conductor model — always Opus 4.7, or fall back to Sonnet on capacity errors?**
+   Suggest Opus only for design (Phase 1 + 2 both); if Opus is queued >2 min, surface
+   "Conductor is queued, retry?" rather than silently downgrading quality.
 
 ---
 
