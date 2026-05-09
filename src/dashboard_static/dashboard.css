@@ -4635,3 +4635,21 @@ body.status-bar-hidden .status-bar { display: none; }
   background: var(--accent-coral);
   color: var(--bg-primary);
 }
+
+/* v47.1 W0.2 — refinement loop round badge.
+   Shown only on agents with iterate_with set; backend bumps the
+   "round" field via SSE status events. */
+.badge.iterate {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-coral) 22%, var(--bg-secondary)),
+    color-mix(in srgb, var(--accent-amber) 22%, var(--bg-secondary)));
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 40%, transparent);
+  color: var(--fg-primary);
+  font-weight: 700;
+}
+.badge.iterate [data-round-n] {
+  display: inline-block;
+  min-width: 1ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}

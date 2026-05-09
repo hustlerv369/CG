@@ -2323,6 +2323,11 @@ function buildPanel(agent) {
           <span class="badge-dot" aria-hidden="true"></span>
           <span class="badge-text">${agent.status}</span>
         </span>
+        ${agent.iterate_with ? `
+        <span class="badge iterate" data-round
+              title="Refinement loop with ${escapeHtml(agent.iterate_with)} (max ${agent.max_rounds || 1} rounds)">
+          🔁 round <span data-round-n>${agent.rounds_completed || 1}</span>/${agent.max_rounds || 1}
+        </span>` : ""}
         <span class="agent-elapsed" data-elapsed hidden>--:--</span>
         <span class="agent-tokens" data-tokens hidden>0 tok</span>
       </div>
@@ -2454,6 +2459,11 @@ function handleStatus(d) {
       && p.stopElapsed) p.stopElapsed();
   if (d.exit_code !== null && d.exit_code !== undefined) {
     p.exitEl.textContent = `exit ${d.exit_code}`;
+  }
+  // v47.1 W0.2 — bump the iteration round badge if backend sent one
+  if (d.round && p.root) {
+    const rn = p.root.querySelector("[data-round-n]");
+    if (rn) rn.textContent = String(d.round);
   }
   // v25 — refresh inspector if it's currently showing this agent
   if (typeof refreshInspectorIfShowing === "function") {
