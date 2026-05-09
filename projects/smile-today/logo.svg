@@ -1,0 +1,6 @@
+<svg viewBox="0 0 240 240" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Smile Today">
+  <rect width="240" height="240" fill="#ffffff"/>
+  <text x="120" y="105" font-family="Fraunces, Georgia, serif" font-size="42" font-weight="400" text-anchor="middle" fill="#0a0a0a">Smile</text>
+  <text x="120" y="155" font-family="Fraunces, Georgia, serif" font-size="42" font-weight="700" text-anchor="middle" fill="#0a0a0a">Today</text>
+  <path d="M 85 172 Q 120 165, 155 172" stroke="#ff5a4e" stroke-width="4" fill="none" stroke-linecap="round"/>
+</svg>
