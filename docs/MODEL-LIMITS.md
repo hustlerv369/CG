@@ -83,6 +83,13 @@ Real example, run `dd51a4845f01`, tests step:
   meta-comment ("I will now…") before the actual content — usually
   harmless, the parser scans for fenced blocks anyway.
 - 256-color and Ripgrep warnings on `stderr` are cosmetic, ignore them.
+- **`_recoverFromLoop` self-abort (v45 finding):** Gemini Flash has
+  its own internal generation-loop detector that watches the model's
+  own output for repetition. If it fires, the CLI throws
+  `AbortError: The user aborted a request. at GeminiClient._recoverFromLoop`
+  and exits with non-zero. Observed when generating long Markdown
+  documents (README + DEPLOY in one go). Mitigation: don't use Flash
+  for tasks > ~5 KB output; prefer Sonnet for docs.
 
 **Recommendation:** Use Gemini for:
 - Independent design / creative tasks (Gemini Pro produces solid SVG
@@ -129,6 +136,27 @@ agent marked `failed` with exit code -9.
 **Recovery for the user:** click `× Cancel` in the run header, or
 let the timeout fire (default 12 min).
 
+### 1b. Subprocess accepts prompt then emits zero bytes for minutes
+**Symptom:** agent status `running`; output file is 0 bytes; no
+stderr output; PID alive but never produces a single token.
+
+**Cause:** Anthropic / Google API queueing under heavy load, frozen
+client, network stall, or oversized prompt hitting a soft-limit.
+
+**Fix (v45):** per-agent **first-token watchdog** (default 90 s,
+configurable via `CG_FIRST_TOKEN_TIMEOUT` or `cfg.first_token_timeout`).
+If the subprocess emits NOTHING within 90 s of accepting stdin, kill
+it. Much faster than waiting the full 720 s wall-clock.
+
+### 1c. Oversized prompts (>100 KB context)
+**Symptom:** when an agent step's prompt embeds another step's full
+output (`{{implementation}}` = 117 KB), Sonnet/Opus may queue/stall.
+
+**Fix (v45 preset):** tests step now reads SPEC ONLY (`{{director}}`),
+not full implementation. Reviewer still sees both, so cross-checking
+loop is preserved. Same pattern recommended for any new step that
+needs implementation knowledge — pass spec or summary, not full code.
+
 ### 2. Implementation truncates mid-block
 **Symptom:** last fenced code block in `implementation.out.md` ends
 mid-line.
@@ -160,10 +188,10 @@ spec     | claude-opus-4-7                   | strongest reasoning
 design   | gemini-pro                        | independent creative eye
 code     | claude-opus-4-7 (1M)              | huge output, no tool hang
 review   | claude-sonnet-4-6                 | best at code critique
-tests    | claude-sonnet-4-6 (was gemini-pro)| Gemini hangs on test-write tasks
-docs     | gemini-flash                      | fast + cheap for short docs
-summary  | gemini-flash or claude-haiku-4-5  | bounded short output
-critic   | gemini-pro                        | cross-vendor diversity
+tests    | claude-sonnet-4-6                 | from spec only (no full code)
+docs     | claude-sonnet-4-6 (was Flash)     | Flash hits _recoverFromLoop on long Markdown
+summary  | claude-haiku-4-5                  | bounded short output, cheap
+critic   | gemini-pro                        | cross-vendor diversity (small input)
 parallel | mix vendors                       | catch each other's blind spots
 ```
 

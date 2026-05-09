@@ -1227,8 +1227,46 @@ class RunManager:
         stderr_thread = threading.Thread(target=_drain_stderr, daemon=True)
         stderr_thread.start()
 
+        # v45 — first-token watchdog. If the subprocess accepts the
+        # prompt but emits NOTHING for `first_token_timeout` seconds,
+        # something is wrong (API queueing, frozen client, network
+        # stall) — kill it fast instead of waiting the full 720 s
+        # wall-clock timeout. The previous test run had Sonnet 4.6
+        # hang at 0 B for 6 min on an oversized prompt; this would
+        # have killed it at 90 s.
+        first_token_timeout = float(
+            cfg.get("first_token_timeout")
+            or os.environ.get("CG_FIRST_TOKEN_TIMEOUT")
+            or 90
+        )
+        first_token_received = threading.Event()
+        watchdog_canceled = threading.Event()
+
+        def _first_token_watchdog():
+            if watchdog_canceled.wait(timeout=first_token_timeout):
+                return  # cancelled because output started arriving
+            if first_token_received.is_set():
+                return
+            # No output yet — kill the subprocess
+            agent_state.log_lines.append(
+                f"[error] no output in {first_token_timeout:.0f}s — killing "
+                f"subprocess (likely API queueing or frozen client)"
+            )
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": agent_state.log_lines[-1]}})
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+        watchdog_thread = threading.Thread(target=_first_token_watchdog, daemon=True)
+        watchdog_thread.start()
+
         assert proc.stdout is not None
         for line in proc.stdout:
+            if not first_token_received.is_set():
+                first_token_received.set()
+                watchdog_canceled.set()  # let watchdog exit cleanly
             # _recover_mojibake fixes the Windows-CLI double-encode case
             # (emoji like 🧠 arriving as đź§  through Windows-1250→UTF-8
             # round trips). It's a no-op on clean ASCII so it's free.
@@ -2259,25 +2297,29 @@ PRESETS: list[dict[str, Any]] = [
                           "## Design tokens + components\n{{designer}}",
             },
             {
-                # v44 — tests moved Gemini→Sonnet. Gemini Pro hung in
-                # missing-tool loops on the previous run when asked to
-                # output many fenced code blocks with file paths;
-                # Sonnet is one-shot generative and reliably finishes
-                # the same task. See docs/MODEL-LIMITS.md.
+                # v45 — tests step now runs from SPEC ONLY, not full
+                # implementation. Previous run had Sonnet hang at 0 B
+                # for 6+ min when fed {{director}} (12.5 KB) +
+                # {{implementation}} (117 KB) = 130 KB prompt — likely
+                # API soft-limit / queueing. Spec alone has everything
+                # tests need: API contract, acceptance criteria, file
+                # tree. Reviewer step still reads both, so the loop
+                # closes there.
                 "agent": "claude-sonnet-4-6", "label": "tests",
-                "depends_on": ["director", "implementation"],
-                "prompt": "You are the test author. "
-                          "Write thorough tests for this implementation. Cover:\n"
+                "depends_on": ["director"],
+                "prompt": "You are the test author. Write thorough tests for "
+                          "the project described by the spec below. Cover:\n"
                           "- Happy path for every endpoint in the API contract\n"
                           "- Each acceptance-criterion bullet\n"
                           "- Edge cases (null/empty/zero/negative/overflow)\n"
                           "- Auth + authz boundaries\n"
                           "- Error responses\n\n"
-                          "Use the framework matching the stack (Vitest for "
-                          "TS, pytest for Python, etc.). Output every test "
-                          "file as a fenced code block with `// path/to/...` "
-                          "first line.\n\n"
-                          "## Spec\n{{director}}\n\n## Implementation\n{{implementation}}",
+                          "Match the stack from the spec (pytest for Python, "
+                          "Vitest for TS, etc.). Output every test file as a "
+                          "fenced code block with `# path/to/file.py` "
+                          "(or `// path/to/file.ts`) as the first line. NO "
+                          "explanation between blocks.\n\n"
+                          "## Spec\n{{director}}",
             },
             {
                 "agent": "claude-sonnet-4-6", "label": "reviewer",
@@ -2294,12 +2336,16 @@ PRESETS: list[dict[str, Any]] = [
                           "## Implementation\n{{implementation}}\n\n## Tests\n{{tests}}",
             },
             {
-                "agent": "gemini-flash", "label": "readme-deploy",
+                # v45 — moved Gemini Flash → Sonnet 4.6. Gemini Flash
+                # has its own internal _recoverFromLoop detector that
+                # self-aborted on the previous run after generating ~6 KB
+                # of README, even with our "TEXT ONLY no tools" preamble
+                # (the loop detector watches the model's own output, not
+                # tool calls). Sonnet 4.6 has no such detector, similar
+                # speed for short Markdown, perfectly reliable.
+                "agent": "claude-sonnet-4-6", "label": "readme-deploy",
                 "depends_on": ["director", "architect", "implementation"],
-                "prompt": "OUTPUT MODE: TEXT ONLY. Do not call any tools. Do not "
-                          "invoke write_file, read_file, or any sub-agent. "
-                          "Respond with raw Markdown text only.\n\n"
-                          "Write the project's complete README + deploy guide:\n\n"
+                "prompt": "Write the project's complete README + deploy guide:\n\n"
                           "## README.md\n- Title + tagline (≤12 words)\n- Hero "
                           "screenshot placeholder\n- Feature list (from MVP "
                           "scope)\n- Quickstart (copy-pasteable)\n- Project "
