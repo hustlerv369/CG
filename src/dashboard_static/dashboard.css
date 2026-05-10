@@ -4940,3 +4940,95 @@ body.status-bar-hidden .status-bar { display: none; }
   filter: brightness(1.08);
   border-color: color-mix(in srgb, var(--accent-coral) 60%, transparent);
 }
+
+/* ============================================================
+ * v56 — Terminal View
+ *
+ * Single chronological tail -f stream of every agent's events. Lighter
+ * than the panel grid: no per-card layout, no animations, no backdrop
+ * filters. Append-only DOM, ~5000 line cap, sticky scroll-to-bottom.
+ * Color-coded by event kind:
+ *   .tline-log               → default fg (text deltas)
+ *   .tline-status-running    → amber  (agent started)
+ *   .tline-status-done       → green  (agent completed)
+ *   .tline-status-failed     → red    (agent failed)
+ *   .tline-status-cancelled  → muted  (cancelled)
+ *   .tline-activity-stream   → blue   (tool_use / thinking / init events)
+ *   .tline-activity-stderr   → cyan   (gemini "Calling tool: X" lines)
+ *   .tline-activity-watchdog → orange (provider queueing)
+ *   .tline-activity-retry    → orange (auto-retry attempt)
+ *
+ * Designed for terminal lovers: mono font, dense line height, color
+ * via terminal palette. Replaces panel grid 1:1 — same SSE stream,
+ * different rendering.
+ * ============================================================ */
+.terminal-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0a0a0a;
+  border-radius: 0;
+  overflow: hidden;
+}
+.terminal-stream {
+  flex: 1;
+  margin: 0;
+  padding: 16px 20px 24px;
+  font: 12.5px/1.55 var(--font-mono, "JetBrains Mono", "SF Mono", Menlo, monospace);
+  color: #d4d4d4;
+  background: #0a0a0a;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-y: auto;
+  overflow-x: hidden;
+  scroll-behavior: smooth;
+}
+.terminal-stream .tline {
+  display: block;
+  color: inherit;
+}
+.terminal-stream .tts {
+  color: #6a6a6a;
+  font-variant-numeric: tabular-nums;
+  margin-right: 6px;
+  user-select: none;
+}
+.terminal-stream .tlabel {
+  display: inline-block;
+  min-width: 14ch;
+  color: #7e7eff;
+  font-weight: 600;
+  margin-right: 4px;
+}
+.terminal-stream .ttext {
+  color: inherit;
+}
+.terminal-stream .tline-status-running .ttext { color: #f5b942; font-weight: 600; }
+.terminal-stream .tline-status-running .tlabel { color: #f5b942; }
+.terminal-stream .tline-status-done    .ttext { color: #4ec9b0; font-weight: 600; }
+.terminal-stream .tline-status-done    .tlabel { color: #4ec9b0; }
+.terminal-stream .tline-status-failed  .ttext { color: #f48771; font-weight: 600; }
+.terminal-stream .tline-status-failed  .tlabel { color: #f48771; }
+.terminal-stream .tline-status-cancelled .ttext { color: #6a6a6a; font-style: italic; }
+.terminal-stream .tline-status-queued  .ttext { color: #6a6a6a; }
+.terminal-stream .tline-status-waiting .ttext { color: #6a6a6a; }
+.terminal-stream .tline-activity-stream  .ttext { color: #569cd6; opacity: 0.86; }
+.terminal-stream .tline-activity-stderr  .ttext { color: #4ec9b0; opacity: 0.78; }
+.terminal-stream .tline-activity-watchdog .ttext { color: #ce9178; }
+.terminal-stream .tline-activity-retry   .ttext { color: #ce9178; font-weight: 600; }
+
+/* Smaller scrollbar so it disappears into the terminal aesthetic */
+.terminal-stream::-webkit-scrollbar {
+  width: 6px;
+}
+.terminal-stream::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 6px;
+}
+
+/* When agent-grid is hidden (terminal mode active), the section
+ * still needs to fill the monitor pane — make terminal-view stretch. */
+.monitor-pane #terminal-view:not([hidden]) {
+  flex: 1;
+  min-height: 0;
+}

@@ -130,8 +130,8 @@
             🎩 Conductor
           </button>
           <label class="quick-start-auto-toggle"
-                 title="Skip approval gates and ship end-to-end. Stop button stays available.">
-            <input type="checkbox" id="quick-start-auto-mode">
+                 title="Skip approval gates and ship end-to-end. Stop button stays available. Default ON in v56 — uncheck if you want to review the brief / spec before launch.">
+            <input type="checkbox" id="quick-start-auto-mode" checked>
             <span>🚀 Auto mode</span>
           </label>
           <div class="quick-start-mode">
@@ -333,6 +333,7 @@
           <button class="seg" data-view="md" title="Render Markdown + code highlighting">markdown</button>
           <button class="seg" data-view="diff" title="Side-by-side diff (best for compare preset)">diff</button>
           <button class="seg" data-view="preview" title="Render HTML / SVG / JSX / image inline (sandboxed)">🎨 preview</button>
+          <button class="seg" data-view="terminal" title="Single tail -f stream — every agent's events in one chronological log. Lightest on the system, easiest to read for terminal lovers.">🖥 terminal</button>
         </div>
         <!-- v22 — CMUX-style grid layout selector -->
         <div class="layout-toggle" id="layout-toggle"
@@ -361,6 +362,14 @@
           <strong>← Build your workflow on the left, then hit Run workflow.</strong><br />
           Each step (agent) gets its own live panel here — you'll see what it's writing in real time.
         </div>
+      </div>
+      <!-- v56 — Terminal View. Single chronological tail -f stream of every
+           agent's events. Hidden by default; visible when view-toggle is set
+           to "terminal". Append-only DOM, mono font, color-coded by status.
+           Lightest possible on the system: no per-panel state, no animations,
+           no backdrop-filter blurs. -->
+      <div id="terminal-view" class="terminal-view" hidden>
+        <pre id="terminal-stream" class="terminal-stream" aria-live="polite"></pre>
       </div>
     </section>
 

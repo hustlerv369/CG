@@ -2524,6 +2524,11 @@ function buildPanel(agent) {
 // silently sitting at 0 chars wondering if it's alive.
 function handleActivity(d) {
   if (!d || !d.label) return;
+  // v56 — Terminal View activity row (currently: tool_use · Read, etc.)
+  if (typeof _terminalRecordAndAppend === "function") {
+    const text = (d.text || "").trim();
+    if (text) _terminalRecordAndAppend(d.label, `activity-${d.source || "stream"}`, `· ${text}`);
+  }
   const p = state.panels[d.label];
   if (!p || !p.root) return;
   let line = p.root.querySelector(".agent-currently");
@@ -2601,6 +2606,18 @@ function handleStatus(d) {
   if (typeof visualUpdateAgentStatus === "function") {
     visualUpdateAgentStatus(d.label, d.status);
   }
+  // v56 — Terminal View status banner. Color-coded by status so
+  // the user sees clean transitions at a glance.
+  if (typeof _terminalRecordAndAppend === "function") {
+    const tag = d.status === "running" ? "→ STARTED"
+      : d.status === "done"            ? "✓ DONE"
+      : d.status === "failed"          ? "✗ FAILED"
+      : d.status === "cancelled"       ? "⨯ CANCELLED"
+      : d.status === "queued"          ? "… queued"
+      : d.status === "waiting"         ? "… waiting for deps"
+      : `· ${d.status}`;
+    _terminalRecordAndAppend(d.label, `status-${d.status}`, tag);
+  }
   const p = state.panels[d.label];
   if (!p) return;
   // Update badge: dot+text structure (v21)
@@ -2671,6 +2688,10 @@ function handleLog(d) {
   // v16 — surface the latest line in the visual canvas node
   if (typeof visualUpdateAgentStatus === "function") {
     visualUpdateAgentStatus(d.label, null, d.line);
+  }
+  // v56 — also feed the Terminal View
+  if (typeof _terminalRecordAndAppend === "function") {
+    _terminalRecordAndAppend(d.label, "log", d.line || "");
   }
   const p = state.panels[d.label];
   if (!p) return;
@@ -2823,6 +2844,35 @@ function setViewMode(mode) {
     b.classList.toggle("active", b.dataset.view === mode);
   });
   const grid = $("#agent-grid");
+  const term = document.getElementById("terminal-view");
+  // v56 — Terminal View toggle. Hides the panel grid and shows a single
+  // chronological tail -f stream. All buffered SSE events get replayed
+  // in order so switching to terminal mid-run shows the full history,
+  // not just events from the toggle moment forward.
+  if (mode === "terminal") {
+    if (grid) grid.hidden = true;
+    if (term) {
+      term.hidden = false;
+      const stream = document.getElementById("terminal-stream");
+      if (stream) {
+        stream.innerHTML = "";
+        // Replay buffered events from each panel into the unified stream
+        const panels = state.panels || {};
+        const events = [];
+        Object.entries(panels).forEach(([label, panel]) => {
+          (panel.terminalLines || []).forEach((line) => {
+            events.push({ ...line, label });
+          });
+        });
+        // Sort by timestamp (events captured at receive time)
+        events.sort((a, b) => (a.t || 0) - (b.t || 0));
+        events.forEach((evt) => _terminalAppendLine(evt));
+      }
+    }
+    return;
+  }
+  if (grid) grid.hidden = false;
+  if (term) term.hidden = true;
   if (grid) grid.classList.toggle("diff-grid", mode === "diff" && Object.keys(state.panels).length === 2);
 
   // Re-render every panel
@@ -2836,6 +2886,52 @@ function setViewMode(mode) {
     const diff = computeLineDiff(a, b);
     state.panels[labels[0]].log.innerHTML = diff.left;
     state.panels[labels[1]].log.innerHTML = diff.right;
+  }
+}
+
+/* v56 — Terminal View utilities.
+ *
+ * Append a single line to the terminal stream, color-coded by event kind.
+ * Each panel records its events into `panel.terminalLines` (a circular
+ * buffer of the last ~2000 events) so toggling into terminal mode mid-run
+ * replays the full history. Live events also call this function directly.
+ */
+const TERMINAL_MAX_LINES = 5000;
+
+function _terminalAppendLine(evt) {
+  const stream = document.getElementById("terminal-stream");
+  if (!stream) return;
+  const wrap = document.createElement("span");
+  wrap.className = `tline tline-${evt.kind || "log"}`;
+  // ts in HH:MM:SS — readable in a terminal context, mono-tabular numerals
+  const d = new Date(evt.t || Date.now());
+  const ts = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}`;
+  const labelTxt = evt.label ? `[${evt.label}]` : "";
+  const labelHtml = labelTxt ? `<span class="tlabel">${escapeHtml(labelTxt)}</span> ` : "";
+  const text = (evt.text || "").replace(/\r/g, "");
+  wrap.innerHTML = `<span class="tts">[${ts}]</span> ${labelHtml}<span class="ttext">${escapeHtml(text)}</span>\n`;
+  stream.appendChild(wrap);
+  // Cap line count
+  while (stream.childElementCount > TERMINAL_MAX_LINES) {
+    stream.firstElementChild.remove();
+  }
+  // Auto-scroll to bottom (sticky)
+  stream.scrollTop = stream.scrollHeight;
+}
+
+function _terminalRecordAndAppend(label, kind, text) {
+  // Record into panel buffer + append live (if terminal mode active).
+  const evt = { t: Date.now(), label, kind, text };
+  const panel = state.panels && state.panels[label];
+  if (panel) {
+    if (!panel.terminalLines) panel.terminalLines = [];
+    panel.terminalLines.push(evt);
+    if (panel.terminalLines.length > TERMINAL_MAX_LINES) {
+      panel.terminalLines.shift();
+    }
+  }
+  if (state.viewMode === "terminal") {
+    _terminalAppendLine(evt);
   }
 }
 
