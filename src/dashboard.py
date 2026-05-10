@@ -1600,14 +1600,26 @@ class RunManager:
         # prompt but emits NOTHING for `first_token_timeout` seconds,
         # something is wrong (API queueing, frozen client, network
         # stall) — kill it fast instead of waiting the full 720 s
-        # wall-clock timeout. The previous test run had Sonnet 4.6
-        # hang at 0 B for 6 min on an oversized prompt; this would
-        # have killed it at 90 s.
-        # v51.1 — per-step override. A spec step can carry
-        # `first_token_timeout: <seconds>` to bump the watchdog for
-        # known-slow steps (e.g. Opus generating 30 KB+ of code can
-        # legitimately take > 90 s before the first visible token
-        # because the provider is queueing the long output).
+        # wall-clock timeout.
+        # v51.1 — per-step override (`first_token_timeout`).
+        # v53 — ADAPTIVE watchdog. The previous design slept naively for
+        # `first_token_timeout` seconds and then killed, ignoring whether
+        # the subprocess was alive. Reality: provider queueing on Opus
+        # peak hours can take 3-8 minutes before any visible content,
+        # but the subprocess IS alive — it streams `system/init`,
+        # `tool_use`, `thinking` events to stdout the entire time. Those
+        # update `agent_state.last_activity_at` even though they don't
+        # satisfy `first_token_received` (which requires VISIBLE
+        # content). The new watchdog uses both signals:
+        #   1. If first-visible-content arrives → cancel (success).
+        #   2. If subprocess is heartbeating (last_activity within
+        #      HEARTBEAT_GRACE seconds) → extend deadline by another
+        #      first_token_timeout chunk and keep watching.
+        #   3. If both deadline AND heartbeat-grace are exceeded → kill.
+        # Default first_token_timeout bumped 90 → 300s for the common
+        # case (Opus producing 30+ KB of code under provider queueing).
+        # Hard wall-clock `agent_timeout` (720s default) still bounds
+        # total run time, so a truly stuck subprocess won't run forever.
         spec_step = next(
             (s for s in run.spec if s.get("label") == label), {}
         ) if run else {}
@@ -1615,27 +1627,101 @@ class RunManager:
             spec_step.get("first_token_timeout")
             or cfg.get("first_token_timeout")
             or os.environ.get("CG_FIRST_TOKEN_TIMEOUT")
-            or 90
+            or 300
         )
+        # v53 — heartbeat grace window. If the subprocess emits ANY raw
+        # stdout (stream-json init / tool_use / heartbeat) within this
+        # many seconds, treat it as alive even past the deadline.
+        heartbeat_grace = float(
+            spec_step.get("heartbeat_grace")
+            or cfg.get("heartbeat_grace")
+            or os.environ.get("CG_HEARTBEAT_GRACE")
+            or 75
+        )
+        watchdog_tick = 10.0  # how often we wake to re-evaluate
         first_token_received = threading.Event()
         watchdog_canceled = threading.Event()
+        proc_started_at = time.time()
 
         def _first_token_watchdog():
-            if watchdog_canceled.wait(timeout=first_token_timeout):
-                return  # cancelled because output started arriving
-            if first_token_received.is_set():
+            # v53.1 — skip watchdog entirely for non-streaming agents.
+            # Non-streaming CLIs (claude --print without stream-json,
+            # gemini -p without stream-json) BUFFER the full output
+            # and emit nothing on stdout until the response is done.
+            # That can be 5+ minutes for Opus generating 30 KB of code,
+            # during which last_activity_at stays None and any heartbeat
+            # check fires false-positive. The hard wall-clock
+            # `agent_timeout` (1200s) is the only safety net we need
+            # for non-streaming runs — it bounds total runtime, which
+            # is the right semantic for buffered output.
+            if not use_streaming:
+                # Wait for cancellation OR forever; the wall-clock
+                # timeout in the parent will reap the subprocess.
+                watchdog_canceled.wait()
                 return
-            # No output yet — kill the subprocess
-            agent_state.log_lines.append(
-                f"[error] no output in {first_token_timeout:.0f}s — killing "
-                f"subprocess (likely API queueing or frozen client)"
-            )
-            self._emit(run.id, label, {"event": "log", "data": {
-                "label": label, "line": agent_state.log_lines[-1]}})
-            try:
-                proc.kill()
-            except Exception:
-                pass
+            deadline = time.time() + first_token_timeout
+            extensions = 0
+            max_extensions = 8  # cap at ~8x first_token_timeout total adaptive runway
+            announced_extension = False
+            while True:
+                # Wake every WATCHDOG_TICK seconds OR when canceled
+                if watchdog_canceled.wait(timeout=watchdog_tick):
+                    return
+                if first_token_received.is_set():
+                    return
+                now = time.time()
+                last_activity = agent_state.last_activity_at or proc_started_at
+                idle = now - last_activity
+                if now < deadline:
+                    # Still inside initial deadline — keep waiting
+                    continue
+                # Past the deadline. Is the subprocess heartbeating?
+                if idle < heartbeat_grace and extensions < max_extensions:
+                    # Subprocess sent SOMETHING (stream-json init, tool
+                    # call, etc.) within `heartbeat_grace` seconds — it's
+                    # alive, provider is just queueing. Extend deadline.
+                    extensions += 1
+                    deadline = now + first_token_timeout
+                    msg = (
+                        f"[watchdog] {now - proc_started_at:.0f}s elapsed, "
+                        f"last heartbeat {idle:.0f}s ago — subprocess alive, "
+                        f"extending deadline (+{first_token_timeout:.0f}s, "
+                        f"ext {extensions}/{max_extensions})"
+                    )
+                    agent_state.log_lines.append(msg)
+                    self._emit(run.id, label, {"event": "log", "data": {
+                        "label": label, "line": msg}})
+                    if not announced_extension:
+                        # Surface as activity so the UI shows it under the panel
+                        self._emit(run.id, label, {"event": "activity", "data": {
+                            "label": label,
+                            "text": f"provider queueing — {now - proc_started_at:.0f}s",
+                            "source": "watchdog",
+                        }})
+                        announced_extension = True
+                    continue
+                # Past deadline AND no heartbeat AND/OR extensions exhausted → kill
+                if extensions >= max_extensions:
+                    reason = (
+                        f"max watchdog extensions exhausted "
+                        f"({max_extensions} × {first_token_timeout:.0f}s)"
+                    )
+                else:
+                    reason = (
+                        f"no output in {first_token_timeout:.0f}s and "
+                        f"no heartbeat for {idle:.0f}s "
+                        f"(subprocess truly frozen — likely network/CLI hang)"
+                    )
+                agent_state.log_lines.append(
+                    f"[error] {reason} — killing subprocess"
+                )
+                self._emit(run.id, label, {"event": "log", "data": {
+                    "label": label, "line": agent_state.log_lines[-1]}})
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+                return
 
         watchdog_thread = threading.Thread(target=_first_token_watchdog, daemon=True)
         watchdog_thread.start()
@@ -1711,14 +1797,17 @@ class RunManager:
         # v44 — hard wall-clock timeout per agent. Without it, an agent
         # CLI that hangs (e.g. Gemini stuck in a missing-tool loop, or
         # any subprocess waiting on stdin) blocks the run forever.
-        # Default 720s (12 min) — Opus 1M with big code outputs needs
-        # the headroom; faster Gemini Flash steps finish in <60s.
+        # v53 — bumped 720 → 1200s (20 min). Opus generating 30+ KB of
+        # code in non-streaming mode can legitimately take 12-15 min
+        # under provider queueing, and the first-token watchdog is now
+        # disabled for non-streaming runs (only the wall-clock timeout
+        # bounds them), so we need the headroom here.
         # Override per-step via env CG_AGENT_TIMEOUT or per-agent in
         # AGENT_KINDS cfg.
         agent_timeout = float(
             cfg.get("timeout")
             or os.environ.get("CG_AGENT_TIMEOUT")
-            or 720
+            or 1200
         )
         try:
             proc.wait(timeout=agent_timeout)
