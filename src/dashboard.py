@@ -1125,12 +1125,28 @@ class RunManager:
         # Build state
         for i, item in enumerate(spec):
             label = item.get("label") or f"agent-{i+1}"
+            # v54 — streaming defaults to TRUE. Stream-json gives the
+            # UI live token deltas + system/init + tool_use heartbeats
+            # ("currently: thinking · 12s") instead of a silent
+            # "connecting" until the buffered output dumps at the end.
+            # Spec steps that explicitly set `streaming: false` opt out
+            # (legacy non-streaming behavior — buffered output, no
+            # heartbeat). Agents whose family doesn't support stream-
+            # json (only claude/gemini do) get streaming=False applied
+            # downstream in `_run_one` regardless of this flag.
+            streaming_field = item.get("streaming")
+            streaming_default = True
+            streaming_value = (
+                bool(streaming_field)
+                if streaming_field is not None
+                else streaming_default
+            )
             run.agents[label] = AgentRunState(
                 label=label,
                 agent=item["agent"],
                 depends_on=list(item.get("depends_on", []) or []),
                 status="queued" if not item.get("depends_on") else "waiting",
-                streaming=bool(item.get("streaming", False)),
+                streaming=streaming_value,
                 role=str(item.get("role", "") or ""),
                 iterate_with=str(item.get("iterate_with", "") or ""),
                 max_rounds=int(item.get("max_rounds", 1) or 1),
@@ -1644,21 +1660,29 @@ class RunManager:
         proc_started_at = time.time()
 
         def _first_token_watchdog():
-            # v53.1 — skip watchdog entirely for non-streaming agents.
-            # Non-streaming CLIs (claude --print without stream-json,
-            # gemini -p without stream-json) BUFFER the full output
-            # and emit nothing on stdout until the response is done.
-            # That can be 5+ minutes for Opus generating 30 KB of code,
-            # during which last_activity_at stays None and any heartbeat
-            # check fires false-positive. The hard wall-clock
-            # `agent_timeout` (1200s) is the only safety net we need
-            # for non-streaming runs — it bounds total runtime, which
-            # is the right semantic for buffered output.
-            if not use_streaming:
-                # Wait for cancellation OR forever; the wall-clock
-                # timeout in the parent will reap the subprocess.
-                watchdog_canceled.wait()
-                return
+            # v54.1 — first-token watchdog is now DISABLED for ALL
+            # agents. Reasoning:
+            #
+            #   Even in streaming mode, Claude CLI does NOT emit a
+            #   `system/init` event the moment the subprocess starts —
+            #   it emits init only after the first API response from
+            #   Anthropic. Provider queueing on Opus peak hours can
+            #   delay that first response 3-5 minutes, during which
+            #   the subprocess is alive but last_activity_at stays None.
+            #   A heartbeat-based watchdog cannot tell "Opus queueing"
+            #   from "subprocess truly frozen" without OS-level signals
+            #   (CPU usage, network bytes, etc.) which we don't sample.
+            #
+            #   The hard wall-clock `agent_timeout` (1800s = 30 min) is
+            #   a strictly stronger guarantee: bounds total runtime
+            #   regardless of streaming/buffered/queued state. False-
+            #   positive kills are gone.
+            #
+            #   For UI visibility, the parent emits periodic "alive"
+            #   events with elapsed seconds so the user sees the agent
+            #   is still alive even before any stream event arrives.
+            watchdog_canceled.wait()
+            return
             deadline = time.time() + first_token_timeout
             extensions = 0
             max_extensions = 8  # cap at ~8x first_token_timeout total adaptive runway
@@ -1725,6 +1749,35 @@ class RunManager:
 
         watchdog_thread = threading.Thread(target=_first_token_watchdog, daemon=True)
         watchdog_thread.start()
+
+        # v54.1 — alive ticker. Emits a heartbeat event every 10s so
+        # the UI can show "elapsed: 90s" even when the subprocess is
+        # silent (provider queueing, big buffered output, etc.). This
+        # is the user-visible replacement for the first-token watchdog
+        # we just removed. The ticker stops when the subprocess exits.
+        alive_ticker_canceled = threading.Event()
+
+        def _alive_ticker():
+            tick_interval = 10.0
+            while not alive_ticker_canceled.wait(timeout=tick_interval):
+                elapsed = time.time() - proc_started_at
+                last_act = agent_state.last_activity_at
+                if last_act:
+                    quiet = time.time() - last_act
+                    text = f"alive · elapsed {elapsed:.0f}s · last event {quiet:.0f}s ago"
+                else:
+                    text = (
+                        f"alive · elapsed {elapsed:.0f}s · waiting for first event "
+                        f"(provider queueing or buffered CLI)"
+                    )
+                self._emit(run.id, label, {"event": "alive", "data": {
+                    "label": label, "kind": "ticker",
+                    "elapsed": elapsed,
+                    "text": text,
+                }})
+
+        alive_ticker_thread = threading.Thread(target=_alive_ticker, daemon=True)
+        alive_ticker_thread.start()
 
         assert proc.stdout is not None
         for line in proc.stdout:
@@ -1797,21 +1850,24 @@ class RunManager:
         # v44 — hard wall-clock timeout per agent. Without it, an agent
         # CLI that hangs (e.g. Gemini stuck in a missing-tool loop, or
         # any subprocess waiting on stdin) blocks the run forever.
-        # v53 — bumped 720 → 1200s (20 min). Opus generating 30+ KB of
-        # code in non-streaming mode can legitimately take 12-15 min
-        # under provider queueing, and the first-token watchdog is now
-        # disabled for non-streaming runs (only the wall-clock timeout
-        # bounds them), so we need the headroom here.
+        # v54.1 — bumped 1200 → 1800s (30 min). Wall-clock is now the
+        # ONLY safety net (first-token watchdog is fully disabled — see
+        # `_first_token_watchdog` above). Realistic ceiling: Opus 1M
+        # context generating a full-stack app spec under heavy provider
+        # queueing has been measured at 18-22 min. 30 min gives ~30%
+        # headroom. Truly frozen subprocesses still get reaped here.
         # Override per-step via env CG_AGENT_TIMEOUT or per-agent in
         # AGENT_KINDS cfg.
         agent_timeout = float(
             cfg.get("timeout")
             or os.environ.get("CG_AGENT_TIMEOUT")
-            or 1200
+            or 1800
         )
         try:
             proc.wait(timeout=agent_timeout)
         except subprocess.TimeoutExpired:
+            alive_ticker_canceled.set()
+            watchdog_canceled.set()
             agent_state.log_lines.append(
                 f"[error] agent timed out after {agent_timeout:.0f}s — killing subprocess"
             )
@@ -1833,6 +1889,9 @@ class RunManager:
             self._emit(run.id, label, {"event": "status", "data": {
                 "label": label, "status": "failed", "exit_code": -9}})
             return
+        # v54.1 — subprocess exited normally; stop alive ticker & watchdog
+        alive_ticker_canceled.set()
+        watchdog_canceled.set()
         stderr_thread.join(timeout=2)
         agent_state.exit_code = proc.returncode
         if agent_state.status == "cancelled":
