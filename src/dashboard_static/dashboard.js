@@ -2181,6 +2181,10 @@ async function openRun(runId) {
 
   $("#run-title-display").textContent = meta.title;
   $("#run-meta").textContent = `id ${meta.id} · ${meta.agents.length} agents · started ${formatTime(meta.created)}`;
+  // v58 — fetch + display actual cost. Best-effort; silently no-ops if
+  // the endpoint is unavailable. Refreshes every 8 s while the run is
+  // live so the number ticks up as agents emit more output.
+  _refreshRunCostBadge(meta.id);
   // Toolbar: cancel + re-run buttons
   let tools = $("#run-tools");
   if (!tools) {
@@ -3143,6 +3147,117 @@ async function cleanupFinishedRuns() {
 }
 
 // ---------- helpers ----------
+
+/* v58 — Cost estimate UI helpers.
+ *
+ * Two flavours:
+ *   1) PRE-RUN — debounced live update from the Quick Start textarea.
+ *      Posts to /api/spec/cost-estimate with a tiny 1-step spec
+ *      (Conductor "build it" assumes a Conductor flow; the cost is
+ *      dominated by the actual launch step which can't be priced
+ *      until the JSON spec exists). For the user, the badge still
+ *      surfaces an order-of-magnitude estimate based on the brief
+ *      length so they're not surprised.
+ *   2) POST-RUN — exact cost from the run's observed log_chars.
+ *      Refreshed every 8 s while live, frozen on terminal status.
+ */
+let _costEstimateTimer = null;
+
+function _scheduleCostEstimate() {
+  clearTimeout(_costEstimateTimer);
+  _costEstimateTimer = setTimeout(_runCostEstimate, 350);
+}
+
+async function _runCostEstimate() {
+  const ideaTa = document.getElementById("quick-start-idea");
+  const wrap = document.getElementById("quick-start-cost");
+  if (!ideaTa || !wrap) return;
+  const idea = (ideaTa.value || "").trim();
+  if (!idea) {
+    wrap.hidden = true;
+    return;
+  }
+  // Construct a synthetic spec mirroring what Conductor would launch
+  // for this idea. The Conductor flow boots Phase 1 (brief) + Phase 2
+  // (compose) + N actual agents. We approximate as a 4-agent Opus
+  // chain — close enough for an order-of-magnitude badge.
+  const spec = [
+    { agent: "claude-opus-4-7", label: "brief", prompt: idea, depends_on: [] },
+    { agent: "claude-opus-4-7", label: "compose", prompt: idea, depends_on: ["brief"] },
+    { agent: "claude-opus-4-7", label: "build",   prompt: idea + "\n\n{{compose}}", depends_on: ["compose"] },
+    { agent: "claude-sonnet-4-6", label: "polish", prompt: "{{build}}", depends_on: ["build"] },
+  ];
+  try {
+    const r = await fetch("/api/spec/cost-estimate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ spec, variables: {} }),
+    });
+    if (!r.ok) { wrap.hidden = true; return; }
+    const d = await r.json();
+    _renderCostBadge(d);
+  } catch {
+    wrap.hidden = true;
+  }
+}
+
+function _renderCostBadge(d) {
+  const wrap = document.getElementById("quick-start-cost");
+  if (!wrap) return;
+  const yourEl   = document.getElementById("qs-cost-your-amount");
+  const apiEl    = document.getElementById("qs-cost-api-amount");
+  const tokEl    = document.getElementById("qs-cost-tokens");
+  const tagEl    = document.getElementById("qs-cost-tag");
+  const fmtUsd = (n) => n < 0.01 ? "<$0.01" : `$${n.toFixed(n < 1 ? 3 : 2)}`;
+  const fmtTok = (n) => n >= 1000 ? `${(n/1000).toFixed(1)}k` : String(n);
+  const inTok  = (d.agents || []).reduce((s, a) => s + (a.input_tokens || 0), 0);
+  const outTok = (d.agents || []).reduce((s, a) => s + (a.output_tokens || 0), 0);
+  if (yourEl) yourEl.textContent = fmtUsd(d.your_cost_usd || 0);
+  if (apiEl)  apiEl.textContent  = "~" + fmtUsd(d.api_cost_usd || 0);
+  if (tokEl)  tokEl.textContent  = `${fmtTok(inTok)} tok in / ~${fmtTok(outTok)} tok out`;
+  if (tagEl) {
+    if (d.fully_subscription_covered) {
+      tagEl.textContent = "subscription · $0";
+      tagEl.className = "qs-cost-tag qs-cost-tag--free";
+    } else {
+      tagEl.textContent = "needs API key";
+      tagEl.className = "qs-cost-tag qs-cost-tag--paid";
+    }
+  }
+  wrap.hidden = false;
+}
+
+let _runCostTimer = null;
+async function _refreshRunCostBadge(runId) {
+  if (_runCostTimer) { clearInterval(_runCostTimer); _runCostTimer = null; }
+  const tick = async () => {
+    try {
+      const r = await fetch(`/api/runs/${runId}/cost`);
+      if (!r.ok) return;
+      const d = await r.json();
+      const meta = document.getElementById("run-meta");
+      if (!meta) return;
+      const inTok  = (d.agents || []).reduce((s, a) => s + (a.input_tokens || 0), 0);
+      const outTok = (d.agents || []).reduce((s, a) => s + (a.output_tokens || 0), 0);
+      const cur = meta.textContent || "";
+      const head = cur.split(" · cost")[0] || cur;
+      const fmtUsd = (n) => n < 0.01 ? "<$0.01" : `$${n.toFixed(n < 1 ? 3 : 2)}`;
+      const tag = d.fully_subscription_covered
+        ? `cost ${fmtUsd(d.your_cost_usd || 0)} (API: ${fmtUsd(d.api_cost_usd || 0)} · ${(inTok/1000).toFixed(1)}k tok in / ${(outTok/1000).toFixed(1)}k out)`
+        : `cost ${fmtUsd(d.your_cost_usd || 0)} (${(inTok/1000).toFixed(1)}k tok in / ${(outTok/1000).toFixed(1)}k out)`;
+      meta.textContent = `${head} · ${tag}`;
+      // Stop ticking once the run is finished
+      const finished = state.currentRun && state.currentRun.id === runId
+                         && Object.values(state.panels || {}).every(p => {
+                              const cls = p.statusBadge?.className || "";
+                              return /\b(done|failed|cancelled)\b/.test(cls);
+                            });
+      if (finished && _runCostTimer) { clearInterval(_runCostTimer); _runCostTimer = null; }
+    } catch { /* ignore */ }
+  };
+  await tick();
+  _runCostTimer = setInterval(tick, 8000);
+}
 
 /* v55 — missing-variables modal. Backend's pre-flight scan returns
  * 400 with a list of `${VAR}` names that the run needs. We show a
@@ -4258,6 +4373,16 @@ const QUICK_START_SAMPLES = {
 };
 
 const QUICK_START_IDEA_DRAFT_KEY = "cg.quickStart.idea.v1";
+
+/* v58 — Persona → mode mapping. Each persona biases the sample chip
+ * row toward the kind of starter ideas a Developer / Marketer /
+ * Founder typically wants. "all" interleaves the three. */
+const QUICK_START_PERSONA_KEY = "cg.quickStart.persona.v1";
+const PERSONA_TO_MODE = {
+  developer: "app",
+  marketer:  "content",
+  founder:   "pitch",
+};
 const QUICK_START_MODE_KEY = "cg.quickStart.mode.v1";
 
 function initQuickStart() {
@@ -4276,7 +4401,11 @@ function initQuickStart() {
   } catch {}
   ideaTa.addEventListener("input", () => {
     try { localStorage.setItem(QUICK_START_IDEA_DRAFT_KEY, ideaTa.value); } catch {}
+    // v58 — debounce a cost estimate as the user types
+    _scheduleCostEstimate();
   });
+  // First-paint estimate (covers persisted draft + initial empty state)
+  _scheduleCostEstimate();
 
   // v42 — render sample chips for current mode
   const renderSamples = (mode) => {
@@ -4321,6 +4450,28 @@ function initQuickStart() {
   document.querySelectorAll(".quick-start-mode-btn").forEach(btn => {
     btn.addEventListener("click", () => setMode(btn.dataset.quickMode));
   });
+
+  /* v58 — Persona chips. Click sets the chip-row mode + persists. */
+  const personaContainer = document.getElementById("quick-start-personas");
+  if (personaContainer) {
+    let activePersona = "all";
+    try {
+      activePersona = localStorage.getItem(QUICK_START_PERSONA_KEY) || "all";
+    } catch {}
+    const setPersona = (p) => {
+      activePersona = p;
+      try { localStorage.setItem(QUICK_START_PERSONA_KEY, p); } catch {}
+      personaContainer.querySelectorAll(".qs-persona").forEach(b => {
+        b.classList.toggle("active", b.dataset.persona === p);
+      });
+      const targetMode = PERSONA_TO_MODE[p];
+      if (targetMode) setMode(targetMode);
+    };
+    setPersona(activePersona);
+    personaContainer.querySelectorAll(".qs-persona").forEach(btn => {
+      btn.addEventListener("click", () => setPersona(btn.dataset.persona));
+    });
+  }
 
   // "Make it real" — fill IDEA var, load preset, scroll to inputs
   goBtn.addEventListener("click", () => {

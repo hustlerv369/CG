@@ -5345,3 +5345,131 @@ body.status-bar-hidden .status-bar { display: none; }
   0%, 100% { opacity: 0.55; }
   50%      { opacity: 1; }
 }
+
+/* ============================================================
+ * v58 — Cost estimate badge (Quick Start) + run-meta cost suffix
+ *
+ * Honest dual pricing: shows what the user pays (typically $0
+ * with Claude Pro + Google subscription) AND what someone on raw
+ * API would pay. Big "your cost" line (the truthful number for
+ * THIS user), small "API equivalent" line for comparison vs
+ * Make/n8n/Zapier-style "$X per run" pitches.
+ * ============================================================ */
+.quick-start-cost {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 14px;
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-coral) 8%, var(--bg-input)),
+    color-mix(in srgb, var(--accent-amber) 8%, var(--bg-input)));
+  border: 1px solid color-mix(in srgb, var(--accent-coral) 18%, var(--border));
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.qs-cost-icon {
+  font-size: 18px;
+  line-height: 1.2;
+  flex-shrink: 0;
+}
+.qs-cost-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  flex: 1;
+}
+.qs-cost-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.qs-cost-your {
+  color: var(--fg-primary);
+  font-weight: 500;
+}
+.qs-cost-your strong {
+  font: 700 14px/1 var(--font-mono);
+  background: linear-gradient(90deg, var(--accent-coral), var(--accent-amber));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-variant-numeric: tabular-nums;
+}
+.qs-cost-api {
+  color: var(--fg-tertiary);
+  font-size: 11.5px;
+}
+.qs-cost-api span {
+  font-variant-numeric: tabular-nums;
+}
+.qs-cost-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font: 600 10px/1.4 var(--font-mono);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.qs-cost-tag.qs-cost-tag--free {
+  background: rgba(78, 201, 176, 0.16);
+  color: #4ec9b0;
+  border: 1px solid rgba(78, 201, 176, 0.32);
+}
+.qs-cost-tag.qs-cost-tag--paid {
+  background: rgba(244, 135, 113, 0.16);
+  color: #f48771;
+  border: 1px solid rgba(244, 135, 113, 0.32);
+}
+
+/* ============================================================
+ * v58 — Persona chips (Developer / Marketer / Founder / All)
+ * Sit between the hero header and the textarea. Click sets the
+ * sample-idea chip row mode below + persists to localStorage so
+ * the user lands on their persona on refresh.
+ * ============================================================ */
+.quick-start-personas {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: 10px 0 14px;
+}
+.qs-persona-label {
+  font-size: 12px;
+  color: var(--fg-tertiary);
+  margin-right: 4px;
+}
+.qs-persona {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px 5px 10px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg-secondary);
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition: all 140ms;
+}
+.qs-persona:hover {
+  background: var(--bg-card);
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-coral) 32%, var(--border));
+}
+.qs-persona.active {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent-coral) 22%, var(--bg-secondary)),
+    color-mix(in srgb, var(--accent-amber) 22%, var(--bg-secondary)));
+  color: var(--fg-primary);
+  border-color: color-mix(in srgb, var(--accent-coral) 60%, transparent);
+  font-weight: 600;
+}
+.qsp-icon {
+  font-size: 14px;
+  line-height: 1;
+}

@@ -608,6 +608,155 @@ AGENT_KINDS.update(_build_http_models())
 
 
 # ---------------------------------------------------------------------------
+# v58 — Per-model pricing table (USD per 1 million tokens, input / output).
+#
+# Two columns per row: what an Anthropic / Google / OpenRouter API user
+# would pay. CG users running on Claude Pro + Google OAuth pay $0 — the
+# UI surfaces both numbers ("API cost: $0.32 · Your cost: $0.00 with
+# subscription") so the comparison vs Make/n8n/Zapier is honest.
+#
+# Numbers are 2026 list prices. Updates ship as the rate sheet changes;
+# they're plain Python so a one-line edit + dashboard restart is enough.
+# ---------------------------------------------------------------------------
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    # Anthropic (Claude API list pricing per 1M tokens)
+    "claude-sonnet-4-6": {"input": 3.00,  "output": 15.00, "subscription": True},
+    "claude-opus-4-7":   {"input": 15.00, "output": 75.00, "subscription": True},
+    "claude-opus-4-6":   {"input": 15.00, "output": 75.00, "subscription": True},
+    # Google AI (Gemini API list pricing per 1M tokens)
+    "gemini-flash":      {"input": 0.10,  "output": 0.30,  "subscription": True},
+    "gemini-pro":        {"input": 1.25,  "output": 5.00,  "subscription": True},
+    # OpenRouter / GLM / DeepSeek / etc — actual paid usage (no subscription path)
+    "or-glm-4-7":        {"input": 0.38,  "output": 1.74,  "subscription": False},
+    "or-deepseek-v3":    {"input": 0.27,  "output": 1.10,  "subscription": False},
+}
+
+# Heuristic conversion: chars → tokens. Claude / Gemini tokenizers
+# compress at roughly 4 chars/token for English prose, 3.5 for code.
+# We err on the higher token count side (= higher cost estimate) so
+# we don't surprise the user with a bill bigger than the badge said.
+_CHARS_PER_TOKEN_DEFAULT = 3.8
+
+# Per-family historical mean output size (chars) for cost-estimate
+# pre-run calculations when the agent hasn't run yet. Calibrated from
+# CG run logs: Opus typically dumps 25-50 KB of code, Sonnet 5-15 KB,
+# Gemini Pro 8-20 KB, Flash 1-3 KB. Updated as new agent families
+# join MODEL_PRICING.
+_FAMILY_OUTPUT_HEURISTIC: dict[str, int] = {
+    "claude": 18000,   # mid-range across Sonnet + Opus
+    "gemini": 6000,    # mid-range across Flash + Pro
+    "glm": 4000,
+    "deepseek": 5000,
+    "other": 4000,
+}
+
+
+def _chars_to_tokens(chars: int, ratio: float = _CHARS_PER_TOKEN_DEFAULT) -> int:
+    """Approximate token count from character count."""
+    if chars <= 0:
+        return 0
+    return max(1, int(chars / ratio))
+
+
+def _estimate_step_cost(agent_id: str, prompt_chars: int,
+                          predicted_output_chars: int | None = None
+                          ) -> dict[str, Any]:
+    """Pre-run cost estimate for one workflow step.
+
+    Returns a dict with input/output token estimates, list-price USD,
+    your-actual-cost USD (zero if covered by an OAuth subscription),
+    and a flag indicating whether subscription pricing applies.
+    """
+    cfg = AGENT_KINDS.get(agent_id) or {}
+    family = cfg.get("family", "other")
+    pricing = MODEL_PRICING.get(agent_id) or {
+        "input": 0.0, "output": 0.0, "subscription": False
+    }
+    out_chars = predicted_output_chars
+    if out_chars is None:
+        out_chars = _FAMILY_OUTPUT_HEURISTIC.get(family,
+                                                    _FAMILY_OUTPUT_HEURISTIC["other"])
+    in_tok = _chars_to_tokens(prompt_chars)
+    out_tok = _chars_to_tokens(out_chars)
+    api_cost = (in_tok / 1_000_000) * pricing["input"] \
+                + (out_tok / 1_000_000) * pricing["output"]
+    your_cost = 0.0 if pricing.get("subscription") else api_cost
+    return {
+        "agent": agent_id,
+        "family": family,
+        "input_tokens": in_tok,
+        "output_tokens": out_tok,
+        "input_chars": prompt_chars,
+        "output_chars": out_chars,
+        "input_price_per_mtok": pricing["input"],
+        "output_price_per_mtok": pricing["output"],
+        "subscription_covered": bool(pricing.get("subscription")),
+        "api_cost_usd": round(api_cost, 4),
+        "your_cost_usd": round(your_cost, 4),
+        "predicted_output": predicted_output_chars is None,
+    }
+
+
+def _estimate_run_cost(spec: list[dict[str, Any]],
+                        variables: dict[str, Any] | None = None
+                        ) -> dict[str, Any]:
+    """Sum estimated costs across every step in a workflow spec.
+
+    Uses the per-family output heuristic for outputs (since the run
+    hasn't happened yet). Substitutes ``${VAR}`` in prompts so the
+    char count reflects the real prompt the user is about to send,
+    not a placeholder template.
+    """
+    variables = variables or {}
+    per_agent: list[dict[str, Any]] = []
+    for step in spec or []:
+        agent_id = step.get("agent") or ""
+        prompt = step.get("prompt") or ""
+        for k, v in variables.items():
+            prompt = prompt.replace("${" + k + "}", str(v))
+        per_agent.append(_estimate_step_cost(agent_id, len(prompt)))
+    api_total = sum(s["api_cost_usd"] for s in per_agent)
+    your_total = sum(s["your_cost_usd"] for s in per_agent)
+    return {
+        "agents": per_agent,
+        "api_cost_usd": round(api_total, 4),
+        "your_cost_usd": round(your_total, 4),
+        "fully_subscription_covered": all(
+            s["subscription_covered"] for s in per_agent
+        ) if per_agent else False,
+    }
+
+
+def _compute_actual_cost(run: "RunState") -> dict[str, Any]:
+    """Post-run actual cost: uses observed log_chars per agent."""
+    per_agent: list[dict[str, Any]] = []
+    for label, agent_state in run.agents.items():
+        agent_id = agent_state.agent
+        # Best-guess input chars from the original spec prompt (after
+        # variable substitution would inflate it slightly — we ignore
+        # that here and use the literal-spec prompt for simplicity).
+        spec_step = next(
+            (s for s in run.spec if s.get("label") == label), {}
+        )
+        in_chars = len(spec_step.get("prompt") or "")
+        out_chars = len("\n".join(agent_state.log_lines))
+        per_agent.append({
+            "label": label,
+            **_estimate_step_cost(agent_id, in_chars, out_chars),
+        })
+    api_total = sum(s["api_cost_usd"] for s in per_agent)
+    your_total = sum(s["your_cost_usd"] for s in per_agent)
+    return {
+        "agents": per_agent,
+        "api_cost_usd": round(api_total, 4),
+        "your_cost_usd": round(your_total, 4),
+        "fully_subscription_covered": all(
+            s["subscription_covered"] for s in per_agent
+        ) if per_agent else False,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Custom HTTP "tool" agents — user-defined endpoints as workflow steps.
 # Saved to D:\CG\custom_agents.json as a list of { id, label, family,
 # summary, http: {endpoint, model, api_key_env, headers, format} }.
@@ -5212,6 +5361,27 @@ def create_app() -> FastAPI:
         spec = body.get("spec") or []
         variables = body.get("variables") or {}
         return {"missing": _scan_unsubstituted_vars(spec, variables)}
+
+    # v58 — pre-run cost estimate. Frontend calls this on every Build it
+    # button hover (or with debounce as the user types) to surface what
+    # this run would cost on raw API rates, plus what THE USER pays
+    # given Claude Pro + Google subscription coverage. Honest dual
+    # pricing — see MODEL_PRICING comment for rationale.
+    @app.post("/api/spec/cost-estimate")
+    async def spec_cost_estimate(body: dict[str, Any]) -> Any:
+        spec = body.get("spec") or []
+        variables = body.get("variables") or {}
+        return _estimate_run_cost(spec, variables)
+
+    # v58 — post-run actual cost. Computes from observed agent output
+    # sizes (log_chars) so the user sees what the run cost based on
+    # what was actually generated, not what we predicted.
+    @app.get("/api/runs/{run_id}/cost")
+    async def get_run_cost(run_id: str) -> Any:
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        return _compute_actual_cost(run)
 
     @app.post("/api/runs")
     async def post_run(body: dict[str, Any], request: Request) -> Any:

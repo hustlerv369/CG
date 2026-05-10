@@ -134,6 +134,28 @@
           <p class="quick-start-sub">Type your idea once. A team of AIs will design,
             build, test, and document it for you.</p>
         </header>
+        <!-- v58 — Persona chips. Click one to switch the sample-idea
+             chips below to ones tailored for your role. Persistence in
+             localStorage. -->
+        <div class="quick-start-personas" id="quick-start-personas">
+          <span class="qs-persona-label">I'm a:</span>
+          <button class="qs-persona" data-persona="developer"
+                  title="Apps, websites, SaaS, technical specs, debugging — engineering-flavored ideas">
+            <span class="qsp-icon">👨‍💻</span><span>Developer</span>
+          </button>
+          <button class="qs-persona" data-persona="marketer"
+                  title="Landing pages, blog posts, ads, social campaigns, SEO — content-flavored ideas">
+            <span class="qsp-icon">📣</span><span>Marketer</span>
+          </button>
+          <button class="qs-persona" data-persona="founder"
+                  title="Pitch decks, business plans, market research, brand identity — business-flavored ideas">
+            <span class="qsp-icon">🚀</span><span>Founder</span>
+          </button>
+          <button class="qs-persona" data-persona="all"
+                  title="Show every kind of starter idea — no filter">
+            <span class="qsp-icon">🎯</span><span>All</span>
+          </button>
+        </div>
         <textarea id="quick-start-idea" class="quick-start-textarea"
                   placeholder="e.g. An app for solo freelancers to track time and auto-generate invoices in PDF. Mobile-first. Stripe payments. Dark mode default."
                   rows="4"></textarea>
@@ -158,6 +180,23 @@
             <input type="checkbox" id="quick-start-auto-mode" checked>
             <span>auto mode</span>
           </label>
+          <!-- v58 — live cost estimate. Updates as the user types into
+               the idea textarea OR loads a preset. Shows raw API price
+               + your-actual price (typically $0 with Claude Pro + Google
+               subscription). Honest dual pricing. -->
+          <div class="quick-start-cost" id="quick-start-cost" hidden>
+            <span class="qs-cost-icon">💰</span>
+            <span class="qs-cost-text">
+              <span class="qs-cost-line qs-cost-your">
+                Your cost: <strong id="qs-cost-your-amount">$0.00</strong>
+                <span class="qs-cost-tag" id="qs-cost-tag">subscription</span>
+              </span>
+              <span class="qs-cost-line qs-cost-api">
+                If on API: <span id="qs-cost-api-amount">~$0.00</span>
+                · <span id="qs-cost-tokens">0 tok in / 0 tok out</span>
+              </span>
+            </span>
+          </div>
           <!-- Power users: skip the Conductor and go straight to a fixed
                template (faster startup — no Phase-1/2 design step). -->
           <details class="quick-start-power">
