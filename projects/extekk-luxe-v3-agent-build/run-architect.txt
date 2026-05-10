@@ -1,0 +1,1 @@
+{"label":"architect","log":"[error] no output in 90s — killing subprocess (likely API queueing or frozen client)"}

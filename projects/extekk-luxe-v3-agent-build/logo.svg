@@ -1,0 +1,13 @@
+<svg viewBox="0 0 360 80" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <style>
+      .wordmark { font-family: 'Syne', sans-serif; font-weight: 700; font-size: 56px; letter-spacing: -0.04em; fill: #ffffff; }
+    </style>
+  </defs>
+  <g transform="translate(10, 0)">
+    <path d="M20 10 L35 10 L45 20 L45 60 L35 70 L20 70 L10 60 L10 20 Z" fill="none" stroke="#ffffff" stroke-width="1.5">
+      <animate attributeName="stroke-dasharray" from="0 200" to="200 200" dur="1.5s" begin="0.2s" fill="freeze" keyTimes="0; 1" values="0 200; 200 0" calcMode="spline" keySplines="0.22, 1, 0.36, 1"/>
+    </path>
+    <text x="70" y="62" class="wordmark">EXTEKK</text>
+  </g>
+</svg>
