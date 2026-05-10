@@ -2007,29 +2007,58 @@ function addAgentRow(spec = {}) {
   tpl.querySelector(".remove").onclick = () => {
     tpl.remove();
     if (typeof renderInputsPanel === "function") renderInputsPanel();
+    // v57.1 — keep Visual canvas in sync when a step is removed.
+    if (typeof renderVisualCanvas === "function" &&
+        $("#visual-pane")?.style.display !== "none") {
+      renderVisualCanvas();
+    }
   };
   $("#agent-rows").appendChild(tpl);
 
   // K4 — toggle step builder on agent change + on initial render
   applyBrowserMode(tpl, spec);
-  sel.addEventListener("change", () => applyBrowserMode(tpl, { prompt: tpl.querySelector(".prompt").value }));
+  sel.addEventListener("change", () => {
+    applyBrowserMode(tpl, { prompt: tpl.querySelector(".prompt").value });
+    // v57.1 — repaint Visual canvas (model badge / family colour change)
+    if (typeof renderVisualCanvas === "function" &&
+        $("#visual-pane")?.style.display !== "none") {
+      renderVisualCanvas();
+    }
+  });
 
   // v39 — re-detect variables when user edits the prompt or label
-  const promptEl = tpl.querySelector(".prompt");
-  const labelEl  = tpl.querySelector(".label");
+  // v57.1 — also re-render Visual canvas: label changes rename the node,
+  // depends_on changes rewire the edges. Debounced 400ms together with
+  // the inputs-panel refresh.
+  const promptEl   = tpl.querySelector(".prompt");
+  const labelEl    = tpl.querySelector(".label");
+  const dependsEl  = tpl.querySelector(".depends_on");
   let varTimer = null;
   const onPromptChange = () => {
     clearTimeout(varTimer);
     varTimer = setTimeout(() => {
       if (typeof renderInputsPanel === "function") renderInputsPanel();
+      if (typeof renderVisualCanvas === "function" &&
+          $("#visual-pane")?.style.display !== "none") {
+        renderVisualCanvas();
+      }
     }, 400);
   };
-  if (promptEl) promptEl.addEventListener("input", onPromptChange);
-  if (labelEl)  labelEl.addEventListener("input", onPromptChange);
+  if (promptEl)  promptEl.addEventListener("input", onPromptChange);
+  if (labelEl)   labelEl.addEventListener("input", onPromptChange);
+  if (dependsEl) dependsEl.addEventListener("input", onPromptChange);
 
   // First-paint refresh after this row is added
   if (typeof renderInputsPanel === "function") {
     requestAnimationFrame(() => renderInputsPanel());
+  }
+  // v57.1 — Bug fix: clicking "+ add step" while Visual view is active
+  // used to leave the new node invisible on the canvas. addAgentRow()
+  // now repaints the canvas right after appending the row, picking up
+  // the new label + auto-positioning it via topoLayout.
+  if (typeof renderVisualCanvas === "function" &&
+      $("#visual-pane")?.style.display !== "none") {
+    requestAnimationFrame(() => renderVisualCanvas());
   }
 }
 
