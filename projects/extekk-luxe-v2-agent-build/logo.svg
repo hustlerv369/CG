@@ -1,0 +1,10 @@
+<svg viewBox="0 0 320 80" xmlns="http://www.w3.org/2000/svg">
+  <!-- Stylized Terminal Cursor Accent -->
+  <path d="M 10 25 L 10 55 L 25 55 L 25 50 L 15 50 L 15 30 L 25 30 L 25 25 Z" fill="#FFFFFF"/>
+  <path d="M 30 55 L 42 55 L 42 50 L 35 50 L 35 30 L 42 30 L 42 25 L 30 25 Z" fill="#FFFFFF" transform="translate(5, 0)"/>
+
+  <!-- Wordmark 'EXTEKK' -->
+  <text x="75" y="58" font-family="monospace" font-size="42" font-weight="bold" fill="#FFFFFF" letter-spacing="-2">
+    EXTEKK
+  </text>
+</svg>

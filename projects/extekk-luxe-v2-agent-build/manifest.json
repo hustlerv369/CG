@@ -1,0 +1,18 @@
+{
+  "name": "EXTEKK",
+  "short_name": "EXTEKK",
+  "description": "Your server can't die anymore. EXTEKK rebuilds nuked Discord servers in under a second.",
+  "start_url": "/",
+  "display": "standalone",
+  "theme_color": "#00FF94",
+  "background_color": "#000000",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "/logo.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}
