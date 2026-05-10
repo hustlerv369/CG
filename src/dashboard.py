@@ -1301,7 +1301,57 @@ class RunManager:
                          and agent_state.max_rounds > 1
                          and agent_state.iterate_with in run.agents)
 
+        # v55 — auto-retry once on transient failure. Default 1 retry
+        # for claude/gemini agents (provider queueing recovery, network
+        # blips, OAuth token rotation). Spec steps can override with
+        # `auto_retry: 0` (disable) or `auto_retry: N` (more retries).
+        # Eligible exit codes: 1 (generic CLI failure), -9 (wall-clock
+        # SIGKILL — usually means we underestimated the time budget,
+        # second pass might fit). Exit 0 (success) and other codes
+        # (auth failure, missing CLI, etc.) are NOT retried.
+        spec_step = next(
+            (s for s in run.spec if s.get("label") == label), {}
+        )
+        family_for_retry = ""
+        try:
+            family_for_retry = AGENT_KINDS.get(agent, {}).get("family", "")
+        except Exception:
+            pass
+        default_retry = 1 if family_for_retry in ("claude", "gemini") else 0
+        retry_field = spec_step.get("auto_retry")
+        max_retries = int(retry_field) if retry_field is not None else default_retry
+        retries_used = 0
+        retry_eligible_codes = {1, -9}
+
         self._run_one(run, label, agent, rendered)
+        while (
+            agent_state.status == "failed"
+            and agent_state.exit_code in retry_eligible_codes
+            and retries_used < max_retries
+        ):
+            retries_used += 1
+            msg = (
+                f"[auto-retry] attempt {retries_used}/{max_retries} after "
+                f"exit_code={agent_state.exit_code} — provider queueing or "
+                f"transient CLI failure, retrying with fresh subprocess"
+            )
+            agent_state.log_lines.append(msg)
+            self._emit(run.id, label, {"event": "log", "data": {
+                "label": label, "line": msg}})
+            self._emit(run.id, label, {"event": "activity", "data": {
+                "label": label,
+                "text": f"auto-retry · attempt {retries_used}/{max_retries}",
+                "source": "retry",
+            }})
+            # Reset transient state for fresh attempt; keep depends_on,
+            # streaming, role, max_rounds, etc.
+            agent_state.status = "running"
+            agent_state.started = None
+            agent_state.finished = None
+            agent_state.exit_code = None
+            agent_state.first_visible_at = None
+            agent_state.last_activity_at = None
+            self._run_one(run, label, agent, rendered)
         agent_state.rounds_completed = max(1, agent_state.rounds_completed)
 
         if (will_iterate and agent_state.status == "done"):
@@ -5134,12 +5184,70 @@ def create_app() -> FastAPI:
             "categories": MISSION_CATEGORIES,
         }
 
+    # v55 — pre-flight ${VAR} validator. Scans every step's prompt for
+    # `${NAME}` placeholders and reports the set of variables that the
+    # supplied `variables` dict does NOT cover. Used by both the dispatch
+    # endpoint (returns 400 with missing list, frontend prompts user)
+    # and a standalone `/api/spec/missing-vars` endpoint (used to peek
+    # before submitting). Pattern matches uppercase A-Z, 0-9, underscore;
+    # bracket form `${ ... }` only — `$VAR` shell-style is intentionally
+    # NOT matched, since prompts often contain literal `$variable` text
+    # in code examples.
+    _VAR_RE = _re.compile(r"\$\{([A-Z][A-Z0-9_]*)\}")
+
+    def _scan_unsubstituted_vars(spec_list: list[dict[str, Any]],
+                                  variables: dict[str, Any]) -> list[str]:
+        provided = set((variables or {}).keys())
+        missing: set[str] = set()
+        for step in spec_list or []:
+            prompt = (step or {}).get("prompt") or ""
+            for m in _VAR_RE.finditer(prompt):
+                name = m.group(1)
+                if name not in provided:
+                    missing.add(name)
+        return sorted(missing)
+
+    @app.post("/api/spec/missing-vars")
+    async def spec_missing_vars(body: dict[str, Any]) -> Any:
+        spec = body.get("spec") or []
+        variables = body.get("variables") or {}
+        return {"missing": _scan_unsubstituted_vars(spec, variables)}
+
     @app.post("/api/runs")
     async def post_run(body: dict[str, Any], request: Request) -> Any:
         title = body.get("title") or "untitled"
         spec = body.get("spec") or []
         if not isinstance(spec, list) or not spec:
             raise HTTPException(400, "spec must be a non-empty array")
+        # v55 — pre-flight validator: refuse runs where prompts contain
+        # `${VAR}` placeholders that no variable covers. Old behavior
+        # silently substituted nothing → director got literal `${IDEA}`
+        # in its prompt and (correctly) refused to invent an idea, but
+        # all 6 downstream agents still ran for 5+ minutes on garbage
+        # before the user noticed. New behavior fails fast with a
+        # structured response the frontend turns into a "Fill in: ..."
+        # modal. To bypass (e.g. when the variable is supplied via
+        # another mechanism), pass `?skip_var_check=1` as a query param.
+        skip_var_check = request.query_params.get("skip_var_check") in (
+            "1", "true", "yes",
+        )
+        body_vars = body.get("variables") or {}
+        if not skip_var_check:
+            missing = _scan_unsubstituted_vars(spec, body_vars)
+            if missing:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "error": "missing_variables",
+                        "variables": missing,
+                        "message": (
+                            f"Run requires variable(s): {', '.join(missing)}. "
+                            "Pass them in the request body's `variables` "
+                            "dict, or append `?skip_var_check=1` to skip "
+                            "this check."
+                        ),
+                    },
+                )
         # Browser-supplied secrets (Settings tab) come in via headers so
         # they live only in localStorage + a single request body, never
         # on disk. Each runner reads its key by env var name; we set
@@ -5425,6 +5533,52 @@ def create_app() -> FastAPI:
             "skipped": skipped,
             "project_dir": str(project_dir),
         }
+
+    # v55 — Output hub: download the materialized project as a ZIP. Runs
+    # export-project first if the project folder doesn't exist yet, so
+    # one click closes the loop "agents finished → I have a working
+    # codebase on disk". Returns the ZIP as a streaming response.
+    @app.get("/api/runs/{run_id}/export-zip")
+    async def export_zip(run_id: str) -> Any:
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        project_dir = RUNS_DIR / run.id / "project"
+        if not project_dir.exists() or not any(project_dir.rglob("*")):
+            # Auto-trigger export-project to materialize files first
+            await export_project(run_id)
+        if not project_dir.exists() or not any(project_dir.rglob("*")):
+            raise HTTPException(
+                404,
+                "no exportable files — agents didn't emit fenced code "
+                "blocks with file-path comments",
+            )
+        # Build ZIP in memory (small projects only — 99% of runs < 500 KB)
+        import io as _io
+        import zipfile as _zip
+        buf = _io.BytesIO()
+        with _zip.ZipFile(buf, "w", _zip.ZIP_DEFLATED) as zf:
+            for path in project_dir.rglob("*"):
+                if path.is_file():
+                    arc = path.relative_to(project_dir).as_posix()
+                    try:
+                        zf.write(path, arc)
+                    except OSError:
+                        pass
+        buf.seek(0)
+        safe_title = "".join(
+            c if c.isalnum() or c in "-_" else "-"
+            for c in (run.title or run.id)
+        )[:60].strip("-") or run.id
+        filename = f"{safe_title}-{run.id[:8]}.zip"
+        return Response(
+            content=buf.getvalue(),
+            media_type="application/zip",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(buf.getvalue())),
+            },
+        )
 
     @app.post("/api/runs/{run_id}/export-to-open-design")
     async def export_to_open_design(run_id: str) -> Any:

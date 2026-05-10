@@ -2086,11 +2086,38 @@ async function startRun() {
 
   let runId;
   try {
-    const r = await fetch("/api/runs", {
+    let r = await fetch("/api/runs", {
       method: "POST",
       headers,
       body: JSON.stringify({ title, spec, variables }),
     });
+    // v55 — handle missing-variables 400. Backend pre-flight scans
+    // every prompt for `${VAR}` placeholders and refuses dispatch if
+    // any aren't covered. Frontend prompts the user via a modal dialog,
+    // then re-dispatches with the merged variables.
+    if (r.status === 400) {
+      const errBody = await r.json().catch(() => null);
+      const detail = errBody && errBody.detail;
+      if (detail && detail.error === "missing_variables" && Array.isArray(detail.variables)) {
+        const collected = await promptMissingVariables(detail.variables);
+        if (!collected) {
+          // user cancelled
+          return;
+        }
+        const mergedVars = { ...variables, ...collected };
+        // Optional: persist to Settings for future runs
+        try {
+          const s = loadSettings();
+          s.variables = { ...(s.variables || {}), ...collected };
+          persistSettings(s);
+        } catch (_) { /* non-fatal */ }
+        r = await fetch("/api/runs", {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ title, spec, variables: mergedVars }),
+        });
+      }
+    }
     if (!r.ok) {
       const err = await r.text();
       alert(`Server error: ${err}`);
@@ -2148,10 +2175,44 @@ async function openRun(runId) {
     <button class="ghost" id="cancel-btn">⨯ Cancel</button>
     <button class="ghost" id="rerun-btn">↻ Reload</button>
     <button class="ghost" id="export-btn">⬇ Export .md</button>
+    <button class="ghost primary-soft" id="export-zip-btn"
+       title="Download every fenced code block from this run as a working project ZIP (auto-extracts files via path comments).">📦 Download ZIP</button>
     <button class="ghost" id="full-page-btn"
        title="Open the rendered HTML/SVG in a new tab (full window — scroll, hover, scroll-snap all work). Picks the LAST agent with a renderable artifact (polish wins over implement).">↗ Open full page</button>
     <button class="ghost" id="open-design-btn" title="Drop this run's report into Open Design's imports/ folder">🎨 Open in OD</button>
   `;
+  // v55 — One-click ZIP download. Backend auto-runs export-project if
+  // the project folder doesn't exist yet, then streams the ZIP. Closes
+  // the loop "agents finished → I have files I can run".
+  tools.querySelector("#export-zip-btn").onclick = async () => {
+    const btn = tools.querySelector("#export-zip-btn");
+    const orig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "📦 Building…";
+    try {
+      const r = await fetch(`/api/runs/${meta.id}/export-zip`);
+      if (!r.ok) {
+        const errText = await r.text();
+        alert("ZIP export failed:\n" + errText);
+        return;
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const cd = r.headers.get("Content-Disposition") || "";
+      const m = cd.match(/filename="([^"]+)"/);
+      a.download = m ? m[1] : `cg-${meta.id}.zip`;
+      document.body.appendChild(a); a.click();
+      setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 200);
+      if (typeof toast === "function") toast(`Downloaded ${a.download}`, 3000);
+    } catch (e) {
+      alert("Network error: " + e);
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
+  };
   tools.querySelector("#full-page-btn").onclick = async () => {
     // Sniff the endpoint with a small Range GET so we can show a
     // friendly toast when nothing renderable was produced, rather
@@ -2325,11 +2386,25 @@ function buildPanel(agent) {
   const roleHtml = roleBadgeHtml(agent.role);
   root.innerHTML = `
     <div class="agent-panel-head">
-      <div class="title">
-        <span class="agent-family-dot agent-family-${fam}" aria-hidden="true"></span>
-        ${roleHtml}
-        <span class="agent-label">${escapeHtml(agent.label)}</span>
-        ${depsHtml}
+      <div class="agent-panel-head__top">
+        <div class="title">
+          <span class="agent-family-dot agent-family-${fam}" aria-hidden="true"></span>
+          ${roleHtml}
+          <span class="agent-label">${escapeHtml(agent.label)}</span>
+          ${depsHtml}
+        </div>
+        <div class="agent-panel-actions" aria-label="Panel actions">
+          <button class="ap-action ap-replay" title="Replay this step + downstream"
+                  aria-label="Replay from here">
+            <span class="ap-icon">🔁</span>
+          </button>
+          <button class="ap-action ap-copy" title="Copy log (C)" aria-label="Copy log">
+            <span class="ap-icon">⧉</span>
+          </button>
+          <button class="ap-action ap-fullscreen" title="Fullscreen (F)" aria-label="Fullscreen">
+            <span class="ap-icon">⛶</span>
+          </button>
+        </div>
       </div>
       <div class="badges">
         <span class="badge ${fam}" title="${escapeHtml(agent.agent)}">${escapeHtml(modelLabel)}</span>
@@ -2345,18 +2420,6 @@ function buildPanel(agent) {
         </span>` : ""}
         <span class="agent-elapsed" data-elapsed hidden>--:--</span>
         <span class="agent-tokens" data-tokens hidden>0 tok</span>
-      </div>
-      <div class="agent-panel-actions" aria-label="Panel actions">
-        <button class="ap-action ap-replay" title="Replay this step + downstream"
-                aria-label="Replay from here">
-          <span class="ap-icon">🔁</span>
-        </button>
-        <button class="ap-action ap-copy" title="Copy log (C)" aria-label="Copy log">
-          <span class="ap-icon">⧉</span>
-        </button>
-        <button class="ap-action ap-fullscreen" title="Fullscreen (F)" aria-label="Fullscreen">
-          <span class="ap-icon">⛶</span>
-        </button>
       </div>
     </div>
     <div class="agent-currently" aria-live="polite">
@@ -2835,6 +2898,85 @@ async function refreshHistory() {
 }
 
 // ---------- helpers ----------
+
+/* v55 — missing-variables modal. Backend's pre-flight scan returns
+ * 400 with a list of `${VAR}` names that the run needs. We show a
+ * compact dialog with one input per variable + multi-line textarea
+ * for any variable named *_DESC, *_TEXT, *_BODY, *_PROMPT, *_IDEA.
+ * Resolves to {VAR_NAME: "value", ...} or null on cancel.
+ *
+ * Visual: a centered card on a dimmed backdrop. Enter submits, Esc
+ * cancels. Inputs are pre-focused. The card heading is the run title
+ * (read from #run-title), so the user sees what they're filling for.
+ */
+function promptMissingVariables(varNames) {
+  return new Promise((resolve) => {
+    const titleEl = document.getElementById("run-title");
+    const runTitle = (titleEl && titleEl.value && titleEl.value.trim()) || "this run";
+    const back = document.createElement("div");
+    back.className = "var-modal-backdrop";
+    back.innerHTML = `
+      <div class="var-modal-card" role="dialog" aria-modal="true" aria-labelledby="var-modal-title">
+        <h3 id="var-modal-title">Fill in variables for <em>${escapeHtml(runTitle)}</em></h3>
+        <p class="var-modal-hint">
+          This preset's prompts reference <strong>${varNames.length}</strong> variable${varNames.length === 1 ? "" : "s"} that haven't been set yet.
+          Enter them below — they'll be saved to Settings → Variables for future runs.
+        </p>
+        <form class="var-modal-form">
+          ${varNames.map((name) => {
+            const isLong = /(_DESC|_TEXT|_BODY|_PROMPT|_IDEA|_BRIEF|_CONTEXT)$/.test(name) || name === "IDEA";
+            const stored = (loadSettings().variables || {})[name] || "";
+            const labelText = name.replace(/_/g, " ").toLowerCase();
+            if (isLong) {
+              return `
+                <label class="var-modal-row">
+                  <span class="var-modal-label"><code>\${${escapeHtml(name)}}</code> · ${escapeHtml(labelText)}</span>
+                  <textarea name="${escapeHtml(name)}" rows="3" placeholder="One sentence describing what you want…" required>${escapeHtml(stored)}</textarea>
+                </label>`;
+            }
+            return `
+              <label class="var-modal-row">
+                <span class="var-modal-label"><code>\${${escapeHtml(name)}}</code> · ${escapeHtml(labelText)}</span>
+                <input type="text" name="${escapeHtml(name)}" placeholder="value…" value="${escapeHtml(stored)}" required />
+              </label>`;
+          }).join("")}
+          <div class="var-modal-actions">
+            <button type="button" class="var-modal-cancel">Cancel</button>
+            <button type="submit" class="var-modal-submit">Continue ▶</button>
+          </div>
+        </form>
+      </div>`;
+    document.body.appendChild(back);
+    const form = back.querySelector(".var-modal-form");
+    const firstInput = form.querySelector("input, textarea");
+    if (firstInput) setTimeout(() => firstInput.focus(), 30);
+    function close(value) {
+      document.removeEventListener("keydown", onKey);
+      back.remove();
+      resolve(value);
+    }
+    function onKey(e) {
+      if (e.key === "Escape") close(null);
+    }
+    document.addEventListener("keydown", onKey);
+    back.addEventListener("click", (e) => {
+      if (e.target === back) close(null);
+    });
+    back.querySelector(".var-modal-cancel").addEventListener("click", () => close(null));
+    form.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const out = {};
+      for (const el of form.querySelectorAll("input, textarea")) {
+        out[el.name] = el.value.trim();
+      }
+      // Reject if any blank
+      if (Object.values(out).some((v) => !v)) {
+        return;
+      }
+      close(out);
+    });
+  });
+}
 
 function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({
