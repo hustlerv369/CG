@@ -68,10 +68,35 @@
       </span>
     </div>
     <nav class="tabs">
-      <button class="tab active" data-tab="orchestrator">Orchestrator</button>
-      <button class="tab" data-tab="editor">Editor</button>
-      <button class="tab" data-tab="notes">Notes</button>
-      <button class="tab" data-tab="settings">Settings</button>
+      <button class="tab active" data-tab="orchestrator" title="Multi-agent runs — design, dispatch, monitor, download artifacts">Orchestrator</button>
+      <button class="tab" data-tab="settings" title="API keys, project root, variables, default view">Settings</button>
+      <!-- v57 — Editor + Notes were rarely used and confusing on the
+           main bar. Tucked under a "More ▾" disclosure with explainer
+           tooltips so they're discoverable but not in the way. -->
+      <div class="tabs-more" id="tabs-more">
+        <button class="tab tabs-more-btn" id="tabs-more-btn" type="button"
+                title="More workspace tools — file editor + notes (rarely used, see tooltips)">
+          More ▾
+        </button>
+        <div class="tabs-more-menu" id="tabs-more-menu" hidden>
+          <button class="tabs-more-item" data-tab="editor"
+                  title="Open / edit any file in your CG project root (D:\CG by default). Useful when you want to tweak a generated file directly without leaving the dashboard. Most users skip this — Claude Code / VS Code is faster for editing.">
+            <span class="tmi-icon">📝</span>
+            <span class="tmi-body">
+              <span class="tmi-title">Editor</span>
+              <span class="tmi-sub">Edit files in your project root. Power-user shortcut.</span>
+            </span>
+          </button>
+          <button class="tabs-more-item" data-tab="notes"
+                  title="Markdown notes saved to D:\CG\notes\. Wikilinks via [[other-note]]. A scratchpad if you don't have a separate notes app — most users skip this and use Notion / Obsidian.">
+            <span class="tmi-icon">📓</span>
+            <span class="tmi-body">
+              <span class="tmi-title">Notes</span>
+              <span class="tmi-sub">Markdown scratchpad. Skip if you have Notion/Obsidian.</span>
+            </span>
+          </button>
+        </div>
+      </div>
     </nav>
     <button class="header-palette-btn" id="header-palette-btn"
             title="Open command palette (⌘K)" aria-label="Command palette">
@@ -324,7 +349,11 @@
 
       </div><!-- /advanced-block -->
 
-      <h2 class="section">Past runs</h2>
+      <div class="past-runs-header">
+        <h2 class="section">Past runs</h2>
+        <button class="ghost past-runs-cleanup" id="cleanup-runs-btn"
+                title="Archive or delete finished runs in bulk. Active runs are left alone.">🧹 Clean up</button>
+      </div>
       <ul id="history"></ul>
     </section>
 

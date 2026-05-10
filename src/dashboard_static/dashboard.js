@@ -2976,21 +2976,141 @@ async function refreshHistory() {
     const data = await fetch("/api/runs").then(r => r.json());
     state.history = data.runs;
     const ul = $("#history");
-    ul.innerHTML = state.history.map(r => `
-      <li data-run-id="${r.id}" class="${state.currentRun && state.currentRun.id === r.id ? 'active' : ''}">
+    if (!state.history.length) {
+      ul.innerHTML = '<li style="color: var(--fg-dim); cursor: default;">No runs yet.</li>';
+      return;
+    }
+    // v57 — per-run hover actions: archive (move to outputs/archive/) and
+    // permanent delete (trash + outputs). Both are gated by a confirm
+    // dialog. Active run can't be deleted (cancel first).
+    ul.innerHTML = state.history.map(r => {
+      const isActive = state.currentRun && state.currentRun.id === r.id;
+      const isLive = !r.finished;
+      const failed = (r.agents || []).some(a => a.status === "failed");
+      const status = isLive ? '⋯ running' : (failed ? '✗ failed' : '✓ done');
+      return `
+      <li data-run-id="${r.id}" class="${isActive ? 'active' : ''} ${isLive ? 'live' : ''}">
         <div class="h-title">${escapeHtml(r.title)}</div>
         <div class="h-meta">
-          ${r.agents.length} agents · ${r.finished ? '✓ done' : '⋯ running'} ·
+          ${r.agents.length} agents · ${status} ·
           ${formatTime(r.created)}
         </div>
-      </li>
-    `).join("") || '<li style="color: var(--fg-dim); cursor: default;">No runs yet.</li>';
+        <div class="h-actions" aria-label="Run actions">
+          <button class="h-act h-archive" data-act="archive"
+                  title="Archive — move artifacts to outputs/archive/, hide from this list. Reversible."
+                  ${isLive ? 'disabled' : ''}>📦</button>
+          <button class="h-act h-delete" data-act="delete"
+                  title="Delete permanently — irreversible. Removes the run + all output files.">🗑</button>
+        </div>
+      </li>`;
+    }).join("");
     $$("#history li[data-run-id]").forEach(li => {
-      li.onclick = () => openRun(li.dataset.runId);
+      const rid = li.dataset.runId;
+      // Action buttons (don't propagate to li.onclick)
+      li.querySelectorAll(".h-act").forEach((btn) => {
+        btn.addEventListener("click", async (e) => {
+          e.stopPropagation();
+          const act = btn.dataset.act;
+          await _runHistoryAction(rid, act);
+        });
+      });
+      // Click anywhere else opens the run
+      li.addEventListener("click", () => openRun(rid));
     });
   } catch {
     /* ignore */
   }
+}
+
+/* v57 — history per-run action handler.
+ * archive: POST /api/runs/<id>/archive — move outputs to archive/, drop
+ *          from list. Reversible by moving the folder back manually.
+ * delete : DELETE /api/runs/<id>/permanent — irreversible, requires
+ *          confirm. Wipes the in-memory entry, on-disk index entry,
+ *          and the run's output dir. */
+async function _runHistoryAction(runId, action) {
+  if (action === "delete") {
+    if (!confirm(`Permanently delete run ${runId.slice(0,8)}…?\n\nThis removes the run from history AND wipes its output files.\nThis cannot be undone.`)) {
+      return;
+    }
+    try {
+      const r = await fetch(`/api/runs/${runId}/permanent`, { method: "DELETE" });
+      if (!r.ok) {
+        const errBody = await r.text();
+        if (typeof toast === "function") toast("Delete failed: " + errBody, 5000);
+        return;
+      }
+      const d = await r.json();
+      if (typeof toast === "function") toast(`🗑 Deleted ${runId.slice(0,8)} (${d.files_removed} files)`, 3500);
+      // If the deleted run was open, close it
+      if (state.currentRun && state.currentRun.id === runId) {
+        if (state.evtSource) { try { state.evtSource.close(); } catch {} state.evtSource = null; }
+        state.currentRun = null;
+        state.panels = {};
+        const grid = document.getElementById("agent-grid");
+        if (grid) grid.innerHTML = '<div class="empty-state empty-state--v56"><div class="empty-state-spark">💡</div><h3 class="empty-state-title">Type an idea, hit <em>Build it</em>.</h3></div>';
+        const titleEl = document.getElementById("run-title-display");
+        if (titleEl) titleEl.textContent = "no run yet";
+      }
+    } catch (e) {
+      if (typeof toast === "function") toast("Network error: " + e, 4000);
+    }
+  } else if (action === "archive") {
+    try {
+      const r = await fetch(`/api/runs/${runId}/archive`, { method: "POST" });
+      if (!r.ok) {
+        const errBody = await r.text();
+        if (typeof toast === "function") toast("Archive failed: " + errBody, 5000);
+        return;
+      }
+      const d = await r.json();
+      if (typeof toast === "function") toast(`📦 Archived ${runId.slice(0,8)} → ${d.archive_path || 'archive'}`, 4000);
+    } catch (e) {
+      if (typeof toast === "function") toast("Network error: " + e, 4000);
+    }
+  }
+  await refreshHistory();
+}
+
+/* v57 — bulk cleanup of finished runs. Wired to the "Clean up" button
+ * in the history pane header. Default mode = archive (safer); the
+ * confirm dialog lets the user upgrade to permanent delete. */
+async function cleanupFinishedRuns() {
+  const finished = (state.history || []).filter(r => r.finished);
+  if (!finished.length) {
+    if (typeof toast === "function") toast("Nothing to clean up — no finished runs.", 2500);
+    return;
+  }
+  const choice = prompt(
+    `Clean up ${finished.length} finished run(s).\n\n` +
+    `Type 'archive' to move them to outputs/archive/ (reversible), or\n` +
+    `'delete' to wipe them permanently (irreversible).\n\n` +
+    `Default: archive`,
+    "archive"
+  );
+  if (choice === null) return;
+  const mode = (choice || "archive").trim().toLowerCase();
+  if (mode !== "archive" && mode !== "delete") {
+    if (typeof toast === "function") toast("Cleanup cancelled — type exactly 'archive' or 'delete'.", 4000);
+    return;
+  }
+  try {
+    const r = await fetch("/api/runs/cleanup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode }),
+    });
+    if (!r.ok) {
+      const errBody = await r.text();
+      if (typeof toast === "function") toast("Cleanup failed: " + errBody, 5000);
+      return;
+    }
+    const d = await r.json();
+    if (typeof toast === "function") toast(`${mode === 'delete' ? '🗑' : '📦'} ${d.processed} run(s) ${mode === 'delete' ? 'deleted' : 'archived'}.`, 4000);
+  } catch (e) {
+    if (typeof toast === "function") toast("Network error: " + e, 4000);
+  }
+  await refreshHistory();
 }
 
 // ---------- helpers ----------
@@ -3836,8 +3956,37 @@ document.addEventListener("DOMContentLoaded", () => {
   $("#run-btn").onclick = startRun;
   // Tab switcher
   document.querySelectorAll("nav.tabs .tab").forEach(b => {
+    if (b.id === "tabs-more-btn") return; // handled separately below
     b.addEventListener("click", () => switchTab(b.dataset.tab));
   });
+  // v57 — "More ▾" disclosure menu housing Editor + Notes (rarely used)
+  const moreBtn = document.getElementById("tabs-more-btn");
+  const moreMenu = document.getElementById("tabs-more-menu");
+  if (moreBtn && moreMenu) {
+    moreBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      moreMenu.hidden = !moreMenu.hidden;
+      moreBtn.classList.toggle("open", !moreMenu.hidden);
+    });
+    moreMenu.querySelectorAll(".tabs-more-item").forEach((item) => {
+      item.addEventListener("click", () => {
+        moreMenu.hidden = true;
+        moreBtn.classList.remove("open");
+        switchTab(item.dataset.tab);
+      });
+    });
+    document.addEventListener("click", (e) => {
+      if (!moreBtn.contains(e.target) && !moreMenu.contains(e.target)) {
+        moreMenu.hidden = true;
+        moreBtn.classList.remove("open");
+      }
+    });
+  }
+  // v57 — bulk cleanup wiring
+  const cleanupBtn = document.getElementById("cleanup-runs-btn");
+  if (cleanupBtn) {
+    cleanupBtn.addEventListener("click", cleanupFinishedRuns);
+  }
   // Editor handlers
   if ($("#editor-refresh-btn")) {
     $("#editor-refresh-btn").onclick = () => loadFileTree("");

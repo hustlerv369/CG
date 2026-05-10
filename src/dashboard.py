@@ -5293,6 +5293,115 @@ def create_app() -> FastAPI:
         manager.cancel_run(run_id)
         return {"id": run_id, "cancelled": True}
 
+    # v57 — permanent delete: cancel if running, drop from in-memory map,
+    # drop from on-disk index, remove the run's output dir. Irreversible.
+    # The plain DELETE above only cancels — it leaves the run in history
+    # so the user can still inspect what failed. This endpoint is for
+    # "I'm done with this, get rid of it" cleanup.
+    @app.delete("/api/runs/{run_id}/permanent")
+    async def permanent_delete_run(run_id: str) -> Any:
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        # Cancel any running subprocesses first
+        if not run.finished:
+            try:
+                manager.cancel_run(run_id)
+            except Exception:
+                pass
+        # Drop from in-memory map
+        manager.runs.pop(run_id, None)
+        # Remove from on-disk index
+        manager._persist_index()
+        # Remove output dir (best-effort)
+        run_dir = RUNS_DIR / run_id
+        deleted_files = 0
+        if run_dir.exists():
+            import shutil as _shutil
+            try:
+                # Count files first for the response
+                deleted_files = sum(1 for _ in run_dir.rglob("*") if _.is_file())
+                _shutil.rmtree(run_dir)
+            except OSError:
+                pass
+        return {
+            "id": run_id,
+            "deleted": True,
+            "files_removed": deleted_files,
+        }
+
+    # v57 — archive: move the run to outputs/archive/<run_id>/, drop from
+    # active history. Reversible (the user can move the folder back) but
+    # cleans up the dashboard list. Useful for "I want this out of my
+    # main view but keep the artifacts".
+    @app.post("/api/runs/{run_id}/archive")
+    async def archive_run(run_id: str) -> Any:
+        run = manager.runs.get(run_id)
+        if not run:
+            raise HTTPException(404, "run not found")
+        if not run.finished:
+            raise HTTPException(
+                400,
+                "cannot archive a running run — cancel or wait for it to finish first",
+            )
+        archive_root = ROOT / "outputs" / "archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        src = RUNS_DIR / run_id
+        dst = archive_root / run_id
+        moved = False
+        if src.exists():
+            import shutil as _shutil
+            try:
+                if dst.exists():
+                    _shutil.rmtree(dst)  # overwrite previous archive of same id
+                _shutil.move(str(src), str(dst))
+                moved = True
+            except OSError:
+                pass
+        manager.runs.pop(run_id, None)
+        manager._persist_index()
+        return {
+            "id": run_id,
+            "archived": True,
+            "files_moved": moved,
+            "archive_path": str(dst) if moved else None,
+        }
+
+    # v57 — bulk: delete or archive every finished run in one call. Saves
+    # the user from clicking 30 times when they want to clean up.
+    @app.post("/api/runs/cleanup")
+    async def cleanup_runs(body: dict[str, Any]) -> Any:
+        mode = (body or {}).get("mode") or "archive"
+        if mode not in ("archive", "delete"):
+            raise HTTPException(400, "mode must be 'archive' or 'delete'")
+        only_failed = bool((body or {}).get("only_failed"))
+        # Snapshot ids to act on (so we don't mutate the dict mid-iteration)
+        target_ids: list[str] = []
+        for rid, run in list(manager.runs.items()):
+            if not run.finished:
+                continue  # never touch live runs
+            if only_failed:
+                statuses = {a.status for a in run.agents.values()}
+                if "failed" not in statuses:
+                    continue
+            target_ids.append(rid)
+        results: list[dict[str, Any]] = []
+        for rid in target_ids:
+            try:
+                if mode == "archive":
+                    res = await archive_run(rid)
+                else:
+                    res = await permanent_delete_run(rid)
+                results.append(res)
+            except HTTPException as e:
+                results.append({"id": rid, "error": str(e.detail)})
+        return {
+            "mode": mode,
+            "only_failed": only_failed,
+            "processed": len(results),
+            "results": results,
+        }
+
     # v49 W4 — Replay-from-here. Re-runs `<label>` + every downstream
     # dependent. Prior steps' outputs stay on disk so upstream {{label}}
     # references still resolve. Kills any in-flight subprocess for the
