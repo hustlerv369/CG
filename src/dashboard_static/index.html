@@ -118,31 +118,41 @@
           <div class="quick-start-samples-row" id="quick-start-samples-row"></div>
         </div>
         <div class="quick-start-actions">
-          <button class="primary quick-start-go" id="quick-start-go-btn"
-                  title="Spawn a fixed-template build team for your idea">
-            ✨ Make it real
-          </button>
-          <!-- v48 W0 — Conductor: Opus designs a custom team for THIS idea
-               (not a fixed template). Two phases: (1) Project Brief, (2)
-               JSON workflow spec. -->
+          <!-- v56 — Primary CTA: one button, end-to-end. Conductor designs
+               a custom team for THIS idea (no template), then auto-runs in
+               auto mode. The user types an idea once, hits the button, and
+               the agents go. Phase-1 brief + Phase-2 spec are streamed
+               for transparency but no approval click is required. Power
+               users who want to review can uncheck "auto mode" below. -->
           <button class="primary quick-start-conductor" id="quick-start-conductor-btn"
-                  title="Opus 4.7 designs a custom team for your specific idea (no template)">
-            🎩 Conductor
+                  title="Type your idea above → press this. Opus 4.7 designs a custom team for your idea, then runs it end-to-end. Watch live in Terminal View or Panels.">
+            🚀 Build it
           </button>
           <label class="quick-start-auto-toggle"
-                 title="Skip approval gates and ship end-to-end. Stop button stays available. Default ON in v56 — uncheck if you want to review the brief / spec before launch.">
+                 title="Skip approval gates and ship end-to-end. Stop button stays available. Default ON — uncheck if you want to review the brief / spec before launch.">
             <input type="checkbox" id="quick-start-auto-mode" checked>
-            <span>🚀 Auto mode</span>
+            <span>auto mode</span>
           </label>
-          <div class="quick-start-mode">
-            <span class="quick-start-mode-label">or build:</span>
-            <button class="ghost quick-start-mode-btn" data-quick-mode="app"
-                    title="App / website / SaaS — full code project">app</button>
-            <button class="ghost quick-start-mode-btn" data-quick-mode="content"
-                    title="Content plan — 90-day calendar + sample pieces">content plan</button>
-            <button class="ghost quick-start-mode-btn" data-quick-mode="pitch"
-                    title="Pitch deck — 10 slides + investor Q&amp;A">pitch deck</button>
-          </div>
+          <!-- Power users: skip the Conductor and go straight to a fixed
+               template (faster startup — no Phase-1/2 design step). -->
+          <details class="quick-start-power">
+            <summary>or use a template…</summary>
+            <div class="quick-start-power-row">
+              <button class="ghost quick-start-go" id="quick-start-go-btn"
+                      title="Skip Conductor design phase — pick a fixed-template build team for your idea (faster, less custom).">
+                ⚡ Use template
+              </button>
+              <div class="quick-start-mode">
+                <span class="quick-start-mode-label">type:</span>
+                <button class="ghost quick-start-mode-btn" data-quick-mode="app"
+                        title="App / website / SaaS — full code project">app</button>
+                <button class="ghost quick-start-mode-btn" data-quick-mode="content"
+                        title="Content plan — 90-day calendar + sample pieces">content plan</button>
+                <button class="ghost quick-start-mode-btn" data-quick-mode="pitch"
+                        title="Pitch deck — 10 slides + investor Q&amp;A">pitch deck</button>
+              </div>
+            </div>
+          </details>
         </div>
 
         <!-- v48 W0 — Conductor live panel (hidden until Conductor is clicked).
@@ -358,9 +368,16 @@
         </button>
       </div>
       <div id="agent-grid" class="agent-grid">
-        <div class="empty-state">
-          <strong>← Build your workflow on the left, then hit Run workflow.</strong><br />
-          Each step (agent) gets its own live panel here — you'll see what it's writing in real time.
+        <div class="empty-state empty-state--v56">
+          <div class="empty-state-spark">💡</div>
+          <h3 class="empty-state-title">Type an idea, hit <em>Build it</em>.</h3>
+          <p class="empty-state-sub">A team of AIs will design, build, test, and document
+          it for you — live, here.</p>
+          <ul class="empty-state-tips">
+            <li><kbd>🖥 terminal</kbd> tab above shows everything as a single chronological log (lighter on the system).</li>
+            <li><kbd>📦 Download ZIP</kbd> after agents finish — get a working project folder.</li>
+            <li>Need to fill <kbd>${'$'}IDEA</kbd> or <kbd>${'$'}TOPIC</kbd>? A modal pops up. Values save to Settings.</li>
+          </ul>
         </div>
       </div>
       <!-- v56 — Terminal View. Single chronological tail -f stream of every
