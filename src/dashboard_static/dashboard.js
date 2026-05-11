@@ -4561,6 +4561,89 @@ function initQuickStart() {
     const auto = document.getElementById("quick-start-auto-mode")?.checked || false;
     runConductorFlow(idea, { autoMode: auto });
   });
+
+  /* v59 — Validate first: dispatches the `idea-validator` preset with
+   * IDEA filled in. 5-agent panel rates the idea 0-100 (Dream Score)
+   * across Market / Novelty / Feasibility / Monetization / Founder Fit,
+   * delivering a structured scorecard the user can act on (Ship it,
+   * Sharpen, Pivot, Kill). Cheaper + faster than building blind. */
+  const validateBtn = document.getElementById("quick-start-validate-btn");
+  validateBtn?.addEventListener("click", () => {
+    const idea = (ideaTa.value || "").trim();
+    if (!idea) {
+      ideaTa.focus();
+      ideaTa.classList.add("input-error");
+      setTimeout(() => ideaTa.classList.remove("input-error"), 800);
+      if (typeof toast === "function") toast("Type your idea above first.", 2500);
+      return;
+    }
+    runValidatorFlow(idea);
+  });
+}
+
+/* v59 — Idea Validator flow controller.
+ *
+ * Loads the `idea-validator` preset, fills in IDEA from the Quick Start
+ * textarea, and dispatches it like any other run. The preset is a
+ * 5-agent panel that produces a Dream Score 0-100 scorecard. We just
+ * orchestrate the load + dispatch and let the regular Monitor view
+ * stream the agents — same Terminal View, same panels, same actions
+ * as every other run. */
+async function runValidatorFlow(idea) {
+  try {
+    const r = await fetch("/api/presets");
+    if (!r.ok) throw new Error(`presets fetch ${r.status}`);
+    const data = await r.json();
+    const presets = Array.isArray(data) ? data : (data.presets || []);
+    const preset = presets.find(p => p.id === "idea-validator");
+    if (!preset) {
+      if (typeof toast === "function") toast("idea-validator preset not found — backend may be older. Reload?", 5000);
+      return;
+    }
+    // Substitute ${IDEA} live (so the dispatch payload is ready to go)
+    const spec = preset.spec.map((s) => ({
+      ...s,
+      prompt: (s.prompt || "").replace(/\$\{IDEA\}/g, idea),
+    }));
+    const variables = {
+      ...(preset.variables || {}),
+      IDEA: idea,
+    };
+    // Persist IDEA + PERSONA defaults to Settings → Variables so future
+    // runs (build, etc.) pick it up automatically.
+    try {
+      const s = loadSettings();
+      s.variables = { ...(s.variables || {}), IDEA: idea };
+      persistSettings(s);
+    } catch (_) { /* non-fatal */ }
+    const settings = loadSettings();
+    const headers = { "Content-Type": "application/json" };
+    if (settings.openrouter) headers["X-CG-OpenRouter-Key"] = settings.openrouter;
+    if (settings.zhipu)      headers["X-CG-Zhipu-Key"] = settings.zhipu;
+    if (settings.anthropic)  headers["X-CG-Anthropic-Key"] = settings.anthropic;
+    if (settings.gemini)     headers["X-CG-Gemini-Key"] = settings.gemini;
+    if (settings.projectRoot) headers["X-CG-Project-Root"] = settings.projectRoot;
+    const dispatch = await fetch("/api/runs", {
+      method: "POST",
+      headers,
+      body: JSON.stringify({
+        title: `🔍 Validate: ${idea.slice(0, 60)}${idea.length > 60 ? "…" : ""}`,
+        spec,
+        variables,
+      }),
+    });
+    if (!dispatch.ok) {
+      const t = await dispatch.text();
+      if (typeof toast === "function") toast("Validator dispatch failed: " + t, 6000);
+      return;
+    }
+    const dd = await dispatch.json();
+    if (typeof toast === "function") toast("🔍 Validator dispatched — watch the panel or terminal view.", 3500);
+    await openRun(dd.id);
+    await refreshHistory();
+  } catch (e) {
+    if (typeof toast === "function") toast("Validator flow error: " + e, 6000);
+  }
 }
 
 /* ----------------------------------------------------------

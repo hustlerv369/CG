@@ -3441,6 +3441,158 @@ PRESETS: list[dict[str, Any]] = [
         ],
     },
     {
+        "id": "idea-validator",
+        "title": "🔍 Idea validator (Dream Score + market / competitors / unit economics)",
+        "description": "Type one ${IDEA}. A 5-agent panel validates it before "
+                       "you build: Market Analyst sizes TAM/SAM/SOM, Competitor "
+                       "Scout maps the top 5 alternatives, Financial Modeler "
+                       "drafts a back-of-envelope unit economics, Risk Assessor "
+                       "lists failure modes, and the Critic synthesizes a "
+                       "Dream Score 0-100 across 5 dimensions (Market, Novelty, "
+                       "Feasibility, Monetization, Founder Fit) with concrete "
+                       "go / refine / pivot guidance. 2-3 min, ~$0 with "
+                       "Pro+Google subscription, ~$0.40 on raw API.",
+        "variables": {
+            "IDEA": "A Czech-first hourly mindfulness PWA for ADHD that nudges "
+                    "the user every hour with one short breathing or grounding "
+                    "exercise via Web Push, tracks streak + completion rate, "
+                    "and shows a weekly heatmap calendar. Solo-founder MVP, "
+                    "no auth (localStorage only), Cloudflare Pages.",
+            "PERSONA": "Solo indie founder, technical, building a side project "
+                       "alongside a day job. Budget €0-300 for the MVP. Aims "
+                       "to monetize within 6 months or kill it.",
+        },
+        "spec": [
+            {
+                "agent": "claude-opus-4-7", "label": "market", "role": "Researcher",
+                "prompt": "You are a market analyst. From the idea + founder "
+                          "persona, output a tight market sizing brief:\n\n"
+                          "## Who this is for\nOne specific user segment in "
+                          "≤25 words. NOT 'everyone'. NOT 'small businesses'. "
+                          "A named persona.\n\n"
+                          "## TAM / SAM / SOM\nThree lines with a numeric "
+                          "estimate + the one-sentence reasoning behind each. "
+                          "Mark each number with `[estimate]` or `[cited: <source>]`.\n\n"
+                          "## Adjacent markets\n3 markets the founder could "
+                          "expand into if the wedge works.\n\n"
+                          "## Top 3 customer signals\n3 specific places (subreddits, "
+                          "communities, search queries) where this customer "
+                          "complains today. Concrete handles or URLs preferred.\n\n"
+                          "## Verdict\nONE of: 'Big enough · niche but real · "
+                          "too small to bootstrap · too small even for a "
+                          "lifestyle business' + 1-line justification.\n\n"
+                          "Be honest. If the market is tiny, say so. "
+                          "Founders waste years on TAMs that don't exist.\n\n"
+                          "## Idea\n${IDEA}\n\n## Founder persona\n${PERSONA}",
+            },
+            {
+                "agent": "gemini-pro", "label": "competitors", "role": "Researcher",
+                "depends_on": ["market"],
+                "prompt": "OUTPUT MODE: TEXT ONLY. Do not call any tools. Do "
+                          "not invoke write_file, read_file, or run_shell_command. "
+                          "Respond with raw text in the requested format.\n\n"
+                          "You are a competitor scout. List the 5 closest "
+                          "alternatives a customer would consider TODAY "
+                          "(includes 'do nothing' + Excel + a blog post if "
+                          "they count). For each:\n\n"
+                          "### Competitor name\n- **What they are:** 1 line\n"
+                          "- **Pricing:** $/mo or free\n"
+                          "- **Stickiness:** low / medium / high · why\n"
+                          "- **Where they're weak:** 2 sentences — be specific\n\n"
+                          "Then close with:\n\n"
+                          "## Whitespace\nThe ONE gap none of them cover that "
+                          "the proposed idea could own. ≤40 words. Concrete.\n\n"
+                          "## Pricing benchmark\nGiven competitor pricing, what "
+                          "price band could this idea charge? Format: "
+                          "`free / $X-Y per month / $Z+ enterprise`.\n\n"
+                          "## Idea\n${IDEA}\n\n## Market context\n{{market}}",
+            },
+            {
+                "agent": "claude-opus-4-7", "label": "economics", "role": "Strategist",
+                "depends_on": ["market", "competitors"],
+                "prompt": "You are a financial modeler. From the idea + market "
+                          "+ competitor pricing, draft back-of-envelope unit "
+                          "economics:\n\n"
+                          "## Revenue model\n1 sentence: free / subscription / "
+                          "transaction fee / one-time / hybrid + why this fits.\n\n"
+                          "## Price point\nA single recommended monthly price "
+                          "(or one-time price), with one-sentence rationale.\n\n"
+                          "## Unit economics (per paying user, per month)\n"
+                          "Table:\n"
+                          "| Metric | Value | Note |\n"
+                          "|---|---|---|\n"
+                          "| Revenue | $? | |\n"
+                          "| Variable cost (LLM / hosting / payments) | $? | |\n"
+                          "| Gross margin | %? | |\n"
+                          "| CAC estimate | $? | which channel |\n"
+                          "| Payback | months | |\n\n"
+                          "## Break-even\nHow many paying users until "
+                          "MRR > €1500 (a freelancer's living wage)? "
+                          "How many until €5000 (full-time replacement)?\n\n"
+                          "## Capital needed\nMVP build cost + 6-month "
+                          "runway with conservative growth, in EUR.\n\n"
+                          "## Verdict\nONE of: 'Bootstrap-able · needs "
+                          "€10-50k savings · needs angel · needs VC' + "
+                          "1-line justification.\n\n"
+                          "## Idea\n${IDEA}\n\n## Market\n{{market}}\n\n"
+                          "## Competitors\n{{competitors}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "risks", "role": "Critic",
+                "depends_on": ["market", "competitors", "economics"],
+                "prompt": "You are a pre-mortem analyst. Imagine this idea "
+                          "launched 12 months ago and FAILED. Write the "
+                          "post-mortem in past tense.\n\n"
+                          "## Top 3 reasons it failed\nEach 2-3 sentences, "
+                          "specific to THIS idea (not generic startup advice). "
+                          "Rank by likelihood.\n\n"
+                          "## Top 3 'this killed us' surprises\nThings the "
+                          "founder didn't see coming. Make them concrete.\n\n"
+                          "## 3 leading indicators we should have watched\n"
+                          "Metrics or signals that — if monitored from day 1 "
+                          "— would have warned us 3 months earlier.\n\n"
+                          "## Idea\n${IDEA}\n\n## Market\n{{market}}\n\n"
+                          "## Competitors\n{{competitors}}\n\n"
+                          "## Economics\n{{economics}}",
+            },
+            {
+                "agent": "claude-sonnet-4-6", "label": "scorecard", "role": "Reviewer",
+                "depends_on": ["market", "competitors", "economics", "risks"],
+                "prompt": "You are the final scorer. Synthesize the 4 prior "
+                          "agent reports into a structured Dream Score "
+                          "scorecard. The score is the SOLE source of truth — "
+                          "everything else is the case for it.\n\n"
+                          "## 💎 Dream Score: NN / 100\n\n"
+                          "## Dimension breakdown (each 0-20)\n"
+                          "Table:\n"
+                          "| Dimension | Score | Why this number |\n"
+                          "|---|---|---|\n"
+                          "| Market Size | NN/20 | 1 sentence |\n"
+                          "| Novelty | NN/20 | 1 sentence |\n"
+                          "| Feasibility (solo MVP in 90 days) | NN/20 | 1 sentence |\n"
+                          "| Monetization Clarity | NN/20 | 1 sentence |\n"
+                          "| Founder Fit | NN/20 | 1 sentence |\n"
+                          "| **Total** | **NN/100** | |\n\n"
+                          "## 🚦 Verdict\nPick ONE based on total score:\n"
+                          "- **80-100 — Ship it:** specific next 3 actions, with deadlines\n"
+                          "- **60-79 — Sharpen first:** 3 specific edits to the idea\n"
+                          "- **40-59 — Pivot the wedge:** 2 sharper related ideas\n"
+                          "- **0-39 — Kill it:** 1 sentence why + 1 adjacent "
+                          "idea worth more.\n\n"
+                          "## Steelman summary\n3 sentences. The strongest "
+                          "version of the case for this idea. Be honest — if "
+                          "the steelman is weak, the idea is weak.\n\n"
+                          "Use the numbers and findings from prior agents — "
+                          "don't invent new data.\n\n"
+                          "## Idea\n${IDEA}\n\n## Persona\n${PERSONA}\n\n"
+                          "## Market analysis\n{{market}}\n\n"
+                          "## Competitors\n{{competitors}}\n\n"
+                          "## Unit economics\n{{economics}}\n\n"
+                          "## Risks\n{{risks}}",
+            },
+        ],
+    },
+    {
         "id": "compare",
         "title": "Two-model compare (Sonnet × Gemini Pro)",
         "description": "Same task to Claude Sonnet 4.6 and Gemini Pro in parallel — diff the two answers.",
