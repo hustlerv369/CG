@@ -124,7 +124,32 @@
 
     <!-- LEFT: workflow designer -->
     <section class="designer">
-      <h2>Workflow</h2>
+      <!-- v60 — Two-mode switcher. Auto = Conductor with zero config.
+           DevOps = pick agents/models/prompts yourself in the visual canvas.
+           Hides the rest of the legacy buttons (personas, samples, auto-toggle,
+           "or use template", Mission Library, etc.) via body.cg-mode-* CSS. -->
+      <div class="cg-mode-switcher" role="tablist" aria-label="Build mode">
+        <button class="cg-mode-tab cg-mode-tab--auto" data-cg-mode="auto" role="tab"
+                aria-selected="true"
+                title="Type an idea. Opus designs the team, picks the models, and ships it end-to-end. Zero configuration.">
+          <span class="cg-mode-icon">🚀</span>
+          <span class="cg-mode-body">
+            <span class="cg-mode-name">Auto</span>
+            <span class="cg-mode-sub">Idea → finished thing. Opus picks the team.</span>
+          </span>
+        </button>
+        <button class="cg-mode-tab cg-mode-tab--devops" data-cg-mode="devops" role="tab"
+                aria-selected="false"
+                title="Power-user mode: pick agents, models and prompts yourself. Visual canvas, presets, manual run.">
+          <span class="cg-mode-icon">🛠️</span>
+          <span class="cg-mode-body">
+            <span class="cg-mode-name">DevOps</span>
+            <span class="cg-mode-sub">Pick agents and models yourself.</span>
+          </span>
+        </button>
+      </div>
+
+      <h2 class="cg-devops-only">Workflow</h2>
 
       <!-- v41 — Quick Start hero: type an idea, agents do the rest. -->
       <section class="quick-start" id="quick-start">

@@ -5509,3 +5509,89 @@ body.status-bar-hidden .status-bar { display: none; }
   border-color: color-mix(in srgb, #569cd6 75%, transparent);
   color: var(--fg-primary);
 }
+
+/* === v60 — Two-mode UI: Auto / DevOps =================================== */
+/* Big mode-switcher tiles at the top of the designer pane. */
+.cg-mode-switcher {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin: 0 0 22px 0;
+}
+.cg-mode-tab {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: var(--bg-card, #1a1a1a);
+  border: 1px solid var(--border, #333);
+  border-radius: 12px;
+  color: var(--fg-primary, #e0e0e0);
+  cursor: pointer;
+  transition: border-color .12s ease, background .12s ease, transform .08s ease;
+  text-align: left;
+  font-family: inherit;
+}
+.cg-mode-tab:hover {
+  border-color: color-mix(in srgb, var(--accent, #ff7a2f) 55%, transparent);
+  background: color-mix(in srgb, var(--accent, #ff7a2f) 4%, var(--bg-card, #1a1a1a));
+}
+.cg-mode-tab[aria-selected="true"] {
+  border-color: var(--accent, #ff7a2f);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--accent, #ff7a2f) 14%, transparent),
+    color-mix(in srgb, var(--accent, #ff7a2f) 3%, transparent));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent, #ff7a2f) 45%, transparent) inset;
+}
+.cg-mode-tab:active { transform: translateY(1px); }
+.cg-mode-icon { font-size: 28px; line-height: 1; flex: 0 0 auto; }
+.cg-mode-body { display: flex; flex-direction: column; gap: 2px; }
+.cg-mode-name { font-size: 15px; font-weight: 700; letter-spacing: 0.2px; }
+.cg-mode-sub { font-size: 12px; color: var(--fg-muted, #888); }
+
+/* === Auto mode: hide all DevOps clutter. Show only textarea + Build it. == */
+body.cg-mode-auto .quick-start-personas,
+body.cg-mode-auto .quick-start-samples,
+body.cg-mode-auto .quick-start-auto-toggle,
+body.cg-mode-auto .quick-start-cost,
+body.cg-mode-auto .quick-start-power,
+body.cg-mode-auto .quick-start-toggle-advanced,
+body.cg-mode-auto #advanced-block,
+body.cg-mode-auto .cg-devops-only {
+  display: none !important;
+}
+/* Auto-mode: shrink the Validate button to a small secondary link */
+body.cg-mode-auto .quick-start-validate {
+  font-size: 12px;
+  padding: 6px 10px;
+  opacity: 0.75;
+  background: transparent;
+  border: 1px dashed var(--border, #333);
+}
+body.cg-mode-auto .quick-start-validate:hover { opacity: 1; }
+/* Auto-mode: bigger primary CTA */
+body.cg-mode-auto #quick-start-conductor-btn {
+  padding: 14px 28px;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+/* === DevOps mode: hide the Auto-only hero textarea + Build-it. ========== */
+body.cg-mode-devops .quick-start-head,
+body.cg-mode-devops .quick-start-personas,
+body.cg-mode-devops .quick-start-samples,
+body.cg-mode-devops #quick-start-idea,
+body.cg-mode-devops .quick-start-actions,
+body.cg-mode-devops #conductor-panel,
+body.cg-mode-devops .quick-start-toggle-advanced {
+  display: none !important;
+}
+/* DevOps: make sure advanced block is visible regardless of legacy toggle */
+body.cg-mode-devops #advanced-block { display: block !important; }
+/* DevOps: tweak the now-empty quick-start container so it doesn't take space */
+body.cg-mode-devops #quick-start {
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+}

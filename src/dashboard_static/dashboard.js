@@ -6260,3 +6260,44 @@ function formatCount(n) {
   if (n < 1_000_000) return (n / 1000).toFixed(n >= 9999 ? 0 : 1).replace(/\.0$/, "") + "k";
   return (n / 1_000_000).toFixed(n >= 9_999_999 ? 0 : 1).replace(/\.0$/, "") + "M";
 }
+
+/* === v60 — Two-mode UI: Auto / DevOps ===================================
+ * Adds <body class="cg-mode-auto"> or "cg-mode-devops" based on the user's
+ * selection from .cg-mode-switcher. CSS toggles visibility of legacy clutter.
+ * Persists choice in localStorage. Default = auto (the simplest path).
+ *
+ * Side-effect: when switching INTO Auto mode, also force the legacy
+ * "auto mode" checkbox to true, so Conductor doesn't pause at approval gates.
+ */
+(function cgInitModeSwitcher() {
+  const STORAGE_KEY = "cg.uiMode";
+  function applyMode(mode) {
+    const normalized = (mode === "devops") ? "devops" : "auto";
+    document.body.classList.toggle("cg-mode-auto", normalized === "auto");
+    document.body.classList.toggle("cg-mode-devops", normalized === "devops");
+    document.querySelectorAll(".cg-mode-tab").forEach(btn => {
+      const isActive = btn.dataset.cgMode === normalized;
+      btn.setAttribute("aria-selected", isActive ? "true" : "false");
+    });
+    // In Auto mode, force the legacy auto-mode checkbox to checked so the
+    // Conductor flow doesn't stop at approval gates.
+    if (normalized === "auto") {
+      const autoToggle = document.getElementById("quick-start-auto-mode");
+      if (autoToggle && !autoToggle.checked) autoToggle.checked = true;
+    }
+    try { localStorage.setItem(STORAGE_KEY, normalized); } catch {}
+  }
+  function init() {
+    let saved = "auto";
+    try { saved = localStorage.getItem(STORAGE_KEY) || "auto"; } catch {}
+    applyMode(saved);
+    document.querySelectorAll(".cg-mode-tab").forEach(btn => {
+      btn.addEventListener("click", () => applyMode(btn.dataset.cgMode));
+    });
+  }
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", init);
+  } else {
+    init();
+  }
+})();
