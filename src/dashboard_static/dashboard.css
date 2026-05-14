@@ -5595,3 +5595,64 @@ body.cg-mode-devops #quick-start {
   border: none;
   background: transparent;
 }
+
+/* ============================================================
+ * v60 — Editor mode toggle (Rows ↔ Visual graph) promotion
+ *
+ * Was a tiny toggle that users confused with the unrelated OUTPUT
+ * view-toggle in the monitor (raw / md / diff / preview / terminal).
+ * v60 adds a label, expanded "Visual graph" wording, and an accent
+ * border on the Visual segment so n8n-style users find it.
+ * ============================================================ */
+.view-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  margin: 12px 0 6px;
+}
+.view-mode-toggle .vm-label {
+  font-size: 11px;
+  color: var(--fg-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  padding: 0 8px 0 6px;
+  font-weight: 600;
+}
+.view-mode-toggle .vm-seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 7px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-secondary);
+  font: 500 12px/1 var(--font-sans);
+  cursor: pointer;
+  transition: all 140ms;
+}
+.view-mode-toggle .vm-seg:hover {
+  color: var(--fg-primary);
+  background: var(--bg-card);
+}
+.view-mode-toggle .vm-seg.active {
+  background: var(--bg-secondary);
+  color: var(--fg-primary);
+  border-color: var(--border);
+  box-shadow: 0 1px 0 rgba(255,255,255,0.04) inset;
+  font-weight: 600;
+}
+.view-mode-toggle .vm-seg--accent.active {
+  background: linear-gradient(135deg,
+    color-mix(in srgb, #569cd6 24%, var(--bg-secondary)),
+    color-mix(in srgb, #4ec9b0 18%, var(--bg-secondary)));
+  border-color: color-mix(in srgb, #569cd6 55%, transparent);
+}
+.view-mode-toggle .vm-seg-icon {
+  font-size: 13px;
+  line-height: 1;
+}

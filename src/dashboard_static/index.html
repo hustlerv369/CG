@@ -367,13 +367,20 @@
         <div class="inputs-panel-body" id="inputs-panel-body"></div>
       </section>
 
+      <!-- v60 — editor-mode toggle. Promoted with a label so users see
+           this is a real n8n-style choice (linear rows vs node graph)
+           and stop confusing it with the OUTPUT view toggle in the
+           monitor on the right. -->
       <div class="view-mode-toggle" id="view-mode-toggle"
-           title="Editor mode — Terminal (linear rows, CMUX-style) ↔ Visual (n8n graph)">
-        <button class="vm-seg active" data-vm="classic">
-          <span class="vm-seg-icon">⌨</span><span class="vm-seg-label">Terminal</span>
+           title="Switch how you design the workflow — Terminal (linear rows, like a Makefile) or Visual (n8n-style node graph with drag-to-connect)">
+        <span class="vm-label" aria-hidden="true">Editor:</span>
+        <button class="vm-seg active" data-vm="classic"
+                title="Linear rows: step 1 → step 2 → step 3. Easy to read top-to-bottom, fast for short workflows.">
+          <span class="vm-seg-icon">⌨</span><span class="vm-seg-label">Rows</span>
         </button>
-        <button class="vm-seg" data-vm="visual">
-          <span class="vm-seg-icon">◇</span><span class="vm-seg-label">Visual</span>
+        <button class="vm-seg vm-seg--accent" data-vm="visual"
+                title="n8n-style node graph: drag-and-drop agents, draw dependency edges. Better for branching/parallel workflows.">
+          <span class="vm-seg-icon">◇</span><span class="vm-seg-label">Visual graph</span>
         </button>
       </div>
 
